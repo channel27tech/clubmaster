@@ -2,11 +2,11 @@
 
 import React, { useState, useEffect } from 'react';
 import GameClock from './GameClock';
+import { socketService } from '../services/socket.service';
 
 interface GameTimerProps {
-  initialWhiteTime: number; // Time in seconds
-  initialBlackTime: number; // Time in seconds
-  activePlayer?: 'white' | 'black' | null;
+  gameId: string;
+  timeControl: 'BULLET' | 'BLITZ' | 'RAPID';
   onTimeOut?: (player: 'white' | 'black') => void;
 }
 
@@ -14,60 +14,66 @@ interface GameTimerProps {
  * GameTimer component to manage both players' clocks
  */
 const GameTimer: React.FC<GameTimerProps> = ({
-  initialWhiteTime,
-  initialBlackTime,
-  activePlayer = null,
+  gameId,
+  timeControl,
   onTimeOut
 }) => {
-  const [whiteTime, setWhiteTime] = useState(initialWhiteTime);
-  const [blackTime, setBlackTime] = useState(initialBlackTime);
-  
-  // Countdown effect for active player
+  const [whiteTime, setWhiteTime] = useState<number>(0);
+  const [blackTime, setBlackTime] = useState<number>(0);
+  const [isWhiteTurn, setIsWhiteTurn] = useState<boolean>(true);
+  const [isRunning, setIsRunning] = useState<boolean>(false);
+
   useEffect(() => {
-    let timer: NodeJS.Timeout | null = null;
-    
-    if (activePlayer) {
-      timer = setInterval(() => {
-        if (activePlayer === 'white') {
-          setWhiteTime(prev => {
-            if (prev <= 1 && onTimeOut) {
-              onTimeOut('white');
-              clearInterval(timer as NodeJS.Timeout);
-              return 0;
-            }
-            return prev - 1;
-          });
-        } else {
-          setBlackTime(prev => {
-            if (prev <= 1 && onTimeOut) {
-              onTimeOut('black');
-              clearInterval(timer as NodeJS.Timeout);
-              return 0;
-            }
-            return prev - 1;
-          });
-        }
-      }, 1000);
-    }
-    
+    const socket = socketService.connect();
+
+    // Join game room and initialize timer
+    socketService.joinGame(gameId);
+    socketService.initializeTimer(gameId, timeControl);
+
+    // Listen for timer updates
+    socket.on('timerUpdate', (data: {
+      whiteTimeMs: number,
+      blackTimeMs: number,
+      isWhiteTurn: boolean,
+      isRunning: boolean
+    }) => {
+      setWhiteTime(Math.ceil(data.whiteTimeMs / 1000));
+      setBlackTime(Math.ceil(data.blackTimeMs / 1000));
+      setIsWhiteTurn(data.isWhiteTurn);
+      setIsRunning(data.isRunning);
+    });
+
+    // Listen for game timeout
+    socket.on('gameTimeout', (data: { winner: 'white' | 'black' }) => {
+      if (onTimeOut) {
+        onTimeOut(data.winner === 'white' ? 'black' : 'white');
+      }
+    });
+
+    // Get initial timer state
+    socketService.getTimerState(gameId);
+
+    // Cleanup on unmount
     return () => {
-      if (timer) clearInterval(timer);
+      socket.off('timerUpdate');
+      socket.off('gameTimeout');
+      socketService.leaveGame(gameId);
     };
-  }, [activePlayer, onTimeOut]);
+  }, [gameId, timeControl, onTimeOut]);
   
   return (
     <div className="flex flex-col gap-2">
       {/* Black Player Clock */}
       <GameClock 
         timeInSeconds={blackTime}
-        isActive={activePlayer === 'black'}
+        isActive={isRunning && !isWhiteTurn}
         isDarkTheme={false}
       />
       
       {/* White Player Clock */}
       <GameClock 
         timeInSeconds={whiteTime}
-        isActive={activePlayer === 'white'}
+        isActive={isRunning && isWhiteTurn}
         isDarkTheme={true}
       />
     </div>
