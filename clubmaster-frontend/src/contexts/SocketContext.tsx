@@ -10,6 +10,7 @@ interface SocketContextType {
   connect: () => void;
   disconnect: () => void;
   joinGame: (gameOptions: { gameType: string }) => void;
+  cancelMatchmaking: () => void;
 }
 
 // Create the context with a default value
@@ -20,6 +21,7 @@ const SocketContext = createContext<SocketContextType>({
   connect: () => {},
   disconnect: () => {},
   joinGame: () => {},
+  cancelMatchmaking: () => {},
 });
 
 // Custom hook to use the socket context
@@ -80,6 +82,11 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
   const joinGame = (gameOptions: { gameType: string }) => {
     socketService.joinGame(gameOptions);
   };
+  
+  // Cancel matchmaking
+  const cancelMatchmaking = () => {
+    socketService.cancelMatchmaking();
+  };
 
   // Connect to the socket when the component mounts
   useEffect(() => {
@@ -99,6 +106,7 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     connect,
     disconnect,
     joinGame,
+    cancelMatchmaking,
   };
 
   return <SocketContext.Provider value={value}>{children}</SocketContext.Provider>;

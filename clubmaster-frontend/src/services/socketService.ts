@@ -49,4 +49,13 @@ export const joinGame = (gameOptions: { gameType: string }): void => {
   if (socket?.connected) {
     socket.emit('joinGame', gameOptions);
   }
+};
+
+/**
+ * Cancel matchmaking
+ */
+export const cancelMatchmaking = (): void => {
+  if (socket?.connected) {
+    socket.emit('cancelMatchmaking');
+  }
 }; 
