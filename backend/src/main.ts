@@ -7,11 +7,14 @@ async function bootstrap() {
   const logger = new Logger('Bootstrap');
   const app = await NestFactory.create(AppModule);
   
-  // Enable CORS
+  // Enable CORS with expanded configuration
   app.enableCors({
-    origin: ['http://localhost:3000'], // Allow frontend origin
-    methods: ['GET', 'POST'],
+    origin: ['http://localhost:3000', 'http://127.0.0.1:3000'], // Allow frontend origins
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH', 'HEAD'], // Allow all necessary methods
     credentials: true,
+    allowedHeaders: ['Content-Type', 'Accept', 'Authorization', 'Cache-Control', 'X-Requested-With', 'Range', 'Origin'],
+    exposedHeaders: ['Content-Disposition', 'Content-Range', 'Accept-Ranges'],
+    maxAge: 3600,
   });
 
   // Use WebSocket adapter

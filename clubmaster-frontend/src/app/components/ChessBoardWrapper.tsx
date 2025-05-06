@@ -9,6 +9,8 @@ import { MoveHistoryState } from '../utils/moveHistory';
 import DrawOfferNotification from './DrawOfferNotification';
 import { useSocket } from '../../contexts/SocketContext';
 import { getGameStatus } from '../utils/chessEngine';
+import { useSound } from '../../contexts/SoundContext';
+import { playSound, preloadSoundEffects } from '../utils/soundEffects';
 
 // Use dynamic import in a client component
 const ChessBoard = dynamic(() => import('./ChessBoard'), {
@@ -28,6 +30,7 @@ export default function ChessBoardWrapper() {
   
   const [moveHistory, setMoveHistory] = useState<MoveHistoryState | null>(null);
   const { socket } = useSocket();
+  const { soundEnabled } = useSound();
   
   // Game state
   const [gameState, setGameState] = useState({
@@ -44,6 +47,11 @@ export default function ChessBoardWrapper() {
   const [drawOfferTimeRemaining, setDrawOfferTimeRemaining] = useState(30);
   const [drawOfferTimeout, setDrawOfferTimeout] = useState<NodeJS.Timeout | null>(null);
 
+  // Preload sound effects when component mounts
+  useEffect(() => {
+    preloadSoundEffects(soundEnabled);
+  }, [soundEnabled]);
+
   // Socket event listeners
   useEffect(() => {
     if (!socket) return;
@@ -51,6 +59,9 @@ export default function ChessBoardWrapper() {
     // Listen for draw offers
     socket.on('offer_draw', ({ player }) => {
       setDrawOfferReceived(true);
+      
+      // Play notification sound
+      playSound('NOTIFICATION', soundEnabled);
       
       // Set a timeout to auto-decline after 30 seconds
       const timeout = setTimeout(() => {
@@ -75,9 +86,20 @@ export default function ChessBoardWrapper() {
     // Game events that would update the game state
     socket.on('game_started', () => {
       setGameState(prev => ({ ...prev, hasStarted: true }));
+      // Play game start sound
+      playSound('GAME_START', soundEnabled);
     });
     
-    socket.on('move_made', ({ player }) => {
+    socket.on('move_made', ({ player, isCapture, isCheck }) => {
+      // Play appropriate sound for the move
+      if (isCheck) {
+        playSound('CHECK', soundEnabled);
+      } else if (isCapture) {
+        playSound('CAPTURE', soundEnabled);
+      } else {
+        playSound('MOVE', soundEnabled);
+      }
+      
       if (player === 'white') {
         setGameState(prev => ({ 
           ...prev, 
@@ -88,18 +110,33 @@ export default function ChessBoardWrapper() {
         setGameState(prev => ({ ...prev, isWhiteTurn: true }));
       }
     });
+    
+    socket.on('checkmate', () => {
+      playSound('CHECKMATE', soundEnabled);
+    });
+    
+    socket.on('draw', () => {
+      playSound('DRAW', soundEnabled);
+    });
+    
+    socket.on('game_end', () => {
+      playSound('GAME_END', soundEnabled);
+    });
 
     return () => {
       socket.off('offer_draw');
       socket.off('game_started');
       socket.off('move_made');
+      socket.off('checkmate');
+      socket.off('draw');
+      socket.off('game_end');
       
       // Clear any existing timeouts
       if (drawOfferTimeout) {
         clearTimeout(drawOfferTimeout);
       }
     };
-  }, [socket, gameId, drawOfferTimeout]);
+  }, [socket, gameId, drawOfferTimeout, soundEnabled]);
   
   // Handle move history updates from the ChessBoard component
   const handleMoveHistoryChange = useCallback((history: MoveHistoryState) => {
@@ -121,7 +158,7 @@ export default function ChessBoardWrapper() {
     if (status.isGameOver) {
       setActivePlayer(null); // Stop both clocks
     } else {
-      setActivePlayer(status.turn); // Set the active player based on whose turn it is
+      setActivePlayer(status.turn === 'white' ? 'white' : 'black'); // Set the active player based on whose turn it is
     }
     
     // If a move is made, notify the server
@@ -162,7 +199,10 @@ export default function ChessBoardWrapper() {
     if (backButton) {
       backButton.click();
     }
-  }, []);
+    
+    // Play button click sound with button label
+    playSound('BUTTON_CLICK', soundEnabled, 1.0, 'Back');
+  }, [soundEnabled]);
   
   // Handle forward button click
   const handleForwardClick = useCallback(() => {
@@ -172,7 +212,10 @@ export default function ChessBoardWrapper() {
     if (forwardButton) {
       forwardButton.click();
     }
-  }, []);
+    
+    // Play button click sound with button label
+    playSound('BUTTON_CLICK', soundEnabled, 1.0, 'Forward');
+  }, [soundEnabled]);
   
   // Determine if we can go back/forward in the move history
   const canGoBack = moveHistory ? moveHistory.currentMoveIndex >= 0 : false;
@@ -197,6 +240,9 @@ export default function ChessBoardWrapper() {
       isGameOver: true,
       gameResult: `Time out! ${player === 'white' ? 'Black' : 'White'} wins`,
     }));
+    
+    // Play time out sound
+    playSound('GAME_END', soundEnabled);
   };
 
   // Handle draw offer responses
@@ -205,6 +251,9 @@ export default function ChessBoardWrapper() {
     
     socket.emit('accept_draw', { gameId });
     setDrawOfferReceived(false);
+    
+    // Play button click sound
+    playSound('BUTTON_CLICK', soundEnabled);
     
     if (drawOfferTimeout) {
       clearTimeout(drawOfferTimeout);
@@ -220,7 +269,7 @@ export default function ChessBoardWrapper() {
     
     // Stop the clocks
     setActivePlayer(null);
-  }, [socket, gameId, drawOfferTimeout]);
+  }, [socket, gameId, drawOfferTimeout, soundEnabled]);
 
   const handleDeclineDraw = useCallback(() => {
     if (!socket) return;
@@ -228,11 +277,14 @@ export default function ChessBoardWrapper() {
     socket.emit('decline_draw', { gameId });
     setDrawOfferReceived(false);
     
+    // Play button click sound
+    playSound('BUTTON_CLICK', soundEnabled);
+    
     if (drawOfferTimeout) {
       clearTimeout(drawOfferTimeout);
       setDrawOfferTimeout(null);
     }
-  }, [socket, gameId, drawOfferTimeout]);
+  }, [socket, gameId, drawOfferTimeout, soundEnabled]);
 
   // Handle resigning from the game
   const handleResign = useCallback(() => {
@@ -344,8 +396,9 @@ export default function ChessBoardWrapper() {
           />
         </div>
       </div>
-      {/* Move Controls - Moved to the bottom */}
-      <MoveControls
+      
+      {/* Move Controls */}
+      <MoveControls 
         onBack={handleBackClick}
         onForward={handleForwardClick}
         canGoBack={canGoBack}

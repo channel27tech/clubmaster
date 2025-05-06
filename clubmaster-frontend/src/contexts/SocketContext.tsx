@@ -10,6 +10,7 @@ interface SocketContextType {
   connect: () => void;
   disconnect: () => void;
   joinGame: (gameOptions: { gameType: string }) => void;
+  cancelMatchmaking: () => void;
   offerDraw: (gameId: string) => void;
   acceptDraw: (gameId: string) => void;
   declineDraw: (gameId: string) => void;
@@ -25,6 +26,7 @@ const SocketContext = createContext<SocketContextType>({
   connect: () => {},
   disconnect: () => {},
   joinGame: () => {},
+  cancelMatchmaking: () => {},
   offerDraw: () => {},
   acceptDraw: () => {},
   declineDraw: () => {},
@@ -90,6 +92,11 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
   const joinGame = (gameOptions: { gameType: string }) => {
     socketService.joinGame(gameOptions);
   };
+  
+  // Cancel matchmaking
+  const cancelMatchmaking = () => {
+    socketService.cancelMatchmaking();
+  };
 
   // Offer a draw
   const offerDraw = (gameId: string) => {
@@ -144,6 +151,7 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     connect,
     disconnect,
     joinGame,
+    cancelMatchmaking,
     offerDraw,
     acceptDraw,
     declineDraw,
