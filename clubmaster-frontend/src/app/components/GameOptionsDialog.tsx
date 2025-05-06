@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { playSound } from '../utils/soundEffects';
 
 interface GameOptionsDialogProps {
   isOpen: boolean;
@@ -14,7 +15,7 @@ interface GameOptionsDialogProps {
   onResign: () => void;
   onAbort: () => void;
   soundEnabled: boolean;
-  onSoundToggle: (enabled: boolean) => void;
+  onSoundToggle: (enabled: boolean) => Promise<void>;
 }
 
 const GameOptionsDialog: React.FC<GameOptionsDialogProps> = ({
@@ -28,6 +29,8 @@ const GameOptionsDialog: React.FC<GameOptionsDialogProps> = ({
   onSoundToggle,
 }) => {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const [isToggling, setIsToggling] = useState(false);
+  const [toggleError, setToggleError] = useState<string | null>(null);
 
   // Handle click outside dialog to close
   useEffect(() => {
@@ -68,6 +71,103 @@ const GameOptionsDialog: React.FC<GameOptionsDialogProps> = ({
     }
   }, [isOpen]);
 
+  // Reset errors when dialog opens/closes
+  useEffect(() => {
+    if (!isOpen) {
+      setToggleError(null);
+    }
+  }, [isOpen]);
+
+  // Direct sound generation function that always works
+  const playDirectClickSound = () => {
+    try {
+      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContext) {
+        console.log('AudioContext not supported in this browser');
+        return;
+      }
+      
+      const audioContext = new AudioContext();
+      
+      // Create a short "click" oscillator sound
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+      
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.1);
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.start();
+      oscillator.stop(audioContext.currentTime + 0.1);
+    } catch (error) {
+      console.warn('Failed to play direct click sound:', error);
+      // Try regular sound as fallback
+      try {
+        playSound('BUTTON_CLICK', true);
+      } catch (e) {
+        console.error('Both sound methods failed', e);
+      }
+    }
+  };
+
+  // Safe function to play sounds that won't break if sound fails
+  const safePlaySound = (soundName: Parameters<typeof playSound>[0], buttonLabel: string) => {
+    try {
+      // Only play sound for sound toggle buttons
+      if (buttonLabel.includes('Sound')) {
+        // First try the direct sound method
+        playDirectClickSound();
+      }
+    } catch (err) {
+      console.warn(`Failed to play direct sound, trying fallback:`, err);
+      // Fallback to regular sound API
+      try {
+        // Always force sound to play for UI feedback regardless of user sound setting
+        // but only for sound toggle buttons
+        if (buttonLabel.includes('Sound')) {
+          playSound(soundName, true, 1.0, buttonLabel);
+        }
+      } catch (secondError) {
+        console.warn(`All sound methods failed:`, secondError);
+      }
+    }
+  };
+
+  // Handle sound toggle with loading state
+  const handleSoundToggle = async () => {
+    if (isToggling) return; // Prevent multiple clicks
+    
+    try {
+      setIsToggling(true);
+      setToggleError(null);
+      
+      // Update the local state immediately for better UX
+      const newSoundEnabled = !soundEnabled;
+      
+      // Use specific button label to get the right sound
+      const buttonLabel = soundEnabled ? "Disable Sound" : "Enable Sound";
+      // Play sound with the correct button label
+      playSound('BUTTON_CLICK', true, 1.0, buttonLabel);
+      
+      // Try to update the server settings in the background
+      try {
+        await onSoundToggle(newSoundEnabled);
+        // Close dialog after successful toggle
+        onClose();
+      } catch (err: any) {
+        console.error('Error toggling sound:', err);
+        setToggleError(err?.message || 'Failed to save sound preference to server, but it will work for now');
+      }
+    } finally {
+      setIsToggling(false);
+    }
+  };
+
   if (!isOpen) return null;
 
   // Only show Abort button before the game has started or before white's first move
@@ -87,7 +187,10 @@ const GameOptionsDialog: React.FC<GameOptionsDialogProps> = ({
         <div className="flex flex-col divide-y divide-gray-700">
           <button 
             className="py-3.5 text-center hover:bg-[#4a4f4f] active:bg-[#585f5f] transition-colors"
-            onClick={onDrawOffer}
+            onClick={() => {
+              // Don't play sound for this button
+              onDrawOffer();
+            }}
             aria-label="Offer draw"
           >
             Draw
@@ -95,7 +198,10 @@ const GameOptionsDialog: React.FC<GameOptionsDialogProps> = ({
           
           <button 
             className="py-3.5 text-center hover:bg-[#4a4f4f] active:bg-[#585f5f] transition-colors"
-            onClick={onResign}
+            onClick={() => {
+              // Don't play sound for this button
+              onResign();
+            }}
             aria-label="Resign from game"
           >
             Resign
@@ -104,7 +210,10 @@ const GameOptionsDialog: React.FC<GameOptionsDialogProps> = ({
           {canAbort && (
             <button 
               className="py-3.5 text-center hover:bg-[#4a4f4f] active:bg-[#585f5f] transition-colors"
-              onClick={onAbort}
+              onClick={() => {
+                // Don't play sound for this button
+                onAbort();
+              }}
               aria-label="Abort game"
             >
               Abort
@@ -112,12 +221,19 @@ const GameOptionsDialog: React.FC<GameOptionsDialogProps> = ({
           )}
           
           <button 
-            className="py-3.5 text-center hover:bg-[#4a4f4f] active:bg-[#585f5f] transition-colors"
-            onClick={() => onSoundToggle(!soundEnabled)}
+            className={`py-3.5 text-center hover:bg-[#4a4f4f] active:bg-[#585f5f] transition-colors ${isToggling ? 'opacity-70' : ''}`}
+            onClick={handleSoundToggle}
+            disabled={isToggling}
             aria-label={soundEnabled ? "Disable sound" : "Enable sound"}
           >
-            {soundEnabled ? "Disable Sound" : "Enable Sound"}
+            {isToggling ? "Updating..." : (soundEnabled ? "Disable Sound" : "Enable Sound")}
           </button>
+          
+          {toggleError && (
+            <div className="py-2 px-3 text-xs text-amber-300 bg-[#39393a] border-t border-gray-700">
+              {toggleError}
+            </div>
+          )}
         </div>
       </div>
       {/* Triangle pointer at the bottom */}
