@@ -10,6 +10,7 @@ interface GameOptionsDialogProps {
     hasStarted: boolean;
     isWhiteTurn: boolean;
     hasWhiteMoved?: boolean;
+    isGameOver?: boolean;
   };
   onDrawOffer: () => void;
   onResign: () => void;
@@ -172,6 +173,9 @@ const GameOptionsDialog: React.FC<GameOptionsDialogProps> = ({
 
   // Only show Abort button before the game has started or before white's first move
   const canAbort = !gameState.hasStarted || (gameState.hasStarted && gameState.isWhiteTurn && !gameState.hasWhiteMoved);
+  
+  // Don't show game action buttons if the game is over
+  const gameOver = gameState.isGameOver === true;
 
   return (
     <div 
@@ -185,39 +189,34 @@ const GameOptionsDialog: React.FC<GameOptionsDialogProps> = ({
         className="bg-[#333939] text-white rounded-md shadow-lg overflow-hidden w-95"
       >
         <div className="flex flex-col divide-y divide-gray-700">
-          <button 
-            className="py-3.5 text-center hover:bg-[#4a4f4f] active:bg-[#585f5f] transition-colors"
-            onClick={() => {
-              // Don't play sound for this button
-              onDrawOffer();
-            }}
-            aria-label="Offer draw"
-          >
-            Draw
-          </button>
-          
-          <button 
-            className="py-3.5 text-center hover:bg-[#4a4f4f] active:bg-[#585f5f] transition-colors"
-            onClick={() => {
-              // Don't play sound for this button
-              onResign();
-            }}
-            aria-label="Resign from game"
-          >
-            Resign
-          </button>
-          
-          {canAbort && (
-            <button 
-              className="py-3.5 text-center hover:bg-[#4a4f4f] active:bg-[#585f5f] transition-colors"
-              onClick={() => {
-                // Don't play sound for this button
-                onAbort();
-              }}
-              aria-label="Abort game"
-            >
-              Abort
-            </button>
+          {!gameOver && (
+            <>
+              <button 
+                className="py-3.5 text-center hover:bg-[#4a4f4f] active:bg-[#585f5f] transition-colors"
+                onClick={onDrawOffer}
+                aria-label="Offer draw"
+              >
+                Draw
+              </button>
+              
+              <button 
+                className="py-3.5 text-center hover:bg-[#4a4f4f] active:bg-[#585f5f] transition-colors"
+                onClick={onResign}
+                aria-label="Resign from game"
+              >
+                Resign
+              </button>
+              
+              {canAbort && (
+                <button 
+                  className="py-3.5 text-center hover:bg-[#4a4f4f] active:bg-[#585f5f] transition-colors"
+                  onClick={onAbort}
+                  aria-label="Abort game"
+                >
+                  Abort
+                </button>
+              )}
+            </>
           )}
           
           <button 

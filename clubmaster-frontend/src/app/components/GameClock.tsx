@@ -19,54 +19,66 @@ const GameClock: React.FC<GameClockProps> = ({
   timeInSeconds: initialTime,
   isActive,
   isDarkTheme = false,
-  onTimeOut,
+  onTimeOut
+}) => {
+  const [remainingTime, setRemainingTime] = useState(timeInSeconds);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const hasCalledTimeOut = useRef(false);
+
+  useEffect(() => {
+    // Reset the timer when we get a new initial time
+    setRemainingTime(timeInSeconds);
+    hasCalledTimeOut.current = false;
+  }, [timeInSeconds]);
+
+  useEffect(() => {
+    // Clear any existing timer
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+
+    // If active and time is greater than 0, start the timer
+    if (isActive && remainingTime > 0) {
+      timerRef.current = setInterval(() => {
+        setRemainingTime(prevTime => {
+          const newTime = prevTime - 1;
+          
+          // If time reaches zero, clear interval and call onTimeOut
+          if (newTime <= 0 && !hasCalledTimeOut.current) {
+            if (timerRef.current) {
+              clearInterval(timerRef.current);
+              timerRef.current = null;
+            }
+            
+            // Call onTimeOut callback if provided
+            if (onTimeOut) {
+              hasCalledTimeOut.current = true;
+              onTimeOut();
+            }
+            
+            return 0;
+          }
+          
+          return newTime;
+        });
+      }, 1000);
+    }
+
+    // Clean up timer on unmount or when isActive changes
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [isActive, onTimeOut]);
+
   playLowTimeSound
 }) => {
-  // State to track remaining time - using initial time directly now 
-  // since we're disabling the countdown
-  const [timeRemaining] = useState(initialTime);
-  
   // Track if we've already played the low time sound
   const hasPlayedLowTimeSound = useRef(false);
-  
-  // Timer effect - disabled 
-  // useEffect(() => {
-  //   // Reset when initial time changes
-  //   setTimeRemaining(initialTime);
-  //   hasPlayedLowTimeSound.current = false;
-  // }, [initialTime]);
-  
-  // Timer countdown effect - disabled
-  // useEffect(() => {
-  //   let interval: NodeJS.Timeout | null = null;
-  //   
-  //   if (isActive && timeRemaining > 0) {
-  //     interval = setInterval(() => {
-  //       setTimeRemaining((prevTime) => {
-  //         // Check if time is about to run low
-  //         if (prevTime === 60 && !hasPlayedLowTimeSound.current && playLowTimeSound) {
-  //           playLowTimeSound();
-  //           hasPlayedLowTimeSound.current = true;
-  //         }
-  //         
-  //         // Check if time will run out on the next tick
-  //         if (prevTime === 1 && onTimeOut) {
-  //           onTimeOut();
-  //         }
-  //         
-  //         return prevTime - 1;
-  //       });
-  //     }, 1000);
-  //   } else if (timeRemaining === 0 && onTimeOut) {
-  //     // If time is already at 0, call timeout handler
-  //     onTimeOut();
-  //   }
-  //   
-  //   return () => {
-  //     if (interval) clearInterval(interval);
-  //   };
-  // }, [isActive, timeRemaining, onTimeOut, playLowTimeSound]);
-  
+
   // Format time as mm:ss
   const formatTime = (seconds: number): string => {
     const minutes = Math.floor(seconds / 60);
@@ -75,7 +87,8 @@ const GameClock: React.FC<GameClockProps> = ({
   };
 
   // Determine if time is running low (less than 1 minute)
-  const isTimeRunningLow = timeRemaining < 60;
+  const isTimeRunningLow = remainingTime < 60;
+
 
   // Apply different styling based on theme (light/dark) and time status
   const textColor = isDarkTheme ? '#D9D9D9' : '#1F2323';
@@ -99,7 +112,7 @@ const GameClock: React.FC<GameClockProps> = ({
         ...urgencyStyles
       }}
     >
-      {formatTime(timeRemaining)}
+      {formatTime(remainingTime)}
       
       {/* Pulse animation removed since we're making timers static */}
     </div>

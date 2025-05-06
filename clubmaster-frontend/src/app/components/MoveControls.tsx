@@ -19,7 +19,12 @@ interface MoveControlsProps {
     hasStarted: boolean;
     isWhiteTurn: boolean;
     hasWhiteMoved: boolean;
+    isGameOver?: boolean;
+    gameResult?: string;
   };
+  onResign?: () => void;
+  onOfferDraw?: () => void;
+  onAbortGame?: () => void;
 }
 
 const MoveControls: React.FC<MoveControlsProps> = ({
@@ -28,10 +33,13 @@ const MoveControls: React.FC<MoveControlsProps> = ({
   canGoBack,
   canGoForward,
   gameId,
-  gameState
+  gameState,
+  onResign,
+  onOfferDraw,
+  onAbortGame
 }) => {
   // Socket context for game actions
-  const { offerDraw, resignGame, abortGame } = useSocket();
+  const { socket } = useSocket();
   
   // Sound context for sound settings
   const { soundEnabled, toggleSound, isLoading: isSoundLoading } = useSound();
@@ -63,9 +71,13 @@ const MoveControls: React.FC<MoveControlsProps> = ({
 
   // Handle draw offer confirmation
   const handleDrawOfferConfirm = useCallback(() => {
-    offerDraw(gameId);
+    if (onOfferDraw) {
+      onOfferDraw();
+    } else if (socket) {
+      socket.emit('offer_draw', { gameId });
+    }
     setIsDrawDialogOpen(false);
-  }, [offerDraw, gameId]);
+  }, [onOfferDraw, socket, gameId]);
 
   // Handle resign request
   const handleResignRequest = useCallback(() => {
@@ -75,9 +87,13 @@ const MoveControls: React.FC<MoveControlsProps> = ({
 
   // Handle resign confirmation
   const handleResignConfirm = useCallback(() => {
-    resignGame(gameId);
+    if (onResign) {
+      onResign();
+    } else if (socket) {
+      socket.emit('resign', { gameId });
+    }
     setIsResignDialogOpen(false);
-  }, [resignGame, gameId]);
+  }, [onResign, socket, gameId]);
 
   // Handle abort request
   const handleAbortRequest = useCallback(() => {
@@ -87,9 +103,13 @@ const MoveControls: React.FC<MoveControlsProps> = ({
 
   // Handle abort confirmation
   const handleAbortConfirm = useCallback(() => {
-    abortGame(gameId);
+    if (onAbortGame) {
+      onAbortGame();
+    } else if (socket) {
+      socket.emit('abort_game', { gameId });
+    }
     setIsAbortDialogOpen(false);
-  }, [abortGame, gameId]);
+  }, [onAbortGame, socket, gameId]);
 
   // Handle sound toggle using the SoundContext
   const handleSoundToggle = useCallback(async (enabled: boolean) => {
@@ -97,13 +117,17 @@ const MoveControls: React.FC<MoveControlsProps> = ({
     setIsOptionsDialogOpen(false);
   }, [toggleSound]);
 
+  // Disable controls if game is over
+  const isDisabled = gameState.isGameOver;
+
   return (
     <div className="relative">
       <div className="w-full grid grid-cols-3 bg-[#333939] text-white py-3 mt-15">
         <button 
           ref={optionsButtonRef}
-          className="flex justify-center items-center"
+          className={`flex justify-center items-center ${isDisabled ? 'opacity-50' : ''}`}
           onClick={handleOptionsClick}
+          disabled={isDisabled}
         >
           <div className="flex flex-col items-center">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
