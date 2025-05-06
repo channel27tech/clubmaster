@@ -365,6 +365,7 @@ export default function ChessBoardWrapper() {
             isActive={activePlayer === 'black'}
             isDarkTheme={false}
             onTimeOut={() => handleTimeOut('black')}
+            playLowTimeSound={() => playSound('TIME_LOW', soundEnabled)}
           />
         </div>
       </div>
@@ -375,7 +376,6 @@ export default function ChessBoardWrapper() {
         onMoveHistoryChange={handleMoveHistoryChange}
       />
       
-    
       {/* Player 2 Info (Bottom) with Timer */}
       <div className="flex justify-between items-center mt-2">
         <PlayerInfo 
@@ -393,6 +393,7 @@ export default function ChessBoardWrapper() {
             isActive={activePlayer === 'white'}
             isDarkTheme={true}
             onTimeOut={() => handleTimeOut('white')}
+            playLowTimeSound={() => playSound('TIME_LOW', soundEnabled)}
           />
         </div>
       </div>
