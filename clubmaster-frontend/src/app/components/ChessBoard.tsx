@@ -31,9 +31,9 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange }: ChessBoardPr
     setBoardState(initialHistory.initialBoardState);
     
     // Notify parent component of initial state
-    if (onMoveHistoryChange) {
+      if (onMoveHistoryChange) {
       onMoveHistoryChange(initialHistory);
-    }
+      }
   }, [onMoveHistoryChange]);
 
   // Handle going back one move
