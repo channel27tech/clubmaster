@@ -1,11 +1,12 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 interface GameClockProps {
   timeInSeconds: number;
   isActive: boolean;
   isDarkTheme?: boolean;
+  onTimeOut?: () => void;
 }
 
 /**
@@ -15,8 +16,62 @@ interface GameClockProps {
 const GameClock: React.FC<GameClockProps> = ({
   timeInSeconds,
   isActive,
-  isDarkTheme = false
+  isDarkTheme = false,
+  onTimeOut
 }) => {
+  const [remainingTime, setRemainingTime] = useState(timeInSeconds);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const hasCalledTimeOut = useRef(false);
+
+  useEffect(() => {
+    // Reset the timer when we get a new initial time
+    setRemainingTime(timeInSeconds);
+    hasCalledTimeOut.current = false;
+  }, [timeInSeconds]);
+
+  useEffect(() => {
+    // Clear any existing timer
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+
+    // If active and time is greater than 0, start the timer
+    if (isActive && remainingTime > 0) {
+      timerRef.current = setInterval(() => {
+        setRemainingTime(prevTime => {
+          const newTime = prevTime - 1;
+          
+          // If time reaches zero, clear interval and call onTimeOut
+          if (newTime <= 0 && !hasCalledTimeOut.current) {
+            if (timerRef.current) {
+              clearInterval(timerRef.current);
+              timerRef.current = null;
+            }
+            
+            // Call onTimeOut callback if provided
+            if (onTimeOut) {
+              hasCalledTimeOut.current = true;
+              onTimeOut();
+            }
+            
+            return 0;
+          }
+          
+          return newTime;
+        });
+      }, 1000);
+    }
+
+    // Clean up timer on unmount or when isActive changes
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [isActive, onTimeOut]);
+
   // Format time as mm:ss
   const formatTime = (seconds: number): string => {
     const minutes = Math.floor(seconds / 60);
@@ -25,7 +80,7 @@ const GameClock: React.FC<GameClockProps> = ({
   };
 
   // Determine if time is running low (less than 1 minute)
-  const isTimeRunningLow = timeInSeconds < 60;
+  const isTimeRunningLow = remainingTime < 60;
 
   // Apply different styling based on theme (light/dark) and time status
   const textColor = isDarkTheme ? '#D9D9D9' : '#1F2323';
@@ -50,7 +105,7 @@ const GameClock: React.FC<GameClockProps> = ({
         ...urgencyStyles
       }}
     >
-      {formatTime(timeInSeconds)}
+      {formatTime(remainingTime)}
       
       {/* Add global CSS for pulse animation */}
       {isTimeRunningLow && (

@@ -1425,6 +1425,7 @@ alwaysApply: true
   - Maintain links between related rules
   - Document breaking changes
 
+<<<<<<< HEAD
 Follow WINDSURF_RULES for proper rule formatting and structure of windsurf rule sections.
 
 # Added by Task Master - Development Workflow Rules
@@ -1902,4 +1903,6 @@ alwaysApply: true
   - Maintain links between related rules
   - Document breaking changes
 
+=======
+>>>>>>> main
 Follow WINDSURF_RULES for proper rule formatting and structure of windsurf rule sections.

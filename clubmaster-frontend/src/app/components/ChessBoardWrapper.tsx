@@ -1,24 +1,158 @@
 'use client';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import PlayerInfo from './PlayerInfo';
 import MoveControls from './MoveControls';
 import GameClock from './GameClock';
 import { player1, player2 } from '../utils/mockData';
 import { MoveHistoryState } from '../utils/moveHistory';
+import DrawOfferNotification from './DrawOfferNotification';
+import { useSocket } from '../../contexts/SocketContext';
+import { getGameStatus } from '../utils/chessEngine';
 
 // Use dynamic import in a client component
 const ChessBoard = dynamic(() => import('./ChessBoard'), {
   ssr: false,
 });
 
+// Game time in seconds for different time controls
+const TIME_CONTROLS = {
+  BULLET: 180,  // 3 minutes
+  BLITZ: 300,   // 5 minutes
+  RAPID: 600    // 10 minutes
+};
+
 export default function ChessBoardWrapper() {
+  // Mock game ID - in a real app this would come from the game state
+  const gameId = 'mock-game-id-123';
+  
   const [moveHistory, setMoveHistory] = useState<MoveHistoryState | null>(null);
+  const { socket } = useSocket();
+  
+  // Game state
+  const [gameState, setGameState] = useState({
+    hasStarted: true,
+    isWhiteTurn: true,
+    hasWhiteMoved: false,
+    isGameOver: false,
+    gameResult: '',
+    timeControl: 'RAPID' // Default time control
+  });
+  
+  // Draw offer state
+  const [drawOfferReceived, setDrawOfferReceived] = useState(false);
+  const [drawOfferTimeRemaining, setDrawOfferTimeRemaining] = useState(30);
+  const [drawOfferTimeout, setDrawOfferTimeout] = useState<NodeJS.Timeout | null>(null);
+
+  // Socket event listeners
+  useEffect(() => {
+    if (!socket) return;
+
+    // Listen for draw offers
+    socket.on('offer_draw', ({ player }) => {
+      setDrawOfferReceived(true);
+      
+      // Set a timeout to auto-decline after 30 seconds
+      const timeout = setTimeout(() => {
+        setDrawOfferReceived(false);
+        socket.emit('decline_draw', { gameId });
+      }, 30000);
+      
+      setDrawOfferTimeout(timeout);
+      
+      // Start countdown
+      const countdownInterval = setInterval(() => {
+        setDrawOfferTimeRemaining((prev) => {
+          if (prev <= 1) {
+            clearInterval(countdownInterval);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    });
+
+    // Game events that would update the game state
+    socket.on('game_started', () => {
+      setGameState(prev => ({ ...prev, hasStarted: true }));
+    });
+    
+    socket.on('move_made', ({ player }) => {
+      if (player === 'white') {
+        setGameState(prev => ({ 
+          ...prev, 
+          isWhiteTurn: false,
+          hasWhiteMoved: true 
+        }));
+      } else {
+        setGameState(prev => ({ ...prev, isWhiteTurn: true }));
+      }
+    });
+
+    return () => {
+      socket.off('offer_draw');
+      socket.off('game_started');
+      socket.off('move_made');
+      
+      // Clear any existing timeouts
+      if (drawOfferTimeout) {
+        clearTimeout(drawOfferTimeout);
+      }
+    };
+  }, [socket, gameId, drawOfferTimeout]);
   
   // Handle move history updates from the ChessBoard component
   const handleMoveHistoryChange = useCallback((history: MoveHistoryState) => {
     setMoveHistory(history);
-  }, []);
+    
+    // Check game status after every move
+    const status = getGameStatus();
+    
+    // Update game state based on chess.js status
+    setGameState(prev => ({ 
+      ...prev,
+      isWhiteTurn: status.turn === 'white',
+      hasWhiteMoved: true,
+      isGameOver: status.isGameOver,
+      gameResult: getGameResult(status),
+    }));
+    
+    // Update active player for clocks
+    if (status.isGameOver) {
+      setActivePlayer(null); // Stop both clocks
+    } else {
+      setActivePlayer(status.turn); // Set the active player based on whose turn it is
+    }
+    
+    // If a move is made, notify the server
+    if (history.moves.length > 0 && history.currentMoveIndex === history.moves.length - 1) {
+      const lastMove = history.moves[history.currentMoveIndex];
+      
+      if (socket) {
+        socket.emit('move_made', {
+          gameId,
+          from: lastMove.from,
+          to: lastMove.to,
+          player: lastMove.piece.color,
+          notation: lastMove.notation,
+        });
+      }
+    }
+  }, [socket, gameId]);
+  
+  // Get a human-readable game result string
+  const getGameResult = (status: ReturnType<typeof getGameStatus>): string => {
+    if (status.isCheckmate) {
+      return `Checkmate! ${status.turn === 'white' ? 'Black' : 'White'} wins`;
+    } else if (status.isStalemate) {
+      return 'Draw by stalemate';
+    } else if (status.isDraw) {
+      return 'Draw';
+    } else if (status.isGameOver) {
+      return 'Game over';
+    }
+    return '';
+  };
   
   // Handle back button click
   const handleBackClick = useCallback(() => {
@@ -43,17 +177,125 @@ export default function ChessBoardWrapper() {
   // Determine if we can go back/forward in the move history
   const canGoBack = moveHistory ? moveHistory.currentMoveIndex >= 0 : false;
   const canGoForward = moveHistory ? moveHistory.currentMoveIndex < moveHistory.moves.length - 1 : false;
+  
   // State to track active player (in a real game, this would be derived from game state)
   const [activePlayer, setActivePlayer] = useState<'white' | 'black' | null>('white');
+  
+  // Get the current time control time in seconds
+  const getTimeControlSeconds = () => {
+    return TIME_CONTROLS[gameState.timeControl as keyof typeof TIME_CONTROLS] || TIME_CONTROLS.RAPID;
+  };
   
   // Mock handler for time out events
   const handleTimeOut = (player: 'white' | 'black') => {
     console.log(`${player} player ran out of time`);
     setActivePlayer(null); // Stop both clocks
+    
+    // Update game state
+    setGameState(prev => ({
+      ...prev,
+      isGameOver: true,
+      gameResult: `Time out! ${player === 'white' ? 'Black' : 'White'} wins`,
+    }));
   };
+
+  // Handle draw offer responses
+  const handleAcceptDraw = useCallback(() => {
+    if (!socket) return;
+    
+    socket.emit('accept_draw', { gameId });
+    setDrawOfferReceived(false);
+    
+    if (drawOfferTimeout) {
+      clearTimeout(drawOfferTimeout);
+      setDrawOfferTimeout(null);
+    }
+    
+    // Update game state
+    setGameState(prev => ({
+      ...prev,
+      isGameOver: true,
+      gameResult: 'Draw by agreement',
+    }));
+    
+    // Stop the clocks
+    setActivePlayer(null);
+  }, [socket, gameId, drawOfferTimeout]);
+
+  const handleDeclineDraw = useCallback(() => {
+    if (!socket) return;
+    
+    socket.emit('decline_draw', { gameId });
+    setDrawOfferReceived(false);
+    
+    if (drawOfferTimeout) {
+      clearTimeout(drawOfferTimeout);
+      setDrawOfferTimeout(null);
+    }
+  }, [socket, gameId, drawOfferTimeout]);
+
+  // Handle resigning from the game
+  const handleResign = useCallback(() => {
+    if (!socket) return;
+    
+    socket.emit('resign', { gameId });
+    
+    // Update game state
+    setGameState(prev => ({
+      ...prev,
+      isGameOver: true,
+      gameResult: `${gameState.isWhiteTurn ? 'White' : 'Black'} resigned. ${gameState.isWhiteTurn ? 'Black' : 'White'} wins`,
+    }));
+    
+    // Stop the clocks
+    setActivePlayer(null);
+  }, [socket, gameId, gameState.isWhiteTurn]);
+
+  // Handle offering a draw
+  const handleOfferDraw = useCallback(() => {
+    if (!socket) return;
+    
+    socket.emit('offer_draw', { gameId });
+  }, [socket, gameId]);
+
+  // Handle aborting the game
+  const handleAbortGame = useCallback(() => {
+    if (!socket || gameState.hasWhiteMoved) return;
+    
+    socket.emit('abort_game', { gameId });
+    
+    // Update game state
+    setGameState(prev => ({
+      ...prev,
+      isGameOver: true,
+      gameResult: 'Game aborted',
+    }));
+    
+    // Stop the clocks
+    setActivePlayer(null);
+  }, [socket, gameId, gameState.hasWhiteMoved]);
+
+  // Get the time for the clocks
+  const gameTimeInSeconds = getTimeControlSeconds();
 
   return (
     <div className="flex flex-col w-full">
+      {/* Draw Offer Notification */}
+      <DrawOfferNotification
+        isOpen={drawOfferReceived}
+        onAccept={handleAcceptDraw}
+        onDecline={handleDeclineDraw}
+        opponentName={player2.username}
+        timeRemaining={drawOfferTimeRemaining}
+      />
+      
+      {/* Game Result Display */}
+      {gameState.isGameOver && (
+        <div className="p-4 my-2 bg-amber-100 rounded-md text-center font-bold">
+          {gameState.gameResult}
+        </div>
+      )}
+      
       {/* Player 1 Info (Top) with Timer */}
       <div className="flex justify-between items-center mb-2">
         <PlayerInfo 
@@ -67,9 +309,10 @@ export default function ChessBoardWrapper() {
         {/* Top player timer (Black) */}
         <div className="mr-2">
           <GameClock 
-            timeInSeconds={554} // Example: 9:14 as shown in the image
+            timeInSeconds={gameTimeInSeconds}
             isActive={activePlayer === 'black'}
             isDarkTheme={false}
+            onTimeOut={() => handleTimeOut('black')}
           />
         </div>
       </div>
@@ -94,20 +337,25 @@ export default function ChessBoardWrapper() {
         {/* Bottom player timer (White) */}
         <div className="mr-2">
           <GameClock 
-            timeInSeconds={500} // Example: 8:20 as shown in the image
+            timeInSeconds={gameTimeInSeconds}
             isActive={activePlayer === 'white'}
             isDarkTheme={true}
+            onTimeOut={() => handleTimeOut('white')}
           />
         </div>
       </div>
-        {/* Move Controls - Moved to the bottom */}
-        <MoveControls
+      {/* Move Controls - Moved to the bottom */}
+      <MoveControls
         onBack={handleBackClick}
         onForward={handleForwardClick}
         canGoBack={canGoBack}
         canGoForward={canGoForward}
+        gameId={gameId}
+        gameState={gameState}
+        onResign={handleResign}
+        onOfferDraw={handleOfferDraw}
+        onAbortGame={handleAbortGame}
       />
-      
     </div>
   );
 } 

@@ -1,16 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import ChessPiece from './ChessPiece';
 import { BoardState, BoardSquare, initializeMoveHistory, MoveHistoryState, goBackOneMove, goForwardOneMove, addMove, generateNotation, PieceType, PieceColor } from '../utils/moveHistory';
-
-// Example mock moves for demonstration purposes
-const mockMoves = [
-  { from: 'e2', to: 'e4', piece: { type: 'pawn' as PieceType, color: 'white' as PieceColor } },
-  { from: 'e7', to: 'e5', piece: { type: 'pawn' as PieceType, color: 'black' as PieceColor } },
-  { from: 'g1', to: 'f3', piece: { type: 'knight' as PieceType, color: 'white' as PieceColor } },
-  { from: 'b8', to: 'c6', piece: { type: 'knight' as PieceType, color: 'black' as PieceColor } },
-];
+import { getChessEngine, resetChessEngine, isLegalMove, makeMove, getGameStatus, getCurrentBoardState } from '../utils/chessEngine';
 
 interface ChessBoardProps {
   perspective?: 'white' | 'black';
@@ -21,6 +14,14 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange }: ChessBoardPr
   const [moveHistory, setMoveHistory] = useState<MoveHistoryState>(() => initializeMoveHistory());
   const [boardState, setBoardState] = useState<BoardState>(moveHistory.initialBoardState);
   const [lastMove, setLastMove] = useState<{ from: string, to: string } | null>(null);
+  const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
+  const [legalMoves, setLegalMoves] = useState<string[]>([]);
+  const [currentPlayer, setCurrentPlayer] = useState<'white' | 'black'>('white');
+  
+  // Initialize the chess engine
+  useEffect(() => {
+    resetChessEngine();
+  }, []);
 
   // Initialize the chess board with pieces in standard positions
   useEffect(() => {
@@ -29,33 +30,10 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange }: ChessBoardPr
     setMoveHistory(initialHistory);
     setBoardState(initialHistory.initialBoardState);
     
-    // Simulating moves for testing the replay functionality
-    // In a real app, this would come from actual gameplay or a game record
-    setTimeout(() => {
-      let currentHistory = initialHistory;
-      let currentBoardState = { ...initialHistory.initialBoardState };
-      
-      for (const move of mockMoves) {
-        // Update board state (in a real app, this would be calculated based on chess rules)
-        const newBoardState = simulateMove(currentBoardState, move.from, move.to, move.piece);
-        
-        // Add move to history
-        const notation = generateNotation(move.from, move.to, move.piece);
-        currentHistory = addMove(currentHistory, { ...move, notation }, newBoardState);
-        currentBoardState = newBoardState;
-      }
-      
-      setMoveHistory(currentHistory);
-      setBoardState(currentHistory.moves[currentHistory.moves.length - 1].boardState);
-      setLastMove({
-        from: mockMoves[mockMoves.length - 1].from,
-        to: mockMoves[mockMoves.length - 1].to
-      });
-      
-      if (onMoveHistoryChange) {
-        onMoveHistoryChange(currentHistory);
-      }
-    }, 500);
+    // Notify parent component of initial state
+    if (onMoveHistoryChange) {
+      onMoveHistoryChange(initialHistory);
+    }
   }, [onMoveHistoryChange]);
 
   // Handle going back one move
@@ -94,6 +72,93 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange }: ChessBoardPr
     }
   }, [moveHistory, onMoveHistoryChange]);
 
+  // Handle square click for move selection
+  const handleSquareClick = (position: string, piece: { type: PieceType, color: PieceColor } | null) => {
+    // If we're in replay mode, don't allow moves
+    if (moveHistory.currentMoveIndex !== moveHistory.moves.length - 1 && moveHistory.moves.length > 0) {
+      return;
+    }
+    
+    // If a square was already selected
+    if (selectedSquare) {
+      // Check if the clicked square is in legal moves
+      if (legalMoves.includes(position)) {
+        // Find the piece that's moving
+        let movingPiece: { type: PieceType, color: PieceColor } | null = null;
+        
+        // Search through boardState to find the piece at selectedSquare
+        boardStateLoop:
+        for (const row of boardState.squares) {
+          for (const square of row) {
+            if (square.position === selectedSquare && square.piece) {
+              movingPiece = square.piece;
+              break boardStateLoop;
+            }
+          }
+        }
+        
+        if (movingPiece) {
+          // Try to make the move in chess.js
+          const moveSuccess = makeMove(selectedSquare, position);
+          
+          if (moveSuccess) {
+            // Update board state based on chess.js
+            const newBoardState = getCurrentBoardState();
+            
+            // Add move to history
+            const notation = generateNotation(selectedSquare, position, movingPiece);
+            const newHistory = addMove(moveHistory, {
+              from: selectedSquare,
+              to: position,
+              piece: movingPiece,
+              notation
+            }, newBoardState);
+            
+            // Update state
+            setMoveHistory(newHistory);
+            setBoardState(newBoardState);
+            setLastMove({ from: selectedSquare, to: position });
+            setCurrentPlayer(currentPlayer === 'white' ? 'black' : 'white');
+            
+            // Notify parent
+            if (onMoveHistoryChange) {
+              onMoveHistoryChange(newHistory);
+            }
+            
+            // Check game status
+            const gameStatus = getGameStatus();
+            if (gameStatus.isGameOver) {
+              // Handle game over
+              console.log('Game over:', gameStatus);
+            }
+          }
+        }
+      }
+      
+      // Clear selection
+      setSelectedSquare(null);
+      setLegalMoves([]);
+    } 
+    // If no square was selected and the player clicked on their own piece
+    else if (piece && piece.color === currentPlayer) {
+      setSelectedSquare(position);
+      
+      // Calculate legal moves for this piece
+      const legalDestinations: string[] = [];
+      
+      // Check all squares on the board
+      for (const row of boardState.squares) {
+        for (const square of row) {
+          if (isLegalMove(position, square.position)) {
+            legalDestinations.push(square.position);
+          }
+        }
+      }
+      
+      setLegalMoves(legalDestinations);
+    }
+  };
+
   // Determine if a square should be dark or light
   const isSquareDark = (row: number, col: number) => {
     return (row + col) % 2 !== 0;
@@ -105,12 +170,28 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange }: ChessBoardPr
     return position === lastMove.from || position === lastMove.to;
   };
 
+  // Check if a square is selected
+  const isSelectedSquare = (position: string) => {
+    return position === selectedSquare;
+  };
+
+  // Check if a square is a legal move destination
+  const isLegalMoveSquare = (position: string) => {
+    return legalMoves.includes(position);
+  };
+
   // Get the background color for a square
   const getSquareBackground = (row: number, col: number, position: string) => {
     const isDark = isSquareDark(row, col);
     const isLastMove = isLastMoveSquare(position);
+    const isSelected = isSelectedSquare(position);
+    const isLegalMove = isLegalMoveSquare(position);
     
-    if (isLastMove) {
+    if (isSelected) {
+      return isDark ? 'bg-blue-700' : 'bg-blue-500';
+    } else if (isLegalMove) {
+      return isDark ? 'bg-green-700' : 'bg-green-500';
+    } else if (isLastMove) {
       return isDark ? 'bg-amber-600' : 'bg-amber-400';
     }
     
@@ -133,13 +214,18 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange }: ChessBoardPr
                 className={`
                   flex items-center justify-center
                   ${getSquareBackground(rowIndex, colIndex, square.position)}
+                  cursor-pointer
                 `}
+                onClick={() => handleSquareClick(square.position, square.piece)}
               >
                 {square.piece && (
                   <ChessPiece
                     type={square.piece.type}
                     color={square.piece.color}
                   />
+                )}
+                {isLegalMoveSquare(square.position) && !square.piece && (
+                  <div className="w-3 h-3 rounded-full bg-green-500 opacity-60"></div>
                 )}
               </div>
             );
@@ -156,7 +242,7 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange }: ChessBoardPr
   );
 };
 
-// Helper function to simulate moving a piece (in a real app, this would be determined by chess rules)
+// Helper function to simulate moving a piece - kept for reference only
 const simulateMove = (
   currentBoardState: BoardState,
   from: string,

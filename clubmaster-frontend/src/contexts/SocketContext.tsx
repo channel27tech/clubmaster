@@ -10,6 +10,11 @@ interface SocketContextType {
   connect: () => void;
   disconnect: () => void;
   joinGame: (gameOptions: { gameType: string }) => void;
+  offerDraw: (gameId: string) => void;
+  acceptDraw: (gameId: string) => void;
+  declineDraw: (gameId: string) => void;
+  resignGame: (gameId: string) => void;
+  abortGame: (gameId: string) => void;
 }
 
 // Create the context with a default value
@@ -20,6 +25,11 @@ const SocketContext = createContext<SocketContextType>({
   connect: () => {},
   disconnect: () => {},
   joinGame: () => {},
+  offerDraw: () => {},
+  acceptDraw: () => {},
+  declineDraw: () => {},
+  resignGame: () => {},
+  abortGame: () => {},
 });
 
 // Custom hook to use the socket context
@@ -81,6 +91,41 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     socketService.joinGame(gameOptions);
   };
 
+  // Offer a draw
+  const offerDraw = (gameId: string) => {
+    if (socket?.connected) {
+      socket.emit('offer_draw', { gameId });
+    }
+  };
+
+  // Accept a draw offer
+  const acceptDraw = (gameId: string) => {
+    if (socket?.connected) {
+      socket.emit('accept_draw', { gameId });
+    }
+  };
+
+  // Decline a draw offer
+  const declineDraw = (gameId: string) => {
+    if (socket?.connected) {
+      socket.emit('decline_draw', { gameId });
+    }
+  };
+
+  // Resign from a game
+  const resignGame = (gameId: string) => {
+    if (socket?.connected) {
+      socket.emit('resign_game', { gameId });
+    }
+  };
+
+  // Abort a game
+  const abortGame = (gameId: string) => {
+    if (socket?.connected) {
+      socket.emit('abort_game', { gameId });
+    }
+  };
+
   // Connect to the socket when the component mounts
   useEffect(() => {
     connect();
@@ -99,6 +144,11 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     connect,
     disconnect,
     joinGame,
+    offerDraw,
+    acceptDraw,
+    declineDraw,
+    resignGame,
+    abortGame,
   };
 
   return <SocketContext.Provider value={value}>{children}</SocketContext.Provider>;
