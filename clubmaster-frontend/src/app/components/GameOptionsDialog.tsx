@@ -193,7 +193,9 @@ const GameOptionsDialog: React.FC<GameOptionsDialogProps> = ({
             <>
               <button 
                 className="py-3.5 text-center hover:bg-[#4a4f4f] active:bg-[#585f5f] transition-colors"
-                onClick={onDrawOffer}
+                onClick={() => {
+                  onDrawOffer();
+                }}
                 aria-label="Offer draw"
               >
                 Draw
@@ -201,7 +203,9 @@ const GameOptionsDialog: React.FC<GameOptionsDialogProps> = ({
               
               <button 
                 className="py-3.5 text-center hover:bg-[#4a4f4f] active:bg-[#585f5f] transition-colors"
-                onClick={onResign}
+                onClick={() => {
+                  onResign();
+                }}
                 aria-label="Resign from game"
               >
                 Resign
@@ -210,7 +214,9 @@ const GameOptionsDialog: React.FC<GameOptionsDialogProps> = ({
               {canAbort && (
                 <button 
                   className="py-3.5 text-center hover:bg-[#4a4f4f] active:bg-[#585f5f] transition-colors"
-                  onClick={onAbort}
+                  onClick={() => {
+                    onAbort();
+                  }}
                   aria-label="Abort game"
                 >
                   Abort

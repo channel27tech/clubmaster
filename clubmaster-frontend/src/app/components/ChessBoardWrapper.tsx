@@ -158,7 +158,7 @@ export default function ChessBoardWrapper() {
     if (status.isGameOver) {
       setActivePlayer(null); // Stop both clocks
     } else {
-      setActivePlayer(status.turn); // Set the active player based on whose turn it is
+      setActivePlayer(status.turn === 'white' ? 'white' : 'black'); // Set the active player based on whose turn it is
     }
     
     // If a move is made, notify the server
@@ -259,6 +259,7 @@ export default function ChessBoardWrapper() {
       clearTimeout(drawOfferTimeout);
       setDrawOfferTimeout(null);
     }
+    
     // Update game state
     setGameState(prev => ({
       ...prev,
@@ -375,7 +376,6 @@ export default function ChessBoardWrapper() {
         onMoveHistoryChange={handleMoveHistoryChange}
       />
       
-    
       {/* Player 2 Info (Bottom) with Timer */}
       <div className="flex justify-between items-center mt-2">
         <PlayerInfo 

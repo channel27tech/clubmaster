@@ -13,23 +13,25 @@ interface GameClockProps {
 /**
  * GameClock component displays a chess game timer
  * Changes appearance when time falls below 1 minute
- * NOTE: Countdown functionality is currently disabled - timers remain static
  */
 const GameClock: React.FC<GameClockProps> = ({
   timeInSeconds: initialTime,
   isActive,
   isDarkTheme = false,
-  onTimeOut
+  onTimeOut,
+  playLowTimeSound
 }) => {
-  const [remainingTime, setRemainingTime] = useState(timeInSeconds);
+  const [remainingTime, setRemainingTime] = useState(initialTime);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const hasCalledTimeOut = useRef(false);
+  const hasPlayedLowTimeSound = useRef(false);
 
   useEffect(() => {
     // Reset the timer when we get a new initial time
-    setRemainingTime(timeInSeconds);
+    setRemainingTime(initialTime);
     hasCalledTimeOut.current = false;
-  }, [timeInSeconds]);
+    hasPlayedLowTimeSound.current = false;
+  }, [initialTime]);
 
   useEffect(() => {
     // Clear any existing timer
@@ -41,8 +43,14 @@ const GameClock: React.FC<GameClockProps> = ({
     // If active and time is greater than 0, start the timer
     if (isActive && remainingTime > 0) {
       timerRef.current = setInterval(() => {
-        setRemainingTime(prevTime => {
+        setRemainingTime((prevTime: number) => {
           const newTime = prevTime - 1;
+          
+          // Check if time is about to run low
+          if (newTime === 60 && !hasPlayedLowTimeSound.current && playLowTimeSound) {
+            playLowTimeSound();
+            hasPlayedLowTimeSound.current = true;
+          }
           
           // If time reaches zero, clear interval and call onTimeOut
           if (newTime <= 0 && !hasCalledTimeOut.current) {
@@ -72,12 +80,7 @@ const GameClock: React.FC<GameClockProps> = ({
         timerRef.current = null;
       }
     };
-  }, [isActive, onTimeOut]);
-
-  playLowTimeSound
-}) => {
-  // Track if we've already played the low time sound
-  const hasPlayedLowTimeSound = useRef(false);
+  }, [isActive, onTimeOut, playLowTimeSound, remainingTime]);
 
   // Format time as mm:ss
   const formatTime = (seconds: number): string => {
@@ -89,13 +92,11 @@ const GameClock: React.FC<GameClockProps> = ({
   // Determine if time is running low (less than 1 minute)
   const isTimeRunningLow = remainingTime < 60;
 
-
   // Apply different styling based on theme (light/dark) and time status
   const textColor = isDarkTheme ? '#D9D9D9' : '#1F2323';
   const backgroundColor = isDarkTheme ? '#333939' : '#C8D5B9';
   
   // Add urgency indicator styles when time is low
-  // Removed animation for static display
   const urgencyStyles = isTimeRunningLow ? {} : {};
 
   return (
