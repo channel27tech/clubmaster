@@ -52,6 +52,99 @@ export const joinGame = (gameOptions: { gameType: string }): void => {
 };
 
 /**
+ * Start matchmaking to find an opponent
+ * @param matchmakingOptions Options for matchmaking (gameMode, timeControl, etc.)
+ */
+export const startMatchmaking = (matchmakingOptions: { 
+  gameMode?: string;
+  timeControl?: string;
+  rated?: boolean;
+  preferredSide?: string;
+}): void => {
+  if (socket?.connected) {
+    socket.emit('startMatchmaking', matchmakingOptions);
+  }
+};
+
+/**
+ * Cancel an ongoing matchmaking request
+ */
+export const cancelMatchmaking = (): void => {
+  if (socket?.connected) {
+    socket.emit('cancelMatchmaking');
+  }
+};
+
+/**
+ * Add a listener for when a match is found
+ * @param callback Function to call when a match is found
+ */
+export const onMatchFound = (callback: (gameData: any) => void): void => {
+  if (socket) {
+    socket.on('matchFound', callback);
+  }
+};
+
+/**
+ * Remove the match found listener
+ */
+export const offMatchFound = (callback?: (gameData: any) => void): void => {
+  if (socket) {
+    if (callback) {
+      socket.off('matchFound', callback);
+    } else {
+      socket.off('matchFound');
+    }
+  }
+};
+
+/**
+ * Add a listener for matchmaking errors
+ * @param callback Function to call when a matchmaking error occurs
+ */
+export const onMatchmakingError = (callback: (error: any) => void): void => {
+  if (socket) {
+    socket.on('matchmakingError', callback);
+  }
+};
+
+/**
+ * Remove the matchmaking error listener
+ */
+export const offMatchmakingError = (callback?: (error: any) => void): void => {
+  if (socket) {
+    if (callback) {
+      socket.off('matchmakingError', callback);
+    } else {
+      socket.off('matchmakingError');
+    }
+  }
+};
+
+/**
+ * Add a listener for matchmaking status updates
+ * @param callback Function to call when a matchmaking status update is received
+ */
+export const onMatchmakingStatus = (callback: (status: any) => void): void => {
+  if (socket) {
+    socket.on('matchmakingStatus', callback);
+  }
+};
+
+/**
+ * Remove the matchmaking status listener
+ */
+export const offMatchmakingStatus = (callback?: (status: any) => void): void => {
+  if (socket) {
+    if (callback) {
+      socket.off('matchmakingStatus', callback);
+    } else {
+      socket.off('matchmakingStatus');
+    }
+  }
+};
+
+/**
  * Offer a draw to the opponent
  * @param gameId Game ID
  */
