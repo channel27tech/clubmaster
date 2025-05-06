@@ -7,14 +7,16 @@ interface GameClockProps {
   isActive: boolean;
   isDarkTheme?: boolean;
   onTimeOut?: () => void;
+  playLowTimeSound?: () => void;
 }
 
 /**
  * GameClock component displays a chess game timer
  * Changes appearance when time falls below 1 minute
+ * NOTE: Countdown functionality is currently disabled - timers remain static
  */
 const GameClock: React.FC<GameClockProps> = ({
-  timeInSeconds,
+  timeInSeconds: initialTime,
   isActive,
   isDarkTheme = false,
   onTimeOut
@@ -72,6 +74,11 @@ const GameClock: React.FC<GameClockProps> = ({
     };
   }, [isActive, onTimeOut]);
 
+  playLowTimeSound
+}) => {
+  // Track if we've already played the low time sound
+  const hasPlayedLowTimeSound = useRef(false);
+
   // Format time as mm:ss
   const formatTime = (seconds: number): string => {
     const minutes = Math.floor(seconds / 60);
@@ -82,14 +89,14 @@ const GameClock: React.FC<GameClockProps> = ({
   // Determine if time is running low (less than 1 minute)
   const isTimeRunningLow = remainingTime < 60;
 
+
   // Apply different styling based on theme (light/dark) and time status
   const textColor = isDarkTheme ? '#D9D9D9' : '#1F2323';
   const backgroundColor = isDarkTheme ? '#333939' : '#C8D5B9';
   
   // Add urgency indicator styles when time is low
-  const urgencyStyles = isTimeRunningLow ? {
-    animation: isActive ? 'pulse 1s infinite' : 'none'
-  } : {};
+  // Removed animation for static display
+  const urgencyStyles = isTimeRunningLow ? {} : {};
 
   return (
     <div 
@@ -107,16 +114,7 @@ const GameClock: React.FC<GameClockProps> = ({
     >
       {formatTime(remainingTime)}
       
-      {/* Add global CSS for pulse animation */}
-      {isTimeRunningLow && (
-        <style jsx global>{`
-          @keyframes pulse {
-            0% { opacity: 1; }
-            50% { opacity: 0.6; }
-            100% { opacity: 1; }
-          }
-        `}</style>
-      )}
+      {/* Pulse animation removed since we're making timers static */}
     </div>
   );
 };

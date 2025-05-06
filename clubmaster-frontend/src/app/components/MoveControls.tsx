@@ -6,6 +6,8 @@ import ResignConfirmationDialog from './ResignConfirmationDialog';
 import DrawOfferDialog from './DrawOfferDialog';
 import AbortConfirmationDialog from './AbortConfirmationDialog';
 import { useSocket } from '../../contexts/SocketContext';
+import { useSound } from '../../contexts/SoundContext';
+import { playSound } from '../utils/soundEffects';
 
 interface MoveControlsProps {
   onBack: () => void;
@@ -39,6 +41,9 @@ const MoveControls: React.FC<MoveControlsProps> = ({
   // Socket context for game actions
   const { socket } = useSocket();
   
+  // Sound context for sound settings
+  const { soundEnabled, toggleSound, isLoading: isSoundLoading } = useSound();
+  
   // Reference to options button for positioning
   const optionsButtonRef = useRef<HTMLButtonElement>(null);
   
@@ -47,13 +52,6 @@ const MoveControls: React.FC<MoveControlsProps> = ({
   const [isResignDialogOpen, setIsResignDialogOpen] = useState(false);
   const [isDrawDialogOpen, setIsDrawDialogOpen] = useState(false);
   const [isAbortDialogOpen, setIsAbortDialogOpen] = useState(false);
-  
-  // Sound settings
-  const [soundEnabled, setSoundEnabled] = useState(
-    typeof localStorage !== 'undefined' 
-      ? localStorage.getItem('soundEnabled') !== 'false'
-      : true
-  );
 
   // Handle options button click
   const handleOptionsClick = useCallback(() => {
@@ -113,14 +111,11 @@ const MoveControls: React.FC<MoveControlsProps> = ({
     setIsAbortDialogOpen(false);
   }, [onAbortGame, socket, gameId]);
 
-  // Handle sound toggle
-  const handleSoundToggle = useCallback((enabled: boolean) => {
-    setSoundEnabled(enabled);
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('soundEnabled', enabled.toString());
-    }
+  // Handle sound toggle using the SoundContext
+  const handleSoundToggle = useCallback(async (enabled: boolean) => {
+    await toggleSound(enabled);
     setIsOptionsDialogOpen(false);
-  }, []);
+  }, [toggleSound]);
 
   // Disable controls if game is over
   const isDisabled = gameState.isGameOver;
@@ -145,7 +140,11 @@ const MoveControls: React.FC<MoveControlsProps> = ({
         
         <button 
           className={`flex justify-center items-center ${!canGoBack ? 'opacity-50' : ''}`}
-          onClick={onBack}
+          onClick={() => {
+            onBack();
+            // Play button click sound only for back button
+            soundEnabled && playSound('BUTTON_CLICK', soundEnabled, 1.0, 'Back');
+          }}
           disabled={!canGoBack}
         >
           <div className="flex flex-col items-center">
@@ -158,7 +157,11 @@ const MoveControls: React.FC<MoveControlsProps> = ({
         
         <button 
           className={`flex justify-center items-center ${!canGoForward ? 'opacity-50' : ''}`}
-          onClick={onForward}
+          onClick={() => {
+            onForward();
+            // Play button click sound only for forward button
+            soundEnabled && playSound('BUTTON_CLICK', soundEnabled, 1.0, 'Forward');
+          }}
           disabled={!canGoForward}
         >
           <div className="flex flex-col items-center">

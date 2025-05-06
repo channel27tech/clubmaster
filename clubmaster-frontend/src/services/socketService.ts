@@ -52,6 +52,15 @@ export const joinGame = (gameOptions: { gameType: string }): void => {
 };
 
 /**
+ * Cancel matchmaking
+ */
+export const cancelMatchmaking = (): void => {
+  if (socket?.connected) {
+    socket.emit('cancelMatchmaking');
+  }
+};
+
+/**
  * Offer a draw to the opponent
  * @param gameId Game ID
  */
