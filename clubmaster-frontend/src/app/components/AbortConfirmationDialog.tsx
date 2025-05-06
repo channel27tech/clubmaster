@@ -83,6 +83,7 @@ const AbortConfirmationDialog: React.FC<AbortConfirmationDialogProps> = ({
               className="flex-1 py-2 rounded transition-colors"
               style={{ backgroundColor: '#4A7C59' }}
               onClick={onConfirm}
+              
             >
               Yes
             </button>
