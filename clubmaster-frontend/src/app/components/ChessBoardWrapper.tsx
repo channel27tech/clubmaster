@@ -90,6 +90,35 @@ export default function ChessBoardWrapper() {
           'bp': 8, 'bn': 2, 'bb': 2, 'br': 2, 'bq': 1, 'bk': 1
         };
         
+        // Adjust for promotions - track all pawn promotions from move history
+        const promotions: { fromColor: string, toType: string }[] = [];
+        if (moveHistory.moves) {
+          moveHistory.moves.forEach(move => {
+            if (move.promotion) {
+              const fromColor = move.piece.color === 'white' ? 'w' : 'b';
+              const toType = move.promotion === 'queen' ? 'q' : 
+                             move.promotion === 'rook' ? 'r' : 
+                             move.promotion === 'bishop' ? 'b' : 
+                             move.promotion === 'knight' ? 'n' : '';
+              
+              if (toType) {
+                promotions.push({ fromColor, toType });
+              }
+            }
+          });
+        }
+        
+        // Adjust initial counts based on promotions
+        promotions.forEach(({ fromColor, toType }) => {
+          // Decrement pawn count
+          const pawnKey = `${fromColor}p` as keyof typeof initialPieces;
+          initialPieces[pawnKey]--;
+          
+          // Increment promoted piece count
+          const pieceKey = `${fromColor}${toType}` as keyof typeof initialPieces;
+          initialPieces[pieceKey]++;
+        });
+        
         // Calculate captured pieces
         const newCapturedByWhite: CapturedPiece[] = [];
         const newCapturedByBlack: CapturedPiece[] = [];
@@ -110,13 +139,13 @@ export default function ChessBoardWrapper() {
           .forEach(([key, count]) => {
             const pieceType = key[1];
             const onBoardCount = piecesOnBoard[key as keyof typeof piecesOnBoard];
-            const capturedCount = count - onBoardCount;
+            const capturedCount = Math.max(0, count - onBoardCount); // Ensure count is never negative
             
             for (let i = 0; i < capturedCount; i++) {
               newCapturedByWhite.push({
                 type: pieceTypeMap[pieceType],
                 color: 'black',
-                id: `black-${pieceType}-${i}-${Date.now()}`
+                id: `black-${pieceType}-${i}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`
               });
             }
           });
@@ -127,13 +156,13 @@ export default function ChessBoardWrapper() {
           .forEach(([key, count]) => {
             const pieceType = key[1];
             const onBoardCount = piecesOnBoard[key as keyof typeof piecesOnBoard];
-            const capturedCount = count - onBoardCount;
+            const capturedCount = Math.max(0, count - onBoardCount); // Ensure count is never negative
             
             for (let i = 0; i < capturedCount; i++) {
               newCapturedByBlack.push({
                 type: pieceTypeMap[pieceType],
                 color: 'white',
-                id: `white-${pieceType}-${i}-${Date.now()}`
+                id: `white-${pieceType}-${i}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`
               });
             }
           });
@@ -447,7 +476,7 @@ export default function ChessBoardWrapper() {
       )}
       
       {/* Player 1 Info (Top) with Timer */}
-      <div className="flex justify-between items-center mb-2">
+      <div className="flex items-center justify-between mb-2">
         <PlayerInfo 
           position="top"
           username={player1.username}
@@ -475,7 +504,7 @@ export default function ChessBoardWrapper() {
       />
       
       {/* Player 2 Info (Bottom) with Timer */}
-      <div className="flex justify-between items-center mt-2">
+      <div className="flex items-center justify-between mt-2">
         <PlayerInfo 
           position="bottom"
           username={player2.username}

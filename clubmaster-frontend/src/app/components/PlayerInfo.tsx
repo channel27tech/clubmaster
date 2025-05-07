@@ -61,54 +61,73 @@ const PlayerInfo: React.FC<PlayerInfoProps> = ({
       return null;
     }
 
+    // Group pieces by type for more compact display
+    const groupedPieces: Record<PieceType, number> = {
+      'queen': 0,
+      'rook': 0,
+      'bishop': 0,
+      'knight': 0,
+      'pawn': 0,
+      'king': 0
+    };
+
+    sortedCapturedPieces.forEach(piece => {
+      groupedPieces[piece.type]++;
+    });
+
     return (
-      <div className="flex flex-wrap gap-2 justify-center">
-        {sortedCapturedPieces.map((piece) => (
-          <div key={piece.id} className="w-6 h-6">
-            <ChessPiece type={piece.type} color={piece.color} />
-          </div>
-        ))}
+      <div className="flex flex-wrap gap-1">
+        {Object.entries(groupedPieces).map(([type, count]) => {
+          if (count === 0) return null;
+          
+          const pieceType = type as PieceType;
+          const pieceColor = sortedCapturedPieces[0].color; // All pieces have the same color
+          
+          return (
+            <div key={type} className="flex items-center">
+              <div className="w-5 h-5">
+                <ChessPiece type={pieceType} color={pieceColor} />
+              </div>
+              {count > 1 && (
+                <span className="text-xs font-semibold text-gray-200 ml-0.5 mr-1">
+                  ×{count}
+                </span>
+              )}
+            </div>
+          );
+        })}
       </div>
     );
   };
 
   return (
-    <div className={`w-full ${isTop ? 'mb-3' : 'mt-3'} py-1 px-1`}>
-      <div className="flex items-center justify-between">
-        {/* Left section with profile and info */}
-        <div className="flex items-center gap-2">
-          {/* Profile Icon/Avatar */}
-          <div 
-            className="w-9 h-9 rounded-sm overflow-hidden">
-            <div 
-              className="w-full h-full flex  items-center justify-center" 
-              style={{ backgroundColor: colors.profile.bg }}
-            >
-              <span className="font-bold text-sm" style={{ color: colors.profile.pieceColor }}>
-                {username.charAt(0).toUpperCase()}
-              </span>
-            </div>
-          </div>
-          
-          {/* Player Info */}
-          <div>
-            <div className="flex items-center gap-1">
-              <h3 className="font-bold text-sm ms-1 text-[#FAF3DD]">
-                {username}
-              </h3>
-              {rating && <span className="text-xs text-[#FAF3DD]">({rating})</span>}
-            </div>
-             {/* Captured Pieces */}
-        <div className="min-w-[200px] flex justify-start ms--3">
-          <div 
-            className=" rounded-sm min-h-[30px] flex items-center justify-center"
-          >
-            {renderCapturedPieces()}
-          </div>
+    <div className="flex items-center">
+      {/* Avatar on the left */}
+      <div className="w-9 h-9 rounded-sm overflow-hidden mr-2">
+        <div 
+          className="w-full h-full flex items-center justify-center" 
+          style={{ backgroundColor: colors.profile.bg }}
+        >
+          <span className="font-bold text-sm" style={{ color: colors.profile.pieceColor }}>
+            {username.charAt(0).toUpperCase()}
+          </span>
         </div>
-          </div>
+      </div>
+      
+      {/* Player name and captured pieces in a column */}
+      <div className="flex flex-col justify-center">
+        {/* Player name and rating */}
+        <div className="flex items-center">
+          <h3 className="font-bold text-sm text-[#FAF3DD]">
+            {username}
+          </h3>
+          {rating && <span className="text-xs text-[#FAF3DD] ml-1">({rating})</span>}
         </div>
         
+        {/* Captured pieces */}
+        <div className="mt-1">
+          {renderCapturedPieces()}
+        </div>
       </div>
     </div>
   );
