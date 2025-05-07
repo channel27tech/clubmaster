@@ -482,6 +482,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
           to: lastMove.to,
           player: lastMove.piece.color,
           notation: lastMove.notation,
+          promotion: lastMove.promotion // Include promotion information if present
         });
       }
     }
@@ -545,7 +546,9 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   // Mock handler for time out events
   const handleTimeOut = (player: 'white' | 'black') => {
     console.log(`${player} player ran out of time`);
-    setActivePlayer(null); // Stop both clocks
+    
+    // Use setState callback to avoid referencing current state directly
+    setActivePlayer(() => null); // Stop both clocks
     
     // Update game state
     setGameState(prev => ({
@@ -706,6 +709,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
             perspective={playerColor || 'white'}
             onMoveHistoryChange={handleMoveHistoryChange}
             playerColor={playerColor}
+            gameId={gameRoomId}
           />
       
           {/* Player 2 Info (Bottom) - Black */}
@@ -759,6 +763,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
             perspective={playerColor || 'white'}
             onMoveHistoryChange={handleMoveHistoryChange}
             playerColor={playerColor}
+            gameId={gameRoomId}
           />
       
           {/* Player 1 Info (Bottom) - White */}
