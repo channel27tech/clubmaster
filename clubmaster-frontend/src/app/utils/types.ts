@@ -25,4 +25,28 @@ export interface BoardSquare {
     color: PieceColor;
   } | null;
   position: string;
+}
+
+// Game result types
+export type GameResultType = 'win' | 'loss' | 'draw';
+export type GameEndReason = 
+  | 'checkmate'
+  | 'timeout'
+  | 'resignation'
+  | 'draw_agreement'
+  | 'stalemate'
+  | 'insufficient_material'
+  | 'threefold_repetition'
+  | 'fifty_move_rule';
+
+// Game result interface
+export interface GameResult {
+  result: GameResultType;
+  reason: GameEndReason;
+  playerName: string;
+  opponentName: string;
+  playerRating: number;
+  opponentRating: number;
+  playerRatingChange: number;
+  opponentRatingChange: number;
 } 
