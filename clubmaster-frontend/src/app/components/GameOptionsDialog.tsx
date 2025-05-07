@@ -14,7 +14,7 @@ interface GameOptionsDialogProps {
   };
   onDrawOffer: () => void;
   onResign: () => void;
-  onAbort: () => void;
+  onAbort?: () => void;
   soundEnabled: boolean;
   onSoundToggle: (enabled: boolean) => Promise<void>;
 }
@@ -215,7 +215,7 @@ const GameOptionsDialog: React.FC<GameOptionsDialogProps> = ({
                 <button 
                   className="py-3.5 text-center hover:bg-[#4a4f4f] active:bg-[#585f5f] transition-colors"
                   onClick={() => {
-                    onAbort();
+                    onAbort && onAbort();
                   }}
                   aria-label="Abort game"
                 >

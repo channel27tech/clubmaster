@@ -41,7 +41,7 @@ export const isLegalMove = (from: string, to: string, promotion?: PieceType): bo
   
   try {
     // Get the piece at the 'from' position to check if it's a pawn that might need promotion
-    const piece = chess.get(from);
+    const piece = chess.get(from as any);
     
     // Check if this is a potential pawn promotion move
     const isPawnPromotionMove = 
@@ -57,9 +57,17 @@ export const isLegalMove = (from: string, to: string, promotion?: PieceType): bo
     // chess.js will throw an error for illegal moves
     const moveOptions: { from: string; to: string; promotion?: string } = { from, to };
     
-    // Add promotion if specified
-    if (promotion) {
-      moveOptions.promotion = pieceTypeMapping[promotion];
+    // Get legal moves as strings
+    const moves = chess.moves({ square: from as any, verbose: false });
+    
+    // Chess.js uses SAN notation for non-verbose moves
+    // We need to convert our 'to' coordinate to a possible SAN notation
+    // This is a simplified approach that doesn't handle all edge cases
+    
+    // Check if our move is in the list of legal moves
+    // For simple pawn moves like e2-e4, the SAN notation is just 'e4'
+    if (moves.includes(to)) {
+      return true;
     }
     
     // If this is a pawn promotion move but no promotion piece specified, 
@@ -70,13 +78,36 @@ export const isLegalMove = (from: string, to: string, promotion?: PieceType): bo
     
     const result = chess.move(moveOptions);
     
-    // Undo the move to maintain the board state
-    chess.undo();
+    // For piece moves, try checking if any move ends with the destination
+    for (const move of moves) {
+      if (move.endsWith(to)) {
+        return true;
+      }
+    }
     
-    // If result is null, the move is illegal
-    return result !== null;
+    // If this is a pawn promotion move but no promotion piece specified, 
+    // we'll check legality assuming queen promotion
+    if (isPawnPromotionMove && !promotion) {
+      // For checking legal moves, if no promotion is specified, default to 'queen'
+      // This allows showing the move as legal in the UI, and then prompting for the promotion piece
+      console.log(`Potential pawn promotion detected: ${from} -> ${to}`);
+      const moveOptions: { from: string; to: string; promotion?: string } = { 
+        from, 
+        to,
+        promotion: 'q' // Default to queen for legality check
+      };
+      
+      const result = chess.move(moveOptions);
+      if (result) {
+        chess.undo(); // Revert the move after checking
+        return true;
+      }
+    }
+    
+    // No match found
+    return false;
   } catch (error) {
-    console.error('Error checking move legality:', error);
+    // Don't log invalid move errors to avoid console spam
     return false;
   }
 };
@@ -87,7 +118,7 @@ export const makeMove = (from: string, to: string, promotion?: PieceType): boole
   
   try {
     // Get the piece at the 'from' position to check if it's a pawn that might need promotion
-    const piece = chess.get(from);
+    const piece = chess.get(from as any);
     
     // Check if this is a pawn promotion move
     const isPawnPromotionMove = 
@@ -212,7 +243,8 @@ export const getGameStatus = () => {
 export const loadPgn = (pgn: string): boolean => {
   const chess = getChessEngine();
   try {
-    return chess.loadPgn(pgn);
+    chess.loadPgn(pgn);
+    return true; // Return true on success
   } catch (error) {
     console.error('Error loading PGN:', error);
     return false;

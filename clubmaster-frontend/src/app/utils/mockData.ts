@@ -2,6 +2,7 @@ import { PieceType, PieceColor, CapturedPiece, PlayerData } from './types';
 
 // Mock data for players
 export const player1: PlayerData = {
+  id: 'player1',
   username: "Asif",
   rating: 2850,
   clubAffiliation: "Oslo Chess Club",
@@ -14,6 +15,7 @@ export const player1: PlayerData = {
 };
 
 export const player2: PlayerData = {
+  id: 'player2',
   username: "Basith",
   rating: 2780,
   clubAffiliation: "St. Louis Chess Club",
@@ -25,6 +27,7 @@ export const player2: PlayerData = {
 };
 
 export const guestPlayer: PlayerData = {
+  id: 'guest',
   username: "Guest123",
   isGuest: true,
   capturedPieces: []

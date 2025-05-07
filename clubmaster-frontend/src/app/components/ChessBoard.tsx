@@ -5,13 +5,15 @@ import ChessPiece from './ChessPiece';
 import PromotionSelector from './PromotionSelector';
 import { BoardState, BoardSquare, initializeMoveHistory, MoveHistoryState, goBackOneMove, goForwardOneMove, addMove, generateNotation, PieceType, PieceColor } from '../utils/moveHistory';
 import { getChessEngine, resetChessEngine, isLegalMove, makeMove, getGameStatus, getCurrentBoardState } from '../utils/chessEngine';
+import { useSocket } from '../../contexts/SocketContext';
 
 interface ChessBoardProps {
   perspective?: 'white' | 'black';
   onMoveHistoryChange?: (moveHistory: MoveHistoryState) => void;
+  playerColor?: 'white' | 'black' | null;
 }
 
-const ChessBoard = ({ perspective = 'white', onMoveHistoryChange }: ChessBoardProps) => {
+const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor }: ChessBoardProps) => {
   const [moveHistory, setMoveHistory] = useState<MoveHistoryState>(() => initializeMoveHistory());
   const [boardState, setBoardState] = useState<BoardState>(moveHistory.initialBoardState);
   const [lastMove, setLastMove] = useState<{ from: string, to: string } | null>(null);
@@ -31,10 +33,18 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange }: ChessBoardPr
   // Reference to the board element for positioning the promotion selector
   const boardRef = useRef<HTMLDivElement>(null);
   
+  // Get socket for remote move updates
+  const { socket } = useSocket();
+  
   // Initialize the chess engine
   useEffect(() => {
     resetChessEngine();
   }, []);
+
+  // Debug logging for playerColor
+  useEffect(() => {
+    console.log('ChessBoard received playerColor:', playerColor);
+  }, [playerColor]);
 
   // Initialize the chess board with pieces in standard positions
   useEffect(() => {
@@ -48,6 +58,77 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange }: ChessBoardPr
       onMoveHistoryChange(initialHistory);
       }
   }, [onMoveHistoryChange]);
+  
+  // Listen for opponent moves via socket
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleOpponentMove = (data: { 
+      from: string, 
+      to: string, 
+      player: string, 
+      notation: string,
+      gameId: string 
+    }) => {
+      console.log('Received move from opponent:', data);
+      
+      // If player colors are set, only process if it's the opponent's move
+      if (playerColor && data.player !== playerColor) {
+        console.log(`Processing opponent move. Our color: ${playerColor}, move made by: ${data.player}`);
+        
+        // Use makeMove directly instead of simulating clicks
+        const moveSuccess = makeMove(data.from, data.to);
+        
+        if (moveSuccess) {
+          console.log('Move successfully applied to board');
+          // Get updated board state after move
+          const newBoardState = getCurrentBoardState();
+          
+          // Find the piece that moved
+          let movingPiece: { type: PieceType, color: PieceColor } | null = null;
+          for (const row of boardState.squares) {
+            for (const square of row) {
+              if (square.position === data.from && square.piece) {
+                movingPiece = { ...square.piece };
+                break;
+              }
+            }
+          }
+          
+          if (movingPiece) {
+            // Add the move to history
+            const newHistory = addMove(moveHistory, {
+              from: data.from,
+              to: data.to,
+              piece: movingPiece,
+              notation: data.notation
+            }, newBoardState);
+            
+            // Update state
+            setMoveHistory(newHistory);
+            setBoardState(newBoardState);
+            setLastMove({ from: data.from, to: data.to });
+            setCurrentPlayer(data.player === 'white' ? 'black' : 'white');
+            
+            // Notify parent of move history change
+            if (onMoveHistoryChange) {
+              onMoveHistoryChange(newHistory);
+            }
+          } else {
+            console.error('Could not find moving piece for opponent move');
+          }
+        } else {
+          console.error('Failed to apply opponent move to board');
+        }
+      }
+    };
+
+    socket.on('move_made', handleOpponentMove);
+
+    return () => {
+      socket.off('move_made', handleOpponentMove);
+    };
+  }, [socket, playerColor, boardState, moveHistory, onMoveHistoryChange]);
 
   // Handle going back one move
   const handleGoBack = useCallback(() => {
@@ -185,8 +266,34 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange }: ChessBoardPr
       return;
     }
     
-    // If a square was already selected
+    // Debug logs
+    console.log("CLICK - playerColor:", playerColor, "currentPlayer:", currentPlayer);
+    
+    // If a square was already selected (making a move)
     if (selectedSquare) {
+      // PRIMARY RESTRICTION: Only allow players to move their own color
+      if (playerColor) {
+        // Find the selected piece
+        let selectedPiece: { type: PieceType, color: PieceColor } | null = null;
+        
+        for (const row of boardState.squares) {
+          for (const square of row) {
+            if (square.position === selectedSquare && square.piece) {
+              selectedPiece = square.piece;
+              break;
+            }
+          }
+        }
+        
+        // If we found a piece and it's not the player's color, cancel selection
+        if (selectedPiece && selectedPiece.color !== playerColor) {
+          console.log(`Cannot move ${selectedPiece.color} pieces when you are ${playerColor}`);
+          setSelectedSquare(null);
+          setLegalMoves([]);
+          return;
+        }
+      }
+      
       // Check if the clicked square is in legal moves
       if (legalMoves.includes(position)) {
         // Find the piece that's moving
@@ -204,6 +311,14 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange }: ChessBoardPr
         }
         
         if (movingPiece) {
+          // Double check the moving piece belongs to current player
+          if (movingPiece.color !== currentPlayer) {
+            console.log(`Cannot move ${movingPiece.color} pieces on ${currentPlayer}'s turn`);
+            setSelectedSquare(null);
+            setLegalMoves([]);
+            return;
+          }
+          
           // Check if this move would be a pawn promotion
           if (isPawnPromotion(selectedSquare, position, movingPiece)) {
             // Show promotion selector
@@ -258,23 +373,49 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange }: ChessBoardPr
       setSelectedSquare(null);
       setLegalMoves([]);
     } 
-    // If no square was selected and the player clicked on their own piece
-    else if (piece && piece.color === currentPlayer) {
-      setSelectedSquare(position);
-      
-      // Calculate legal moves for this piece
-      const legalDestinations: string[] = [];
-      
-      // Check all squares on the board
-      for (const row of boardState.squares) {
-        for (const square of row) {
-          if (isLegalMove(position, square.position)) {
-            legalDestinations.push(square.position);
-          }
-        }
+    // If no square was selected and the player clicked on a piece (selecting a piece)
+    else if (piece) {
+      // PRIMARY RESTRICTION: If playerColor is set, only allow selection of that color's pieces
+      if (playerColor && piece.color !== playerColor) {
+        console.log(`Cannot select ${piece.color} pieces when you are ${playerColor}`);
+        return;
       }
       
-      setLegalMoves(legalDestinations);
+      // Only allow selection of pieces that match the current turn
+      if (piece.color !== currentPlayer) {
+        console.log(`Cannot select ${piece.color} pieces on ${currentPlayer}'s turn`);
+        return;
+      }
+      
+      // Set the selected square and calculate legal moves
+      setSelectedSquare(position);
+      
+      // Get all legal moves for this piece directly from chess.js
+      try {
+        // Use standard chess notation for the position
+        const legalDestinations: string[] = [];
+        
+        // Get all legal moves for the current piece
+        const chess = getChessEngine();
+        const legalMoves = chess.moves({
+          square: position as any,
+          verbose: true
+        }) as any[];
+        
+        // Extract the destination squares
+        if (legalMoves && legalMoves.length > 0) {
+          for (const move of legalMoves) {
+            if (move && move.to) {
+              legalDestinations.push(move.to);
+            }
+          }
+        }
+        
+        setLegalMoves(legalDestinations);
+      } catch (err) {
+        console.error("Error calculating legal moves:", err);
+        setLegalMoves([]);
+      }
     }
   };
 

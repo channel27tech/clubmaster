@@ -58,16 +58,16 @@ const PlayerInfo: React.FC<PlayerInfoProps> = ({
       // Sort by value (higher value first)
       return pieceValues[b.type] - pieceValues[a.type];
     });
-    
+   
     // Remove the "No pieces" message - the area will remain blank until pieces are captured
     if (sortedCapturedPieces.length === 0) {
       return null;
     }
-
+ 
     return (
-      <div className="flex flex-wrap gap-1">
+      <div className="flex flex-wrap gap-2 justify-center">
         {sortedCapturedPieces.map((piece) => (
-          <div key={piece.id} className="w-5 h-5">
+          <div key={piece.id} className="w-6 h-6">
             <ChessPiece type={piece.type} color={piece.color} />
           </div>
         ))}

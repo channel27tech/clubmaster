@@ -12,6 +12,10 @@ import { MatchmakingService } from '../game/matchmaking.service';
 import { GameManagerService } from '../game/game-manager.service';
 import { GameEndService } from '../game/game-end/game-end.service';
 import { RatingService } from '../game/rating/rating.service';
+<<<<<<< HEAD
+import { DisconnectionService } from '../game/disconnection.service';
+=======
+>>>>>>> main
 
 interface MatchmakingOptions {
   gameMode?: string;
@@ -40,6 +44,10 @@ export class GameGateway
     private readonly gameManagerService: GameManagerService,
     private readonly gameEndService: GameEndService,
     private readonly ratingService: RatingService,
+<<<<<<< HEAD
+    private readonly disconnectionService: DisconnectionService
+=======
+>>>>>>> main
   ) {}
 
   /**
@@ -54,6 +62,7 @@ export class GameGateway
    */
   handleConnection(client: Socket) {
     this.logger.log(`Client connected: ${client.id}`);
+    
     // Send a welcome message to the connected client
     client.emit('connectionEstablished', {
       message: 'Successfully connected to Chess Game server',
@@ -72,6 +81,12 @@ export class GameGateway
     
     // Register disconnection with game manager for ongoing games
     this.gameManagerService.registerDisconnection(client.id, this.server);
+<<<<<<< HEAD
+    
+    // Handle disconnection for active games
+    this.disconnectionService.handlePlayerDisconnect(this.server, client.id);
+=======
+>>>>>>> main
   }
 
   /**
@@ -415,7 +430,48 @@ export class GameGateway
   }
 
   /**
+<<<<<<< HEAD
+   * Handle a player rejoining a game after reconnection
+   */
+  @SubscribeMessage('rejoin_game')
+  handleRejoinGame(client: Socket, payload: { gameId: string, playerId: string }) {
+    this.logger.log(
+      `Client ${client.id} requested to rejoin game ${payload.gameId} as player ${payload.playerId}`,
+    );
+    
+    try {
+      // Handle player reconnection
+      this.disconnectionService.handlePlayerReconnect(this.server, payload.playerId, client.id);
+      
+      // Add the client to the game room
+      client.join(payload.gameId);
+      
+      return {
+        event: 'rejoinGameResponse',
+        data: {
+          success: true,
+          message: 'Successfully rejoined the game',
+        },
+      };
+    } catch (error) {
+      this.logger.error(`Error rejoining game for client ${client.id}:`, error);
+      
+      return {
+        event: 'rejoinGameResponse',
+        data: {
+          success: false,
+          message: 'Failed to rejoin game',
+          error: error.message,
+        },
+      };
+    }
+  }
+
+  /**
+   * Handle a client request to abort a game
+=======
    * Handle a client request to abort a game (before first move)
+>>>>>>> main
    */
   @SubscribeMessage('abort_game')
   handleAbortGame(client: Socket, payload: { gameId: string }) {
@@ -423,6 +479,10 @@ export class GameGateway
       `Client ${client.id} requested to abort game ${payload.gameId}`,
     );
     
+<<<<<<< HEAD
+    // First, check with the game manager if the game can be aborted
+=======
+>>>>>>> main
     const game = this.gameManagerService.getGame(payload.gameId);
     
     if (!game) {
@@ -446,6 +506,73 @@ export class GameGateway
       };
     }
     
+<<<<<<< HEAD
+    try {
+      // Validate and handle the abort request with the disconnection service
+      const success = this.disconnectionService.handleAbortRequest(
+        this.server,
+        client.id,
+        payload.gameId
+      );
+      
+      // Determine the color of the player aborting
+      const isWhitePlayer = game.whitePlayer.socketId === client.id;
+      
+      if (success) {
+        // Emit game aborted event to all players
+        this.server.to(payload.gameId).emit('game_aborted', {
+          gameId: payload.gameId,
+          playerId: client.id,
+          playerColor: isWhitePlayer ? 'white' : 'black',
+          reason: 'Game aborted by player before first move'
+        });
+      }
+      
+      return {
+        event: 'abortGameResponse',
+        data: {
+          success,
+          message: success ? 'Game successfully aborted' : 'Unable to abort game',
+        },
+      };
+    } catch (error) {
+      this.logger.error(`Error aborting game for client ${client.id}:`, error);
+      
+      return {
+        event: 'abortGameResponse',
+        data: {
+          success: false,
+          message: 'Failed to abort game',
+          error: error.message,
+        },
+      };
+    }
+  }
+
+  /**
+   * Mark that white has made the first move, preventing further abort requests
+   */
+  @SubscribeMessage('move_made')
+  handleMoveMade(client: Socket, payload: { gameId: string, from: string, to: string, player: string, notation: string }) {
+    this.logger.log(
+      `Move made in game ${payload.gameId} by ${payload.player}: ${payload.notation}`,
+    );
+    
+    // If this is the first move by white, update the game state
+    if (payload.player === 'white') {
+      this.disconnectionService.markWhiteFirstMove(payload.gameId);
+    }
+    
+    // Broadcast the move to all players in the game
+    this.server.to(payload.gameId).emit('move_made', {
+      gameId: payload.gameId,
+      from: payload.from,
+      to: payload.to,
+      player: payload.player,
+      notation: payload.notation,
+      isCapture: payload.notation.includes('x'),
+      isCheck: payload.notation.includes('+') || payload.notation.includes('#'),
+=======
     // Determine the color of the player aborting
     const isWhitePlayer = game.whitePlayer.socketId === client.id;
     
@@ -458,13 +585,152 @@ export class GameGateway
       gameId: payload.gameId,
       playerId: client.id,
       playerColor: isWhitePlayer ? 'white' : 'black',
+>>>>>>> main
     });
     
     return {
-      event: 'gameAborted',
+      event: 'moveMadeResponse',
       data: {
         success: true,
-        message: 'Game aborted',
+        message: 'Move broadcast to all players',
+      },
+    };
+  }
+
+  /**
+   * Handle a player joining a game room
+   */
+  @SubscribeMessage('join_game_room')
+  handleJoinGameRoom(client: Socket, payload: { gameId: string }) {
+    this.logger.log(
+      `Client ${client.id} is joining game room ${payload.gameId}`,
+    );
+    
+    // Add the client to the game room
+    client.join(payload.gameId);
+    
+    // Notify the client that they've joined
+    client.emit('joined_game_room', {
+      gameId: payload.gameId,
+      playerId: client.id
+    });
+    
+    return {
+      event: 'joinGameRoomResponse',
+      data: {
+        success: true,
+        message: 'Successfully joined the game room',
+      },
+    };
+  }
+  
+  /**
+   * Handle a timeout from a player
+   */
+  @SubscribeMessage('report_timeout')
+  handleReportTimeout(client: Socket, payload: { gameId: string, color: 'w' | 'b' }) {
+    this.logger.log(
+      `Timeout reported for ${payload.color === 'w' ? 'white' : 'black'} in game ${payload.gameId}`,
+    );
+    
+    // Verify reporter is in the game
+    const game = this.gameManagerService.getGame(payload.gameId);
+    
+    if (!game) {
+      return {
+        event: 'timeoutReported',
+        data: {
+          success: false,
+          message: 'Game not found',
+        },
+      };
+    }
+    
+    // Verify the reporter is a player in the game
+    const isPlayerInGame = 
+      game.whitePlayer.socketId === client.id || 
+      game.blackPlayer.socketId === client.id;
+    
+    if (!isPlayerInGame) {
+      return {
+        event: 'timeoutReported',
+        data: {
+          success: false,
+          message: 'Only players can report timeouts',
+        },
+      };
+    }
+    
+    // Register the timeout
+    const gameResult = this.gameManagerService.registerTimeout(
+      payload.gameId,
+      payload.color,
+      this.server,
+    );
+    
+    if (gameResult) {
+      return {
+        event: 'timeoutReported',
+        data: {
+          success: true,
+          message: `${payload.color === 'w' ? 'White' : 'Black'} player timeout registered`,
+          result: gameResult,
+        },
+      };
+    }
+    
+    return {
+      event: 'timeoutReported',
+      data: {
+        success: false,
+        message: 'Failed to register timeout',
+      },
+    };
+  }
+  
+  /**
+   * Handle a player claiming a draw (e.g., for insufficent material)
+   */
+  @SubscribeMessage('claim_draw')
+  handleClaimDraw(client: Socket, payload: { gameId: string }) {
+    this.logger.log(
+      `Client ${client.id} claimed a draw in game ${payload.gameId}`
+    );
+    
+    const game = this.gameManagerService.getGame(payload.gameId);
+    
+    if (!game) {
+      return {
+        event: 'drawClaimed',
+        data: {
+          success: false,
+          message: 'Game not found',
+        },
+      };
+    }
+    
+    // Check if the game has actually ended in a draw
+    const gameResult = this.gameManagerService.checkGameEnd(
+      payload.gameId,
+      this.server
+    );
+    
+    if (gameResult && gameResult.result === 'draw') {
+      return {
+        event: 'drawClaimed',
+        data: {
+          success: true,
+          message: 'Draw claim valid',
+          result: gameResult,
+        },
+      };
+    }
+    
+    return {
+      event: 'drawClaimed',
+      data: {
+        success: false,
+        message: 'Invalid draw claim',
       },
     };
   }

@@ -34,8 +34,33 @@ const MatchmakingManager: React.FC<MatchmakingManagerProps> = ({
   useEffect(() => {
     // Setup socket listeners when component mounts
     const handleMatchFound = (gameData: any) => {
-      console.log('Match found:', gameData);
+      console.log('Match found with gameData:', gameData);
       setIsMatchmaking(false);
+      
+      // Store playerColor in localStorage for use on the game page
+      if (gameData && gameData.playerColor) {
+        // Make sure playerColor is a valid value
+        const color = gameData.playerColor.toLowerCase();
+        if (color === 'white' || color === 'black') {
+          localStorage.setItem('playerColor', color);
+          console.log('Stored player color in localStorage:', color);
+        } else {
+          console.error('Invalid player color received:', gameData.playerColor);
+        }
+      } else {
+        console.warn('No playerColor in gameData');
+      }
+      
+      // Store timeControl in localStorage
+      if (gameData && gameData.timeControl) {
+        localStorage.setItem('timeControl', gameData.timeControl);
+        console.log('Stored time control in localStorage:', gameData.timeControl);
+      } else {
+        console.warn('No timeControl in gameData');
+        // Use the current timeControl as fallback
+        localStorage.setItem('timeControl', `${timeControl}+0`);
+        console.log('Stored fallback time control in localStorage:', `${timeControl}+0`);
+      }
       
       // Navigate to the game screen with the game ID
       if (gameData && gameData.gameId) {
@@ -74,20 +99,49 @@ const MatchmakingManager: React.FC<MatchmakingManagerProps> = ({
     setSide(playSide);
     
     try {
-      // Get socket but don't check connection
-      const socket = socketService.getSocket();
-      console.log('Socket connection status:', socketService.isConnected());
+      // Format time control as the backend expects: "5+0" format
+      const timeControlString = `${time}+0`;
       
-      // Start matchmaking anyway
-      socketService.startMatchmaking({
-        gameMode: mode,
-        timeControl: `${time}+0`,
-        rated: true,
-        preferredSide: playSide
-      });
+      // Get or initialize socket
+      const socket = socketService.getSocket();
+      const isConnected = socketService.isConnected();
+      console.log('Socket connection status:', isConnected);
+      
+      if (!isConnected) {
+        console.log("Socket not connected, attempting to connect...");
+        // Try to initialize socket connection
+        socket.connect();
+        
+        // Set a timeout to check if connection succeeded
+        setTimeout(() => {
+          if (socketService.isConnected()) {
+            console.log("Socket connected after retry");
+            // Now that we're connected, start matchmaking
+            socketService.startMatchmaking({
+              gameMode: mode,
+              timeControl: timeControlString,
+              rated: true,
+              preferredSide: playSide
+            });
+          } else {
+            console.error("Socket connection failed after retry");
+            setError("Unable to connect to game server. Please try again.");
+            setIsMatchmaking(false);
+          }
+        }, 1000);
+      } else {
+        // Socket is already connected, start matchmaking immediately
+        socketService.startMatchmaking({
+          gameMode: mode,
+          timeControl: timeControlString,
+          rated: true,
+          preferredSide: playSide
+        });
+      }
     } catch (err) {
       console.error('Error in startMatchmaking:', err);
-      // Still keep matchmaking status active for UI
+      setError("An error occurred while starting matchmaking");
+      setIsMatchmaking(false);
     }
   };
   

@@ -65,7 +65,7 @@ export default function Home() {
       // This allows the player to see the final board state before showing the result
       setTimeout(() => {
         setShowGameResult(true);
-      }, 100000);
+      }, 5000);
     }
   }, [gameEnded, gameEndData]);
 
@@ -89,7 +89,7 @@ export default function Home() {
           opponentRatingChange: -12
         });
         setShowGameResult(true);
-      }, 100000);
+      }, 5000);
     }
     
     // Clean up timer when component unmounts or dependencies change
@@ -119,7 +119,7 @@ export default function Home() {
         <div className="mb-4">
           <MoveTracker />
         </div>
-        <div className="flex-grow flex flex-col items-center justify-center">
+        <div className="flex-grow flex flex-col items-center justify-center py-8">
           <div className="w-full max-w-md mx-auto px-4">
             <ChessBoardWrapper />
           </div>
