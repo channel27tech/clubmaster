@@ -116,7 +116,9 @@ export default function Home() {
       {/* Main content always renders - will be visible through blurred overlays */}
       <div className="relative w-full min-h-screen">
         <Header />
-        <MoveTracker />
+        <div className="mb-4">
+          <MoveTracker />
+        </div>
         <div className="flex-grow flex flex-col items-center justify-center py-8">
           <div className="w-full max-w-md mx-auto">
             <ChessBoardWrapper />

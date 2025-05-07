@@ -8,18 +8,19 @@ type PieceColor = 'white' | 'black';
 interface ChessPieceProps {
   type: PieceType;
   color: PieceColor;
+  large?: boolean; // Add option for larger pieces (in promotion selector)
 }
 
-const ChessPiece: React.FC<ChessPieceProps> = ({ type, color }) => {
+const ChessPiece: React.FC<ChessPieceProps> = ({ type, color, large = false }) => {
   // Use inline SVGs with custom colors instead of external files
   return (
     <div className="w-full h-full flex items-center justify-center">
-      <div className="w-4/5 h-4/5 relative">
+      <div className={large ? "w-full h-full" : "w-4/5 h-4/5"} style={{ maxWidth: large ? '100%' : '85%' }}>
         <svg
           viewBox="0 0 45 45"
           width="100%"
           height="100%"
-          className="absolute inset-0"
+          className={`${large ? 'drop-shadow-md' : ''}`}
         >
           {renderPieceSVG(type, color)}
         </svg>

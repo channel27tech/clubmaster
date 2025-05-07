@@ -124,7 +124,7 @@ const MoveTracker: React.FC = () => {
     <div className="w-full bg-[#1A1D1D] border-b border-black">
       <div 
         ref={scrollContainerRef}
-        className="flex items-center h-[25px] overflow-x-auto whitespace-nowrap touch-pan-x no-scrollbar"
+        className="flex items-center h-[28px] overflow-x-auto whitespace-nowrap touch-pan-x no-scrollbar"
         style={{ scrollbarWidth: 'none' }}
       >
         {formattedMoves.map((move) => (
