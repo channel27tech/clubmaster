@@ -40,6 +40,14 @@ export const isLegalMove = (from: string, to: string, promotion?: PieceType): bo
   const chess = getChessEngine();
   
   try {
+    // Get the piece at the 'from' position to check if it's a pawn that might need promotion
+    const piece = chess.get(from as any);
+    
+    // Check if this is a potential pawn promotion move
+    const isPawnPromotionMove = 
+      piece?.type === 'p' && // It's a pawn
+      ((piece.color === 'w' && to[1] === '8') || (piece.color === 'b' && to[1] === '1')); // Moving to the last rank
+    
     // Get legal moves as strings
     const moves = chess.moves({ square: from as any, verbose: false });
     
@@ -66,6 +74,25 @@ export const isLegalMove = (from: string, to: string, promotion?: PieceType): bo
       }
     }
     
+    // If this is a pawn promotion move but no promotion piece specified, 
+    // we'll check legality assuming queen promotion
+    if (isPawnPromotionMove && !promotion) {
+      // For checking legal moves, if no promotion is specified, default to 'queen'
+      // This allows showing the move as legal in the UI, and then prompting for the promotion piece
+      console.log(`Potential pawn promotion detected: ${from} -> ${to}`);
+      const moveOptions: { from: string; to: string; promotion?: string } = { 
+        from, 
+        to,
+        promotion: 'q' // Default to queen for legality check
+      };
+      
+      const result = chess.move(moveOptions);
+      if (result) {
+        chess.undo(); // Revert the move after checking
+        return true;
+      }
+    }
+    
     // No match found
     return false;
   } catch (error) {
@@ -79,14 +106,35 @@ export const makeMove = (from: string, to: string, promotion?: PieceType): boole
   const chess = getChessEngine();
   
   try {
+    // Get the piece at the 'from' position to check if it's a pawn that might need promotion
+    const piece = chess.get(from as any);
+    
+    // Check if this is a pawn promotion move
+    const isPawnPromotionMove = 
+      piece?.type === 'p' && // It's a pawn
+      ((piece.color === 'w' && to[1] === '8') || (piece.color === 'b' && to[1] === '1')); // Moving to the last rank
+    
+    // If this is a pawn promotion move but no promotion piece specified, we can't complete the move
+    if (isPawnPromotionMove && !promotion) {
+      console.warn('Attempted to make a pawn promotion move without specifying the promotion piece');
+      return false;
+    }
+    
     const moveOptions: { from: string; to: string; promotion?: string } = { from, to };
     
     // Add promotion if specified
     if (promotion) {
       moveOptions.promotion = pieceTypeMapping[promotion];
+      console.log(`Making promotion move: ${from} -> ${to}, promoting to ${promotion}`);
     }
     
     const result = chess.move(moveOptions);
+    
+    // Log for debugging
+    if (result) {
+      console.log(`Move made: ${result.san}`);
+    }
+    
     return result !== null;
   } catch (error) {
     console.error('Error making move:', error);
@@ -184,7 +232,8 @@ export const getGameStatus = () => {
 export const loadPgn = (pgn: string): boolean => {
   const chess = getChessEngine();
   try {
-    return chess.loadPgn(pgn);
+    chess.loadPgn(pgn);
+    return true; // Return true on success
   } catch (error) {
     console.error('Error loading PGN:', error);
     return false;

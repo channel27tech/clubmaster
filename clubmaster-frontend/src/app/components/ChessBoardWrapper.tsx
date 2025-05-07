@@ -8,9 +8,10 @@ import { player1, player2 } from '../utils/mockData';
 import { MoveHistoryState } from '../utils/moveHistory';
 import DrawOfferNotification from './DrawOfferNotification';
 import { useSocket } from '../../contexts/SocketContext';
-import { getGameStatus } from '../utils/chessEngine';
+import { getGameStatus, getChessEngine } from '../utils/chessEngine';
 import { useSound } from '../../contexts/SoundContext';
 import { playSound, preloadSoundEffects } from '../utils/soundEffects';
+import { CapturedPiece } from '../utils/types';
 import DisconnectionNotification from './DisconnectionNotification';
 
 // Use dynamic import in a client component
@@ -59,6 +60,10 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   const [moveHistory, setMoveHistory] = useState<MoveHistoryState | null>(null);
   const { socket } = useSocket();
   const { soundEnabled } = useSound();
+  
+  // Captured pieces state
+  const [capturedByWhite, setCapturedByWhite] = useState<CapturedPiece[]>([]);
+  const [capturedByBlack, setCapturedByBlack] = useState<CapturedPiece[]>([]);
   
   // Game state
   const [gameState, setGameState] = useState({
@@ -119,13 +124,135 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   useEffect(() => {
     preloadSoundEffects(soundEnabled);
   }, [soundEnabled]);
+  
+  // Track captured pieces
+  useEffect(() => {
+    if (!moveHistory) return;
+    
+    const updateCapturedPieces = () => {
+      try {
+        // Get the current position from Chess.js
+        const chess = getChessEngine();
+        const board = chess.board();
+        
+        // Count pieces on the board
+        const piecesOnBoard = {
+          'wp': 0, 'wn': 0, 'wb': 0, 'wr': 0, 'wq': 0, 'wk': 0,
+          'bp': 0, 'bn': 0, 'bb': 0, 'br': 0, 'bq': 0, 'bk': 0
+        };
+        
+        // Count pieces on the board
+        for (let row = 0; row < 8; row++) {
+          for (let col = 0; col < 8; col++) {
+            const piece = board[row][col];
+            if (piece) {
+              const key = piece.color + piece.type;
+              piecesOnBoard[key as keyof typeof piecesOnBoard]++;
+            }
+          }
+        }
+        
+        // Initial pieces counts
+        const initialPieces = {
+          'wp': 8, 'wn': 2, 'wb': 2, 'wr': 2, 'wq': 1, 'wk': 1,
+          'bp': 8, 'bn': 2, 'bb': 2, 'br': 2, 'bq': 1, 'bk': 1
+        };
+        
+        // Adjust for promotions - track all pawn promotions from move history
+        const promotions: { fromColor: string, toType: string }[] = [];
+        if (moveHistory.moves) {
+          moveHistory.moves.forEach(move => {
+            if (move.promotion) {
+              const fromColor = move.piece.color === 'white' ? 'w' : 'b';
+              const toType = move.promotion === 'queen' ? 'q' : 
+                             move.promotion === 'rook' ? 'r' : 
+                             move.promotion === 'bishop' ? 'b' : 
+                             move.promotion === 'knight' ? 'n' : '';
+              
+              if (toType) {
+                promotions.push({ fromColor, toType });
+              }
+            }
+          });
+        }
+        
+        // Adjust initial counts based on promotions
+        promotions.forEach(({ fromColor, toType }) => {
+          // Decrement pawn count
+          const pawnKey = `${fromColor}p` as keyof typeof initialPieces;
+          initialPieces[pawnKey]--;
+          
+          // Increment promoted piece count
+          const pieceKey = `${fromColor}${toType}` as keyof typeof initialPieces;
+          initialPieces[pieceKey]++;
+        });
+        
+        // Calculate captured pieces
+        const newCapturedByWhite: CapturedPiece[] = [];
+        const newCapturedByBlack: CapturedPiece[] = [];
+        
+        // Map from chess.js piece notation to our piece types
+        const pieceTypeMap: Record<string, 'pawn' | 'knight' | 'bishop' | 'rook' | 'queen' | 'king'> = {
+          'p': 'pawn',
+          'n': 'knight',
+          'b': 'bishop',
+          'r': 'rook',
+          'q': 'queen',
+          'k': 'king'
+        };
+        
+        // Calculate pieces captured by white (black pieces missing from board)
+        Object.entries(initialPieces)
+          .filter(([key]) => key.startsWith('b')) // Only black pieces
+          .forEach(([key, count]) => {
+            const pieceType = key[1];
+            const onBoardCount = piecesOnBoard[key as keyof typeof piecesOnBoard];
+            const capturedCount = count - onBoardCount;
+            
+            for (let i = 0; i < capturedCount; i++) {
+              newCapturedByWhite.push({
+                type: pieceTypeMap[pieceType],
+                color: 'black',
+                id: `black-${pieceType}-${i}-${Date.now()}`
+              });
+            }
+          });
+        
+        // Calculate pieces captured by black (white pieces missing from board)
+        Object.entries(initialPieces)
+          .filter(([key]) => key.startsWith('w')) // Only white pieces
+          .forEach(([key, count]) => {
+            const pieceType = key[1];
+            const onBoardCount = piecesOnBoard[key as keyof typeof piecesOnBoard];
+            const capturedCount = count - onBoardCount;
+            
+            for (let i = 0; i < capturedCount; i++) {
+              newCapturedByBlack.push({
+                type: pieceTypeMap[pieceType],
+                color: 'white',
+                id: `white-${pieceType}-${i}-${Date.now()}`
+              });
+            }
+          });
+        
+        // Update state
+        setCapturedByWhite(newCapturedByWhite);
+        setCapturedByBlack(newCapturedByBlack);
+      } catch (error) {
+        console.error('Error updating captured pieces:', error);
+      }
+    };
+    
+    // Update captured pieces whenever move history changes
+    updateCapturedPieces();
+  }, [moveHistory]);
 
   // Socket event listeners
   useEffect(() => {
     if (!socket) return;
 
     // Listen for draw offers
-    socket.on('offer_draw', ({ player }) => {
+    socket.on('offer_draw', () => {
       setDrawOfferReceived(true);
       
       // Play notification sound
@@ -532,12 +659,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   }, [socket, gameRoomId]);
 
   return (
-    <div className="flex flex-col w-full h-full rounded-none sm:rounded-xl overflow-hidden flex-shrink-0" style={{ backgroundColor: '#4A7C59' }}>
-      {/* DEBUG INFO */}
-      <div className="p-2 bg-yellow-100 text-black text-xs">
-        <div>Player: {playerColor || 'unknown'} | Time: {gameState.timeControl} ({gameTimeInSeconds} seconds)</div>
-      </div>
-      
+    <div className="flex flex-col w-full h-full rounded-t-xl rounded-b-none sm:rounded-t-xl sm:rounded-b-none overflow-hidden flex-shrink-0" style={{ backgroundColor: '#4A7C59' }}>
       {/* Draw Offer Notification */}
       <DrawOfferNotification
         isOpen={drawOfferReceived}
@@ -565,14 +687,14 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
               rating={player1.rating}
               clubAffiliation={player1.clubAffiliation}
               isGuest={player1.isGuest}
-              capturedPieces={whiteCapturedPieces}
+              capturedPieces={capturedByWhite || whiteCapturedPieces}
             />
             {/* Top player timer (White) */}
             <div className="mr-2">
               <GameClock 
                 timeInSeconds={gameTimeInSeconds}
                 isActive={activePlayer === 'white'}
-                isDarkTheme={true}
+                isDarkTheme={false}
                 onTimeOut={() => handleTimeOut('white')}
                 playLowTimeSound={() => playSound('TIME_LOW', soundEnabled)}
               />
@@ -594,7 +716,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
               rating={player2.rating}
               clubAffiliation={player2.clubAffiliation}
               isGuest={player2.isGuest}
-              capturedPieces={blackCapturedPieces}
+              capturedPieces={capturedByBlack || blackCapturedPieces}
             />
             {/* Bottom player timer (Black) */}
             <div className="mr-2">
@@ -618,14 +740,14 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
               rating={player2.rating}
               clubAffiliation={player2.clubAffiliation}
               isGuest={player2.isGuest}
-              capturedPieces={blackCapturedPieces}
+              capturedPieces={capturedByBlack || blackCapturedPieces}
             />
             {/* Top player timer (Black) */}
             <div className="mr-2">
               <GameClock 
                 timeInSeconds={gameTimeInSeconds}
                 isActive={activePlayer === 'black'}
-                isDarkTheme={true}
+                isDarkTheme={false}
                 onTimeOut={() => handleTimeOut('black')}
                 playLowTimeSound={() => playSound('TIME_LOW', soundEnabled)}
               />
@@ -647,7 +769,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
               rating={player1.rating}
               clubAffiliation={player1.clubAffiliation}
               isGuest={player1.isGuest}
-              capturedPieces={whiteCapturedPieces}
+              capturedPieces={capturedByWhite || whiteCapturedPieces}
             />
             {/* Bottom player timer (White) */}
             <div className="mr-2">
