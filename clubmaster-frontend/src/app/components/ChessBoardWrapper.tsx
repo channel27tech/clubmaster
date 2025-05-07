@@ -476,7 +476,7 @@ export default function ChessBoardWrapper() {
       )}
       
       {/* Player 1 Info (Top) with Timer */}
-      <div className="flex items-center justify-between mb-4 px-2">
+      <div className="flex justify-between items-center mb-2 mt-16">
         <PlayerInfo 
           position="top"
           username={player1.username}
@@ -484,6 +484,7 @@ export default function ChessBoardWrapper() {
           clubAffiliation={player1.clubAffiliation}
           isGuest={player1.isGuest}
           capturedPieces={capturedByBlack}
+          isActive={activePlayer === 'black'}
         />
         {/* Top player timer (Black) */}
         <div>
@@ -512,6 +513,7 @@ export default function ChessBoardWrapper() {
           clubAffiliation={player2.clubAffiliation}
           isGuest={player2.isGuest}
           capturedPieces={capturedByWhite}
+          isActive={activePlayer === 'white'}
         />
         {/* Bottom player timer (White) */}
         <div>
