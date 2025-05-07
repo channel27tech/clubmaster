@@ -349,7 +349,7 @@ export default function ChessBoardWrapper() {
       )}
       
       {/* Player 1 Info (Top) with Timer */}
-      <div className="flex justify-between items-center mb-2">
+      <div className="flex justify-between items-center mb-2 mt-16">
         <PlayerInfo 
           position="top"
           username={player1.username}
@@ -357,12 +357,13 @@ export default function ChessBoardWrapper() {
           clubAffiliation={player1.clubAffiliation}
           isGuest={player1.isGuest}
           capturedPieces={player1.capturedPieces}
+          isActive={!gameState.isWhiteTurn}
         />
         {/* Top player timer (Black) */}
         <div className="mr-2">
           <GameClock 
             timeInSeconds={gameTimeInSeconds}
-            isActive={activePlayer === 'black'}
+            isActive={false}
             isDarkTheme={false}
             onTimeOut={() => handleTimeOut('black')}
             playLowTimeSound={() => playSound('TIME_LOW', soundEnabled)}
@@ -385,12 +386,13 @@ export default function ChessBoardWrapper() {
           clubAffiliation={player2.clubAffiliation}
           isGuest={player2.isGuest}
           capturedPieces={player2.capturedPieces}
+          isActive={gameState.isWhiteTurn}
         />
         {/* Bottom player timer (White) */}
         <div className="mr-2">
           <GameClock 
             timeInSeconds={gameTimeInSeconds}
-            isActive={activePlayer === 'white'}
+            isActive={true}
             isDarkTheme={true}
             onTimeOut={() => handleTimeOut('white')}
             playLowTimeSound={() => playSound('TIME_LOW', soundEnabled)}

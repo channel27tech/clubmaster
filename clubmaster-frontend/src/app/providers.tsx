@@ -34,7 +34,7 @@ export const Providers: React.FC<ProvidersProps> = ({ children }) => {
   return (
     <SocketProvider>
       <SoundProvider userId={userId}>
-        {children}
+      {children}
       </SoundProvider>
     </SocketProvider>
   );

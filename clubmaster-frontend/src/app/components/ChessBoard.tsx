@@ -205,6 +205,13 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange }: ChessBoardPr
 
   return (
     <div className="w-full mx-auto">
+      {/* Turn indicator - shows which player's turn it is */}
+      {/* <div className="w-full mb-2 flex justify-center">
+        <div className={`px-3 py-1 rounded-md font-semibold ${currentPlayer === 'white' ? 'bg-white text-black' : 'bg-black text-white'}`}>
+          {currentPlayer === 'white' ? 'White' : 'Black'}'s Turn
+        </div>
+      </div> */} 
+      
       <div className="aspect-square grid grid-cols-8 grid-rows-8 border-8 rounded-sm border-[#333939]">
         {displayBoard.map((row, rowIndex) => (
           row.map((square, colIndex) => {
