@@ -120,7 +120,7 @@ export default function Home() {
           <MoveTracker />
         </div>
         <div className="flex-grow flex flex-col items-center justify-center py-8">
-          <div className="w-full max-w-md mx-auto">
+          <div className="w-full max-w-md mx-auto px-4">
             <ChessBoardWrapper />
           </div>
         </div>

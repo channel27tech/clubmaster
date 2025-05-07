@@ -48,6 +48,15 @@ export const isLegalMove = (from: string, to: string, promotion?: PieceType): bo
       piece?.type === 'p' && // It's a pawn
       ((piece.color === 'w' && to[1] === '8') || (piece.color === 'b' && to[1] === '1')); // Moving to the last rank
     
+    if (isPawnPromotionMove && !promotion) {
+      // For checking legal moves, if no promotion is specified, default to 'queen'
+      // This allows showing the move as legal in the UI, and then prompting for the promotion piece
+      console.log(`Potential pawn promotion detected: ${from} -> ${to}`);
+    }
+    
+    // chess.js will throw an error for illegal moves
+    const moveOptions: { from: string; to: string; promotion?: string } = { from, to };
+    
     // Get legal moves as strings
     const moves = chess.moves({ square: from as any, verbose: false });
     
@@ -61,11 +70,13 @@ export const isLegalMove = (from: string, to: string, promotion?: PieceType): bo
       return true;
     }
     
-    // Check for capture moves which might be in the form 'exd5'
-    const captureMove = `${from.charAt(0)}x${to}`;
-    if (moves.includes(captureMove)) {
-      return true;
+    // If this is a pawn promotion move but no promotion piece specified, 
+    // we'll check legality assuming queen promotion
+    if (isPawnPromotionMove && !promotion) {
+      moveOptions.promotion = 'q'; // Default to queen for legality check
     }
+    
+    const result = chess.move(moveOptions);
     
     // For piece moves, try checking if any move ends with the destination
     for (const move of moves) {
