@@ -526,17 +526,19 @@ export default function ChessBoardWrapper() {
       </div>
       
       {/* Move Controls */}
-      <MoveControls 
-        onBack={handleBackClick}
-        onForward={handleForwardClick}
-        canGoBack={canGoBack}
-        canGoForward={canGoForward}
-        gameId={gameId}
-        gameState={gameState}
-        onResign={handleResign}
-        onOfferDraw={handleOfferDraw}
-        onAbortGame={handleAbortGame}
-      />
+      <div className="mt-8">
+        <MoveControls 
+          onBack={handleBackClick}
+          onForward={handleForwardClick}
+          canGoBack={canGoBack}
+          canGoForward={canGoForward}
+          gameId={gameId}
+          gameState={gameState}
+          onResign={handleResign}
+          onOfferDraw={handleOfferDraw}
+          onAbortGame={handleAbortGame}
+        />
+      </div>
     </div>
   );
 } 
