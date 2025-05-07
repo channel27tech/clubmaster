@@ -44,9 +44,11 @@ export default function Home() {
           or it will be blurred in the background during matchmaking */}
       <div className="relative w-full">
         <Header />
-        <MoveTracker />
+        <div className="mb-4">
+          <MoveTracker />
+        </div>
         <div className="flex-grow flex flex-col items-center justify-center">
-          <div className="w-full max-w-md mx-auto">
+          <div className="w-full max-w-md mx-auto px-4">
             <ChessBoardWrapper />
           </div>
         </div>

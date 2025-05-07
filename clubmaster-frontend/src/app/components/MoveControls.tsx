@@ -122,7 +122,7 @@ const MoveControls: React.FC<MoveControlsProps> = ({
 
   return (
     <div className="relative">
-      <div className="w-full grid grid-cols-3 bg-[#333939] text-white py-3 mt-15">
+      <div className="w-full grid grid-cols-3 bg-[#333939] text-white py-3 mt-4">
         <button 
           ref={optionsButtonRef}
           className={`flex justify-center items-center ${isDisabled ? 'opacity-50' : ''}`}

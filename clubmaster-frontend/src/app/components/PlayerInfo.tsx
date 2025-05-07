@@ -103,7 +103,7 @@ const PlayerInfo: React.FC<PlayerInfoProps> = ({
   return (
     <div className="flex items-center">
       {/* Avatar on the left */}
-      <div className="w-9 h-9 rounded-sm overflow-hidden mr-2">
+      <div className="w-9 h-9 rounded-sm overflow-hidden mr-3">
         <div 
           className="w-full h-full flex items-center justify-center" 
           style={{ backgroundColor: colors.profile.bg }}
@@ -125,7 +125,7 @@ const PlayerInfo: React.FC<PlayerInfoProps> = ({
         </div>
         
         {/* Captured pieces */}
-        <div className="mt-1">
+        <div className="mt-0.5">
           {renderCapturedPieces()}
         </div>
       </div>

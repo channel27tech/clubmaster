@@ -326,7 +326,7 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange }: ChessBoardPr
     <div className="w-full mx-auto relative">
       <div 
         ref={boardRef}
-        className={`aspect-square grid grid-cols-8 grid-rows-8 border-8 rounded-sm border-[#333939] ${showPromotion ? 'filter blur-sm' : ''}`}
+        className={`aspect-square grid grid-cols-8 grid-rows-8 border-8 rounded-sm border-[#333939] shadow-md ${showPromotion ? 'filter blur-sm' : ''}`}
       >
         {displayBoard.map((row, rowIndex) => (
           row.map((square, colIndex) => {
