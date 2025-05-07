@@ -11,6 +11,7 @@ export interface CapturedPiece {
 
 // Player data interface
 export interface PlayerData {
+  id?: string; // Optional ID for player identification
   username: string;
   rating?: number;
   clubAffiliation?: string;

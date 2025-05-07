@@ -1,0 +1,28 @@
+// Example Jest test for DisconnectionNotification component
+test('DisconnectionNotification renders correctly for opponent disconnection', () => {
+  const { getByText } = render(
+    <DisconnectionNotification 
+      gameId="test-game"
+      playerId="player2"
+      reconnectTimeoutSeconds={120}
+    />
+  );
+  
+  expect(getByText('Opponent Disconnected')).toBeInTheDocument();
+  expect(getByText(/If they don't reconnect in time/)).toBeInTheDocument();
+});
+
+// Example Jest test for AbortButton visibility
+test('AbortButton is only visible before white moves', () => {
+  // Test with hasWhiteMoved=false
+  const { getByText, rerender } = render(
+    <AbortButton gameId="test" hasWhiteMoved={false} isPlayerWhite={true} />
+  );
+  
+  expect(getByText('Abort Game')).toBeInTheDocument();
+  
+  // Test with hasWhiteMoved=true
+  rerender(<AbortButton gameId="test" hasWhiteMoved={true} isPlayerWhite={true} />);
+  
+  expect(screen.queryByText('Abort Game')).not.toBeInTheDocument();
+}); 

@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useSocket } from '../../contexts/SocketContext';
+import * as socketService from '../../services/socketService';
 import Header from './Header';
 
 interface WaitingScreenProps {
@@ -13,7 +13,7 @@ interface WaitingScreenProps {
 }
 
 const WaitingScreen: React.FC<WaitingScreenProps> = ({ 
-  gameType = 'standard',
+  gameType = 'blitz',
   onCancel,
   timeInMinutes = 10,
   username = 'supi1981',
@@ -22,37 +22,36 @@ const WaitingScreen: React.FC<WaitingScreenProps> = ({
   const [waitTime, setWaitTime] = useState<number>(0);
   const [searchingText, setSearchingText] = useState<string>('Searching...');
   const router = useRouter();
-  const { socket, isConnected, joinGame, cancelMatchmaking } = useSocket();
+  const [connectionError, setConnectionError] = useState<string | null>(null);
 
-  // Set up automatic redirection after 5 seconds
+  // Effect to handle socket events for matchmaking
   useEffect(() => {
-    // Automatically redirect to main chess board after 5 seconds
-    const redirectTimer = setTimeout(() => {
-      console.log('Auto-redirecting to chess board after 5 seconds');
-      onCancel(); // Go back to the chessboard
-    }, 5000);
-    
-    // Clean up the timer when component unmounts
-    return () => clearTimeout(redirectTimer);
-  }, [onCancel]);
-
-  // Join matchmaking when component mounts
-  useEffect(() => {
-    if (isConnected) {
-      joinGame({ gameType });
-      
-      // Listen for successful match
-      socket?.on('gameFound', (gameData) => {
-        // Match found notification handling
-        console.log('Game found:', gameData);
-      });
-    }
-    
-    // Clean up listeners when component unmounts
-    return () => {
-      socket?.off('gameFound');
+    // Set up match found listener
+    const handleMatchFound = (gameData: any) => {
+      console.log('Match found:', gameData);
+      // Navigate to the game page
+      if (gameData && gameData.gameId) {
+        router.push(`/game/${gameData.gameId}`);
+      }
     };
-  }, [isConnected, joinGame, socket, gameType]);
+    
+    // Set up error handling
+    const handleMatchmakingError = (error: any) => {
+      console.error('Matchmaking error:', error);
+      setConnectionError(error.message || 'Connection error occurred');
+    };
+    
+    // Register listeners
+    socketService.onMatchFound(handleMatchFound);
+    socketService.onMatchmakingError(handleMatchmakingError);
+    
+    // Cleanup function
+    return () => {
+      // Remove listeners
+      socketService.offMatchFound(handleMatchFound);
+      socketService.offMatchmakingError(handleMatchmakingError);
+    };
+  }, [router]);
   
   // Increment wait time every second and update searching text animation
   useEffect(() => {
@@ -70,8 +69,15 @@ const WaitingScreen: React.FC<WaitingScreenProps> = ({
   }, []);
 
   const handleCancel = () => {
-    cancelMatchmaking();
+    socketService.cancelMatchmaking();
     onCancel();
+  };
+
+  // Format wait time as mm:ss
+  const formatWaitTime = () => {
+    const minutes = Math.floor(waitTime / 60);
+    const seconds = waitTime % 60;
+    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   };
 
   return (
@@ -93,17 +99,21 @@ const WaitingScreen: React.FC<WaitingScreenProps> = ({
             <div className="text-white bg-[#5E8C69] px-4 py-1 rounded-md font-mono text-lg">{timeInMinutes}:00</div>
           </div>
           
-          {/* Central area with the starting soon dialog always visible */}
+          {/* Central area with the waiting dialog */}
           <div className="flex-grow flex items-center justify-center">
             <div className="bg-[#2B3131] p-6 rounded-lg text-center shadow-xl w-72">
-              <div className="text-white font-bold text-lg mb-3">{timeInMinutes} min game</div>
+              <div className="text-white font-bold text-lg mb-3">{timeInMinutes} min {gameType}</div>
               <div className="w-16 h-16 mx-auto mb-3 rounded-full flex items-center justify-center border-2 border-[#4A7C59]">
                 <svg viewBox="0 0 24 24" className="w-10 h-10 text-[#4A7C59]" fill="currentColor">
                   <path d="M12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4A8,8 0 0,1 20,12A8,8 0 0,1 12,20M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"></path>
                   <path d="M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z"></path>
                 </svg>
               </div>
-              <div className="text-gray-400 text-lg">Starting soon..</div>
+              <div className="text-gray-400 text-lg">Waiting for opponent..</div>
+              {connectionError && (
+                <div className="text-red-400 text-sm mt-2">{connectionError}</div>
+              )}
+              <div className="text-gray-400 text-sm mt-3">Wait time: {formatWaitTime()}</div>
             </div>
           </div>
           

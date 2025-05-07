@@ -1,12 +1,18 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { Socket } from 'socket.io-client';
 import * as socketService from '../services/socketService';
+
+// Define connection status type
+type ConnectionStatus = 'connected' | 'disconnected' | 'connecting';
 
 // Define the context type
 interface SocketContextType {
   socket: Socket | null;
   isConnected: boolean;
   isReconnecting: boolean;
+  connectionStatus: ConnectionStatus;
+  reconnectionAttempts: number;
+  disconnectionDuration: number | null;
   connect: () => void;
   disconnect: () => void;
   joinGame: (gameOptions: { gameType: string }) => void;
@@ -16,6 +22,8 @@ interface SocketContextType {
   declineDraw: (gameId: string) => void;
   resignGame: (gameId: string) => void;
   abortGame: (gameId: string) => void;
+  rejoinGame: (gameId: string, playerId: string) => void;
+  manualReconnect: () => void;
 }
 
 // Create the context with a default value
@@ -23,6 +31,9 @@ const SocketContext = createContext<SocketContextType>({
   socket: null,
   isConnected: false,
   isReconnecting: false,
+  connectionStatus: 'disconnected',
+  reconnectionAttempts: 0,
+  disconnectionDuration: null,
   connect: () => {},
   disconnect: () => {},
   joinGame: () => {},
@@ -32,6 +43,8 @@ const SocketContext = createContext<SocketContextType>({
   declineDraw: () => {},
   resignGame: () => {},
   abortGame: () => {},
+  rejoinGame: () => {},
+  manualReconnect: () => {},
 });
 
 // Custom hook to use the socket context
@@ -46,37 +59,110 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [isReconnecting, setIsReconnecting] = useState<boolean>(false);
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected');
+  const [reconnectionAttempts, setReconnectionAttempts] = useState<number>(0);
+  const [disconnectionDuration, setDisconnectionDuration] = useState<number | null>(null);
+  
+  // Use refs for tracking disconnection time
+  const disconnectionStartTimeRef = useRef<number | null>(null);
+  const disconnectionTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Start tracking disconnection time
+  const startDisconnectionTimer = () => {
+    disconnectionStartTimeRef.current = Date.now();
+    
+    // Update disconnection duration every second
+    disconnectionTimerRef.current = setInterval(() => {
+      if (disconnectionStartTimeRef.current) {
+        const duration = Math.floor((Date.now() - disconnectionStartTimeRef.current) / 1000);
+        setDisconnectionDuration(duration);
+      }
+    }, 1000);
+  };
+
+  // Stop tracking disconnection time
+  const stopDisconnectionTimer = () => {
+    if (disconnectionTimerRef.current) {
+      clearInterval(disconnectionTimerRef.current);
+      disconnectionTimerRef.current = null;
+    }
+    disconnectionStartTimeRef.current = null;
+    setDisconnectionDuration(null);
+  };
+
+  // Reset reconnection attempts counter
+  const resetReconnectionAttempts = () => {
+    setReconnectionAttempts(0);
+  };
 
   // Initialize socket connection
   const connect = () => {
     try {
-      const socketInstance = socketService.getSocket();
+      setConnectionStatus('connecting');
+      const socketInstance = socketService.getSocket({
+        reconnectionAttempts: 10,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+        randomizationFactor: 0.5,
+        timeout: 20000
+      });
+      
       setSocket(socketInstance);
       
       // Update connection states based on socket events
       socketInstance.on('connect', () => {
         setIsConnected(true);
         setIsReconnecting(false);
+        setConnectionStatus('connected');
+        stopDisconnectionTimer();
+        resetReconnectionAttempts();
       });
       
-      socketInstance.on('disconnect', () => {
+      socketInstance.on('disconnect', (reason) => {
         setIsConnected(false);
+        setConnectionStatus('disconnected');
+        startDisconnectionTimer();
+        console.log(`Socket disconnected due to: ${reason}`);
       });
       
-      socketInstance.on('reconnect_attempt', () => {
+      socketInstance.on('reconnect_attempt', (attemptNumber) => {
         setIsReconnecting(true);
+        setConnectionStatus('connecting');
+        setReconnectionAttempts(attemptNumber);
+        console.log(`Reconnection attempt #${attemptNumber}`);
       });
       
-      socketInstance.on('reconnect', () => {
+      socketInstance.on('reconnect', (attemptNumber) => {
         setIsConnected(true);
         setIsReconnecting(false);
+        setConnectionStatus('connected');
+        stopDisconnectionTimer();
+        resetReconnectionAttempts();
+        console.log(`Reconnected after ${attemptNumber} attempts`);
       });
       
       socketInstance.on('reconnect_failed', () => {
         setIsReconnecting(false);
+        setConnectionStatus('disconnected');
+        console.error('Reconnection failed after all attempts');
+      });
+      
+      socketInstance.on('reconnect_error', (error) => {
+        console.error('Reconnection error:', error);
       });
     } catch (error) {
       console.error('Error connecting to socket server:', error);
+      setConnectionStatus('disconnected');
+    }
+  };
+
+  // Manually trigger reconnection
+  const manualReconnect = () => {
+    if (socket) {
+      socket.connect();
+      setConnectionStatus('connecting');
+    } else {
+      connect();
     }
   };
 
@@ -86,6 +172,9 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     setSocket(null);
     setIsConnected(false);
     setIsReconnecting(false);
+    setConnectionStatus('disconnected');
+    stopDisconnectionTimer();
+    resetReconnectionAttempts();
   };
 
   // Join a game
@@ -132,6 +221,16 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
       socket.emit('abort_game', { gameId });
     }
   };
+  
+  // Rejoin a game after reconnection
+  const rejoinGame = (gameId: string, playerId: string) => {
+    if (socket?.connected) {
+      socket.emit('rejoin_game', { gameId, playerId });
+      console.log(`Attempting to rejoin game ${gameId}`);
+    } else {
+      console.warn('Cannot rejoin game: socket not connected');
+    }
+  };
 
   // Connect to the socket when the component mounts
   useEffect(() => {
@@ -139,6 +238,9 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     
     // Cleanup on unmount
     return () => {
+      if (disconnectionTimerRef.current) {
+        clearInterval(disconnectionTimerRef.current);
+      }
       disconnect();
     };
   }, []);
@@ -148,6 +250,9 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     socket,
     isConnected,
     isReconnecting,
+    connectionStatus,
+    reconnectionAttempts,
+    disconnectionDuration,
     connect,
     disconnect,
     joinGame,
@@ -157,6 +262,8 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     declineDraw,
     resignGame,
     abortGame,
+    rejoinGame,
+    manualReconnect,
   };
 
   return <SocketContext.Provider value={value}>{children}</SocketContext.Provider>;

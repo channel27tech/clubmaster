@@ -9,6 +9,7 @@ import {
 import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { MatchmakingService } from '../game/matchmaking.service';
+import { DisconnectionService } from '../game/disconnection.service';
 
 interface MatchmakingOptions {
   gameMode?: string;
@@ -32,7 +33,10 @@ export class GameGateway
   @WebSocketServer() server: Server;
   private logger: Logger = new Logger('GameGateway');
 
-  constructor(private readonly matchmakingService: MatchmakingService) {}
+  constructor(
+    private readonly matchmakingService: MatchmakingService,
+    private readonly disconnectionService: DisconnectionService
+  ) {}
 
   /**
    * This method runs when the gateway is initialized
@@ -46,6 +50,7 @@ export class GameGateway
    */
   handleConnection(client: Socket) {
     this.logger.log(`Client connected: ${client.id}`);
+    
     // Send a welcome message to the connected client
     client.emit('connectionEstablished', {
       message: 'Successfully connected to Chess Game server',
@@ -61,6 +66,9 @@ export class GameGateway
     
     // Remove from matchmaking queue if they were in it
     this.matchmakingService.removePlayerFromQueue(client.id);
+    
+    // Handle disconnection for active games
+    this.disconnectionService.handlePlayerDisconnect(this.server, client.id);
   }
 
   /**
@@ -255,25 +263,137 @@ export class GameGateway
   }
 
   /**
-   * Handle a client aborting a game
+   * Handle a player rejoining a game after reconnection
+   */
+  @SubscribeMessage('rejoin_game')
+  handleRejoinGame(client: Socket, payload: { gameId: string, playerId: string }) {
+    this.logger.log(
+      `Client ${client.id} requested to rejoin game ${payload.gameId} as player ${payload.playerId}`,
+    );
+    
+    try {
+      // Handle player reconnection
+      this.disconnectionService.handlePlayerReconnect(this.server, payload.playerId, client.id);
+      
+      // Add the client to the game room
+      client.join(payload.gameId);
+      
+      return {
+        event: 'rejoinGameResponse',
+        data: {
+          success: true,
+          message: 'Successfully rejoined the game',
+        },
+      };
+    } catch (error) {
+      this.logger.error(`Error rejoining game for client ${client.id}:`, error);
+      
+      return {
+        event: 'rejoinGameResponse',
+        data: {
+          success: false,
+          message: 'Failed to rejoin game',
+          error: error.message,
+        },
+      };
+    }
+  }
+
+  /**
+   * Handle a client request to abort a game
    */
   @SubscribeMessage('abort_game')
   handleAbortGame(client: Socket, payload: { gameId: string }) {
     this.logger.log(
-      `Client ${client.id} aborted game ${payload.gameId}`,
+      `Client ${client.id} requested to abort game ${payload.gameId}`,
     );
     
-    // Broadcast the abort to all players in the game
-    this.server.to(payload.gameId).emit('game_aborted', {
+    try {
+      // Validate and handle the abort request
+      const success = this.disconnectionService.handleAbortRequest(
+        this.server,
+        client.id,
+        payload.gameId
+      );
+      
+      return {
+        event: 'abortGameResponse',
+        data: {
+          success,
+          message: success ? 'Game successfully aborted' : 'Unable to abort game',
+        },
+      };
+    } catch (error) {
+      this.logger.error(`Error aborting game for client ${client.id}:`, error);
+      
+      return {
+        event: 'abortGameResponse',
+        data: {
+          success: false,
+          message: 'Failed to abort game',
+          error: error.message,
+        },
+      };
+    }
+  }
+
+  /**
+   * Mark that white has made the first move, preventing further abort requests
+   */
+  @SubscribeMessage('move_made')
+  handleMoveMade(client: Socket, payload: { gameId: string, from: string, to: string, player: string, notation: string }) {
+    this.logger.log(
+      `Move made in game ${payload.gameId} by ${payload.player}: ${payload.notation}`,
+    );
+    
+    // If this is the first move by white, update the game state
+    if (payload.player === 'white') {
+      this.disconnectionService.markWhiteFirstMove(payload.gameId);
+    }
+    
+    // Broadcast the move to all players in the game
+    this.server.to(payload.gameId).emit('move_made', {
       gameId: payload.gameId,
-      playerId: client.id,
+      from: payload.from,
+      to: payload.to,
+      player: payload.player,
+      notation: payload.notation,
+      isCapture: payload.notation.includes('x'),
+      isCheck: payload.notation.includes('+') || payload.notation.includes('#'),
     });
     
     return {
-      event: 'gameAborted',
+      event: 'moveMadeResponse',
       data: {
         success: true,
-        message: 'Game aborted',
+        message: 'Move broadcast to all players',
+      },
+    };
+  }
+
+  /**
+   * Handle a player joining a game room
+   */
+  @SubscribeMessage('join_game_room')
+  handleJoinGameRoom(client: Socket, payload: { gameId: string }) {
+    this.logger.log(
+      `Client ${client.id} is joining game room ${payload.gameId}`,
+    );
+    
+    // Add the client to the game room
+    client.join(payload.gameId);
+    
+    // Notify the client that they've joined
+    client.emit('joined_game_room', {
+      gameId: payload.gameId,
+      playerId: client.id
+    });
+    
+    return {
+      event: 'joinGameRoomResponse',
+      data: {
+        success: true,
+        message: 'Successfully joined the game room',
       },
     };
   }

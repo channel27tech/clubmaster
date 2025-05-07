@@ -219,8 +219,8 @@ export class MatchmakingService {
     this.logger.log(`Match created: ${gameId} between ${player1.socketId} and ${player2.socketId}`);
     
     // Notify both players that a match has been found
-    player1.socket.emit('matchFound', gameData);
-    player2.socket.emit('matchFound', gameData);
+    player1.socket.emit('matchFound', { ...gameData, playerColor: isPlayer1White ? 'white' : 'black' });
+    player2.socket.emit('matchFound', { ...gameData, playerColor: isPlayer1White ? 'black' : 'white' });
     
     // Join both players to a game room for further communication
     player1.socket.join(gameId);

@@ -1,8 +1,11 @@
 import { Module } from '@nestjs/common';
 import { MatchmakingService } from './matchmaking.service';
+import { DisconnectionService } from './disconnection.service';
+import { TimerModule } from './timer/timer.module';
 
 @Module({
-  providers: [MatchmakingService],
-  exports: [MatchmakingService],
+  imports: [TimerModule],
+  providers: [MatchmakingService, DisconnectionService],
+  exports: [MatchmakingService, DisconnectionService],
 })
 export class GameModule {} 
