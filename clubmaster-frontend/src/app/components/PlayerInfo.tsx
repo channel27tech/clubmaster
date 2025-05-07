@@ -64,41 +64,13 @@ const PlayerInfo: React.FC<PlayerInfoProps> = ({
       return null;
     }
 
-    // Group pieces by type for more compact display
-    const groupedPieces: Record<PieceType, number> = {
-      'queen': 0,
-      'rook': 0,
-      'bishop': 0,
-      'knight': 0,
-      'pawn': 0,
-      'king': 0
-    };
-
-    sortedCapturedPieces.forEach(piece => {
-      groupedPieces[piece.type]++;
-    });
-
     return (
       <div className="flex flex-wrap gap-1">
-        {Object.entries(groupedPieces).map(([type, count]) => {
-          if (count === 0) return null;
-          
-          const pieceType = type as PieceType;
-          const pieceColor = sortedCapturedPieces[0].color; // All pieces have the same color
-          
-          return (
-            <div key={type} className="flex items-center">
-              <div className="w-5 h-5">
-                <ChessPiece type={pieceType} color={pieceColor} />
-              </div>
-              {count > 1 && (
-                <span className="text-xs font-semibold text-gray-200 ml-0.5 mr-1">
-                  ×{count}
-                </span>
-              )}
-            </div>
-          );
-        })}
+        {sortedCapturedPieces.map((piece) => (
+          <div key={piece.id} className="w-5 h-5">
+            <ChessPiece type={piece.type} color={piece.color} />
+          </div>
+        ))}
       </div>
     );
   };

@@ -484,12 +484,13 @@ export default function ChessBoardWrapper() {
           clubAffiliation={player1.clubAffiliation}
           isGuest={player1.isGuest}
           capturedPieces={capturedByBlack}
+          isActive={activePlayer === 'black'}
         />
         {/* Top player timer (Black) */}
         <div>
           <GameClock 
             timeInSeconds={gameTimeInSeconds}
-            isActive={false}
+            isActive={activePlayer === 'black'}
             isDarkTheme={false}
             onTimeOut={() => handleTimeOut('black')}
             playLowTimeSound={() => playSound('TIME_LOW', soundEnabled)}
@@ -512,12 +513,13 @@ export default function ChessBoardWrapper() {
           clubAffiliation={player2.clubAffiliation}
           isGuest={player2.isGuest}
           capturedPieces={capturedByWhite}
+          isActive={activePlayer === 'white'}
         />
         {/* Bottom player timer (White) */}
         <div>
           <GameClock 
             timeInSeconds={gameTimeInSeconds}
-            isActive={true}
+            isActive={activePlayer === 'white'}
             isDarkTheme={true}
             onTimeOut={() => handleTimeOut('white')}
             playLowTimeSound={() => playSound('TIME_LOW', soundEnabled)}
