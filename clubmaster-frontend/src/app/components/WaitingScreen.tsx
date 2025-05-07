@@ -77,22 +77,23 @@ const WaitingScreen: React.FC<WaitingScreenProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex flex-col">
       {/* Blurred backdrop */}
+
       <div className="absolute inset-0 bg-black/70 backdrop-blur-[8px]"></div>
-     
       {/* Content */}
       <div className="relative z-10 flex flex-col h-full w-full">
         {/* Use the same header as the main chessboard */}
         <Header />
-       
         <div className="flex-grow flex flex-col items-center overflow-hidden">
           {/* Central content area with max width matching the chessboard */}
           <div className="w-full max-w-md mx-auto flex flex-col h-full">
             {/* Top player info section */}
+
             <div className="w-full bg-[#4A7C59] py-12 px-4 flex justify-between items-center border-b-[13px] border-[#333939]">
               <div className="flex items-center">
                 <div className="w-10 h-10 bg-[#E9CB6B] flex items-center justify-center rounded mr-2">
                   <span className="text-[#2B3131] text-lg">♟</span>
                 </div>
+
                 <span className="text-[#FAF3DD] mb-4 font-semibold font-roboto text-[16px]">{searchingText}</span>
               </div>
               <div className="text-[#1F2323] bg-[#C8D5B9] px-4 py-1 rounded-[4px] front-roboto text-lg">{timeInMinutes}:00</div>
@@ -115,7 +116,6 @@ const WaitingScreen: React.FC<WaitingScreenProps> = ({
            
             {/* Bottom player info section */}
             <div className="w-full bg-[#4A7C59] py-8 px-4 flex justify-between items-center border-t-[13] border-[#333939]">
-
               <div className="flex items-center">
                 <div className="w-10 h-10 bg-[#2B3131] flex items-center justify-center rounded mr-2">
                   <span className="text-white text-lg">♟</span>
