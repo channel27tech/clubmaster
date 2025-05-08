@@ -64,7 +64,7 @@ const MatchmakingManager: React.FC<MatchmakingManagerProps> = ({
       
       // Navigate to the game screen with the game ID
       if (gameData && gameData.gameId) {
-        router.push(`/game/${gameData.gameId}`);
+        router.push(`/play/game/${gameData.gameId}`);
       }
     };
     

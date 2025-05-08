@@ -635,7 +635,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
 
     // Emit abort_game event with gameId
     socket.emit('abort_game', { gameId: gameRoomId });
-
+    
     // Play sound
     playSound('BUTTON_CLICK', soundEnabled);
   };
@@ -646,7 +646,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       console.log(`Joining game room: ${gameRoomId}`);
       // Use the explicit join_game_room handler
       socket.emit('join_game_room', { gameId: gameRoomId });
-      
+
       // Listen for confirmation of joining the room
       const handleJoinedRoom = (data: { gameId: string, playerId: string }) => {
         console.log(`Successfully joined game room ${data.gameId} as player ${data.playerId}`);
@@ -683,13 +683,13 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       {playerColor === 'black' ? (
         <>
           {/* Player 1 Info (Top) - White */}
-          <div className="flex justify-between items-center mb-2">
-            <PlayerInfo 
-              position="top"
-              username={player1.username}
-              rating={player1.rating}
-              clubAffiliation={player1.clubAffiliation}
-              isGuest={player1.isGuest}
+      <div className="flex justify-between items-center mb-2">
+        <PlayerInfo 
+          position="top"
+          username={player1.username}
+          rating={player1.rating}
+          clubAffiliation={player1.clubAffiliation}
+          isGuest={player1.isGuest}
               capturedPieces={capturedByWhite || whiteCapturedPieces}
             />
             {/* Top player timer (White) */}
@@ -745,53 +745,53 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
               clubAffiliation={player2.clubAffiliation}
               isGuest={player2.isGuest}
               capturedPieces={capturedByBlack || blackCapturedPieces}
-            />
-            {/* Top player timer (Black) */}
-            <div className="mr-2">
-              <GameClock 
-                timeInSeconds={gameTimeInSeconds}
-                isActive={activePlayer === 'black'}
-                isDarkTheme={false}
-                onTimeOut={() => handleTimeOut('black')}
-                playLowTimeSound={() => playSound('TIME_LOW', soundEnabled)}
-              />
-            </div>
-          </div>
-          
-          {/* Chess Board */}
-          <ChessBoard 
+        />
+        {/* Top player timer (Black) */}
+        <div className="mr-2">
+          <GameClock 
+            timeInSeconds={gameTimeInSeconds}
+            isActive={activePlayer === 'black'}
+            isDarkTheme={false}
+            onTimeOut={() => handleTimeOut('black')}
+            playLowTimeSound={() => playSound('TIME_LOW', soundEnabled)}
+          />
+        </div>
+      </div>
+      
+      {/* Chess Board */}
+      <ChessBoard 
             perspective={playerColor || 'white'}
-            onMoveHistoryChange={handleMoveHistoryChange}
+        onMoveHistoryChange={handleMoveHistoryChange}
             playerColor={playerColor}
             gameId={gameRoomId}
-          />
+      />
       
           {/* Player 1 Info (Bottom) - White */}
-          <div className="flex justify-between items-center mt-2">
-            <PlayerInfo 
-              position="bottom"
+      <div className="flex justify-between items-center mt-2">
+        <PlayerInfo 
+          position="bottom"
               username={player1.username}
               rating={player1.rating}
               clubAffiliation={player1.clubAffiliation}
               isGuest={player1.isGuest}
               capturedPieces={capturedByWhite || whiteCapturedPieces}
-            />
-            {/* Bottom player timer (White) */}
-            <div className="mr-2">
-              <GameClock 
-                timeInSeconds={gameTimeInSeconds}
-                isActive={activePlayer === 'white'}
+        />
+        {/* Bottom player timer (White) */}
+        <div className="mr-2">
+          <GameClock 
+            timeInSeconds={gameTimeInSeconds}
+            isActive={activePlayer === 'white'}
                 isDarkTheme={false}
-                onTimeOut={() => handleTimeOut('white')}
-                playLowTimeSound={() => playSound('TIME_LOW', soundEnabled)}
-              />
-            </div>
-          </div>
+            onTimeOut={() => handleTimeOut('white')}
+            playLowTimeSound={() => playSound('TIME_LOW', soundEnabled)}
+          />
+        </div>
+      </div>
         </>
       )}
       
       {/* Move Controls */}
-      <MoveControls
+      <MoveControls 
         onBack={handleBackClick}
         onForward={handleForwardClick}
         canGoBack={canGoBack}

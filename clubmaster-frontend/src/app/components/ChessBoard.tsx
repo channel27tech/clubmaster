@@ -618,38 +618,38 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
               }
             }
             
-            // Try to make the move in chess.js
-            const moveSuccess = makeMove(selectedSquare, position);
+          // Try to make the move in chess.js
+          const moveSuccess = makeMove(selectedSquare, position);
+          
+          if (moveSuccess) {
+            // Update board state based on chess.js
+            const newBoardState = getCurrentBoardState();
             
-            if (moveSuccess) {
-              // Update board state based on chess.js
-              const newBoardState = getCurrentBoardState();
-              
-              // Add move to history
+            // Add move to history
               const notation = generateNotation(selectedSquare, position, movingPiece, isCapture);
-              const newHistory = addMove(moveHistory, {
-                from: selectedSquare,
-                to: position,
-                piece: movingPiece,
-                notation
-              }, newBoardState);
-              
-              // Update state
-              setMoveHistory(newHistory);
-              setBoardState(newBoardState);
-              setLastMove({ from: selectedSquare, to: position });
-              setCurrentPlayer(currentPlayer === 'white' ? 'black' : 'white');
-              
-              // Notify parent
-              if (onMoveHistoryChange) {
-                onMoveHistoryChange(newHistory);
-              }
-              
-              // Check game status
-              const gameStatus = getGameStatus();
-              if (gameStatus.isGameOver) {
-                // Handle game over
-                console.log('Game over:', gameStatus);
+            const newHistory = addMove(moveHistory, {
+              from: selectedSquare,
+              to: position,
+              piece: movingPiece,
+              notation
+            }, newBoardState);
+            
+            // Update state
+            setMoveHistory(newHistory);
+            setBoardState(newBoardState);
+            setLastMove({ from: selectedSquare, to: position });
+            setCurrentPlayer(currentPlayer === 'white' ? 'black' : 'white');
+            
+            // Notify parent
+            if (onMoveHistoryChange) {
+              onMoveHistoryChange(newHistory);
+            }
+            
+            // Check game status
+            const gameStatus = getGameStatus();
+            if (gameStatus.isGameOver) {
+              // Handle game over
+              console.log('Game over:', gameStatus);
               }
               
               // Get current FEN for synchronization
@@ -702,8 +702,8 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
       // Get all legal moves for this piece directly from chess.js
       try {
         // Use standard chess notation for the position
-        const legalDestinations: string[] = [];
-        
+      const legalDestinations: string[] = [];
+      
         // Get all legal moves for the current piece
         const chess = getChessEngine();
         const legalMoves = chess.moves({
@@ -716,11 +716,11 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
           for (const move of legalMoves) {
             if (move && move.to) {
               legalDestinations.push(move.to);
-            }
           }
         }
-        
-        setLegalMoves(legalDestinations);
+      }
+      
+      setLegalMoves(legalDestinations);
       } catch (err) {
         console.error("Error calculating legal moves:", err);
         setLegalMoves([]);
