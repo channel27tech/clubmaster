@@ -78,28 +78,28 @@ const GameClock: React.FC<GameClockProps> = ({
     if (isActive && remainingTime > 0) {
       timerRef.current = setInterval(() => {
         if (isMountedRef.current) { // Only update state if component is still mounted
-          setRemainingTime((prevTime: number) => {
-            const newTime = prevTime - 1;
-            
-            // Check if time is about to run low
+        setRemainingTime((prevTime: number) => {
+          const newTime = prevTime - 1;
+          
+          // Check if time is about to run low
             if (newTime === 60 && !hasPlayedLowTimeSound.current) {
               shouldPlaySoundRef.current = true;
+          }
+          
+            // If time reaches zero, clear interval and mark for timeout
+          if (newTime <= 0 && !hasCalledTimeOut.current) {
+            if (timerRef.current) {
+              clearInterval(timerRef.current);
+              timerRef.current = null;
             }
             
-            // If time reaches zero, clear interval and mark for timeout
-            if (newTime <= 0 && !hasCalledTimeOut.current) {
-              if (timerRef.current) {
-                clearInterval(timerRef.current);
-                timerRef.current = null;
-              }
-              
               // Mark for timeout instead of calling directly
               isTimeOutRef.current = true;
-              return 0;
-            }
-            
-            return newTime;
-          });
+            return 0;
+          }
+          
+          return newTime;
+        });
         }
       }, 1000);
     }
