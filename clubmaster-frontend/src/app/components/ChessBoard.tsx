@@ -4,8 +4,31 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import ChessPiece from './ChessPiece';
 import PromotionSelector from './PromotionSelector';
 import { BoardState, BoardSquare, initializeMoveHistory, MoveHistoryState, goBackOneMove, goForwardOneMove, addMove, generateNotation, PieceType, PieceColor } from '../utils/moveHistory';
-import { getChessEngine, resetChessEngine, isLegalMove, makeMove, getGameStatus, getCurrentBoardState, setChessPosition } from '../utils/chessEngine';
+import { getChessEngine, resetChessEngine, isLegalMove, makeMove, getGameStatus, getCurrentBoardState, setChessPosition, getFen } from '../utils/chessEngine';
 import { useSocket } from '../../contexts/SocketContext';
+
+// Helper function to fully synchronize the board state from FEN
+const synchronizeBoardFromFen = (fen: string): BoardState => {
+  try {
+    // Reset the chess engine with the provided FEN
+    resetChessEngine();
+    const chess = getChessEngine();
+    
+    // Load the FEN into the chess engine
+    const loadSuccess = chess.load(fen);
+    
+    if (!loadSuccess) {
+      console.error('Failed to load FEN:', fen);
+      return getCurrentBoardState(); // Return current state as fallback
+    }
+    
+    // Get the new board state after successfully loading the FEN
+    return getCurrentBoardState();
+  } catch (error) {
+    console.error('Error synchronizing board from FEN:', error);
+    return getCurrentBoardState(); // Return current state as fallback
+  }
+};
 
 interface ChessBoardProps {
   perspective?: 'white' | 'black';
@@ -37,6 +60,61 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
   // Get socket for remote move updates
   const { socket } = useSocket();
   
+  // Helper to find a piece on the board
+  const findMovingPiece = useCallback((position: string, boardState: BoardState): { type: PieceType, color: PieceColor } | null => {
+    for (const row of boardState.squares) {
+      for (const square of row) {
+        if (square.position === position && square.piece) {
+          return { ...square.piece };
+        }
+      }
+    }
+    return null;
+  }, []);
+
+  // Helper to extract piece info from algebraic notation
+  const extractPieceInfoFromNotation = useCallback((notation: string, playerColor: PieceColor): { type: PieceType, color: PieceColor } | null => {
+    if (!notation) return null;
+    
+    try {
+      // For pawn moves (no piece letter at start)
+      if (!notation.match(/^[KQRBN]/)) {
+        return {
+          type: 'pawn',
+          color: playerColor
+        };
+      }
+      
+      // For other pieces
+      const pieceChar = notation[0];
+      const pieceType = 
+        pieceChar === 'K' ? 'king' :
+        pieceChar === 'Q' ? 'queen' :
+        pieceChar === 'R' ? 'rook' :
+        pieceChar === 'B' ? 'bishop' :
+        pieceChar === 'N' ? 'knight' : 'pawn';
+        
+      return {
+        type: pieceType as PieceType,
+        color: playerColor
+      };
+    } catch (error) {
+      console.error('Error extracting piece info from notation:', error);
+      return null;
+    }
+  }, []);
+
+  // Helper to request board synchronization
+  const requestBoardSync = useCallback((gameId: string | undefined) => {
+    if (!socket || !gameId) {
+      console.error('Cannot request board sync: missing socket or gameId');
+      return;
+    }
+    
+    console.log('Requesting board state synchronization', { gameId });
+    socket.emit('request_board_sync', { gameId });
+  }, [socket]);
+  
   // Initialize the chess engine
   useEffect(() => {
     resetChessEngine();
@@ -60,9 +138,9 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
     setBoardState(initialHistory.initialBoardState);
     
     // Notify parent component of initial state
-      if (onMoveHistoryChange) {
+    if (onMoveHistoryChange) {
       onMoveHistoryChange(initialHistory);
-      }
+    }
   }, [onMoveHistoryChange]);
   
   // Listen for opponent moves via socket
@@ -114,215 +192,79 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
       if (playerColor && data.player !== playerColor) {
         console.log(`Processing opponent move. Our color: ${playerColor}, move made by: ${data.player}`);
         
-        // If FEN is provided, use it for direct synchronization
+        // Prioritize FEN synchronization if available (most reliable method)
         if (data.fen) {
           try {
             console.log('Using provided FEN for synchronization:', data.fen);
             
-            // Reset the chess engine with the provided FEN first
-            resetChessEngine();
-            setChessPosition(data.fen);
+            // Force a reset and use the FEN
+            const success = setChessPosition(data.fen);
             
-            // Synchronize the board state from the FEN
+            if (success) {
+              // Get the synchronized board state
+              const newBoardState = getCurrentBoardState();
+              
+              // Extract piece information from the move
+              const movingPiece = extractPieceInfoFromNotation(data.notation, data.player as PieceColor);
+              
+              if (movingPiece) {
+                // Add the move to history
+                const newHistory = addMove(moveHistory, {
+                  from: data.from,
+                  to: data.to,
+                  piece: movingPiece,
+                  notation: data.notation,
+                  promotion: data.promotion
+                }, newBoardState);
+                
+                // Update all the state
+                setMoveHistory(newHistory);
+                setBoardState(newBoardState);
+                setLastMove({ from: data.from, to: data.to });
+                setCurrentPlayer(data.player === 'white' ? 'black' : 'white');
+                
+                // Notify parent
+                if (onMoveHistoryChange) {
+                  onMoveHistoryChange(newHistory);
+                }
+                
+                console.log('Successfully synchronized with FEN');
+                return; // Success! Exit early
+              }
+            }
+          } catch (error) {
+            console.error('Error synchronizing from FEN:', error);
+            // Continue to fallback methods
+          }
+        }
+        
+        // Fallback: Try to make the move directly if FEN sync failed
+        try {
+          // Ensure chess engine is in sync with our UI state
+          const currentFen = getFen();
+          console.log('Current engine state:', currentFen);
+          
+          // Try to find the piece that would be moving
+          const movingPiece = findMovingPiece(data.from, boardState) || 
+                             extractPieceInfoFromNotation(data.notation, data.player as PieceColor);
+          
+          if (!movingPiece) {
+            console.error('Could not determine which piece is moving');
+            requestBoardSync(data.gameId || gameId);
+            return;
+          }
+          
+          // Try to make the move in the engine
+          console.log(`Attempting to make move: ${data.from} -> ${data.to}${data.promotion ? ` promoting to ${data.promotion}` : ''}`);
+          const moveSuccess = makeMove(data.from, data.to, data.promotion);
+          
+          if (moveSuccess) {
+            console.log('Move applied successfully through fallback method');
+            
+            // Update board state
             const newBoardState = getCurrentBoardState();
             
-            // Find the piece that moved based on notation
-            let movingPiece: { type: PieceType, color: PieceColor } | null = null;
-            
-            // Extract piece type from notation (or default to pawn)
-            const isPawnMove = !data.notation.match(/^[KQRBN]/);
-            
-            if (isPawnMove) {
-              movingPiece = {
-                type: 'pawn',
-                color: data.player as PieceColor
-              };
-            } else {
-              const pieceChar = data.notation[0];
-              const pieceType = 
-                pieceChar === 'K' ? 'king' :
-                pieceChar === 'Q' ? 'queen' :
-                pieceChar === 'R' ? 'rook' :
-                pieceChar === 'B' ? 'bishop' :
-                pieceChar === 'N' ? 'knight' : 'pawn';
-                
-              movingPiece = {
-                type: pieceType as PieceType,
-                color: data.player as PieceColor
-              };
-            }
-            
-            if (movingPiece) {
-              // Add the move to history with FEN-derived board state
-              const newHistory = addMove(moveHistory, {
-                from: data.from,
-                to: data.to,
-                piece: movingPiece,
-                notation: data.notation,
-                promotion: data.promotion
-              }, newBoardState);
-              
-              // Update all the state
-              setMoveHistory(newHistory);
-              setBoardState(newBoardState);
-              setLastMove({ from: data.from, to: data.to });
-              setCurrentPlayer(data.player === 'white' ? 'black' : 'white');
-              
-              // Notify parent
-              if (onMoveHistoryChange) {
-                onMoveHistoryChange(newHistory);
-              }
-              
-              console.log('Successfully synchronized with FEN');
-              return;
-            }
-          } catch (error) {
-            console.error('Error synchronizing from FEN, falling back to move application:', error);
-          }
-        }
-        
-        // If we don't have FEN or FEN sync failed, try the normal approach
-        // Find the piece that moved before making the move
-        let movingPiece: { type: PieceType, color: PieceColor } | null = null;
-        const infoBeforeMove = [];
-        
-        // Debug board state
-        console.log("Board state before applying move:");
-        for (const row of boardState.squares) {
-          for (const square of row) {
-            if (square.piece) {
-              infoBeforeMove.push(`${square.position}: ${square.piece.color} ${square.piece.type}`);
-            }
-            if (square.position === data.from && square.piece) {
-              movingPiece = { ...square.piece };
-              console.log(`Found piece at ${data.from}: ${square.piece.color} ${square.piece.type}`);
-            }
-          }
-        }
-        console.log(infoBeforeMove.join(', '));
-        
-        // If we couldn't find the piece on the board but we have notation, try to infer the piece
-        if (!movingPiece && data.notation) {
-          console.log("Couldn't find piece on board, inferring from notation:", data.notation);
-          // Extract piece type and color from notation
-          // Most notations start with piece type (except pawns)
-          const isCapture = data.isCapture || data.notation.includes('x');
-          const isPawnMove = !data.notation.match(/^[KQRBN]/);
-          
-          if (isPawnMove) {
-            movingPiece = {
-              type: 'pawn',
-              color: data.player as PieceColor
-            };
-            console.log("Inferred piece from notation: pawn", data.player);
-          } else {
-            const pieceChar = data.notation[0];
-            const pieceType = 
-              pieceChar === 'K' ? 'king' :
-              pieceChar === 'Q' ? 'queen' :
-              pieceChar === 'R' ? 'rook' :
-              pieceChar === 'B' ? 'bishop' :
-              pieceChar === 'N' ? 'knight' : 'pawn';
-              
-            movingPiece = {
-              type: pieceType as PieceType,
-              color: data.player as PieceColor
-            };
-            console.log(`Inferred piece from notation: ${pieceType} ${data.player}`);
-          }
-        }
-        
-        // Handle promotion moves explicitly - make sure the pieceTypeMapping is properly loaded
-        const pieceTypeMapping: Record<PieceType, string> = {
-          'pawn': 'p',
-          'knight': 'n',
-          'bishop': 'b',
-          'rook': 'r',
-          'queen': 'q',
-          'king': 'k'
-        };
-        
-        // Attempt to apply the move with multiple fallback strategies
-        let moveSuccess = false;
-        
-        // Reset the chess engine to match our current state before attempting the move
-        try {
-          const chess = getChessEngine();
-          
-          // Log the current state for debugging
-          console.log('Current board state FEN before move:', chess.fen());
-        } catch (error) {
-          console.error('Error getting current FEN:', error);
-        }
-        
-        // First try with movingPiece info and promotion
-        if (movingPiece) {
-          moveSuccess = makeMove(data.from, data.to, data.promotion);
-          console.log('First move attempt result:', moveSuccess, 'promotion:', data.promotion);
-        }
-        
-        // If the first attempt failed, try a direct move without pre-validation
-        if (!moveSuccess) {
-          try {
-            console.log('Attempting direct move with chess.js');
-            const chess = getChessEngine();
-            
-            // Create a standard chess.js move object
-            const moveObj = {
-              from: data.from,
-              to: data.to,
-              promotion: data.promotion ? pieceTypeMapping[data.promotion] : undefined
-            };
-            
-            console.log('Move object:', moveObj);
-            
-            // Try to make the move using the chess.js move method
-            const result = chess.move(moveObj);
-            moveSuccess = !!result;
-            console.log('Direct move result:', result);
-          } catch (error) {
-            console.error('Error making direct move:', error);
-          }
-        }
-        
-        // Final attempt: If this is a pawn promotion move but failed, try with default queen promotion
-        if (!moveSuccess && movingPiece && movingPiece.type === 'pawn') {
-          // Check if this move could be a promotion (pawn moving to last rank)
-          const destRank = parseInt(data.to[1]);
-          const isPotentialPromotion = 
-            (movingPiece.color === 'white' && destRank === 8) || 
-            (movingPiece.color === 'black' && destRank === 1);
-            
-          if (isPotentialPromotion) {
-            console.log('Trying backup promotion to queen');
-            // Try promoting to queen as fallback
-            try {
-              const chess = getChessEngine();
-              const result = chess.move({
-                from: data.from,
-                to: data.to,
-                promotion: 'q' // Default to queen
-              });
-              moveSuccess = !!result;
-              console.log('Fallback queen promotion result:', result);
-              
-              // If successful, update the promotion type to queen
-              if (moveSuccess) {
-                data.promotion = 'queen';
-              }
-            } catch (error) {
-              console.error('Error making fallback promotion move:', error);
-            }
-          }
-        }
-        
-        if (moveSuccess) {
-          console.log('Move successfully applied to board');
-          // Get updated board state after move
-          const newBoardState = getCurrentBoardState();
-          
-          if (movingPiece) {
-            // Add the move to history, including promotion data if present
+            // Add to history
             const newHistory = addMove(moveHistory, {
               from: data.from,
               to: data.to,
@@ -337,28 +279,17 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
             setLastMove({ from: data.from, to: data.to });
             setCurrentPlayer(data.player === 'white' ? 'black' : 'white');
             
-            // Notify parent of move history change
+            // Notify parent
             if (onMoveHistoryChange) {
               onMoveHistoryChange(newHistory);
             }
           } else {
-            console.error('Could not find moving piece for opponent move');
-            
-            // Still update board state as a fallback
-            setBoardState(newBoardState);
-            setLastMove({ from: data.from, to: data.to });
-            setCurrentPlayer(data.player === 'white' ? 'black' : 'white');
+            console.error(`Failed to apply move: ${data.from} -> ${data.to}`);
+            requestBoardSync(data.gameId || gameId);
           }
-        } else {
-          console.error('Failed to apply opponent move to board');
-          // Try to recover by forcing a board synchronization
-          console.log('Attempting to synchronize board state');
-          
-          // Request state synchronization from server
-          if (socket && gameId) {
-            console.log('Requesting board state synchronization from server');
-            socket.emit('request_board_sync', { gameId: data.gameId || gameId });
-          }
+        } catch (error) {
+          console.error('Error handling opponent move:', error);
+          requestBoardSync(data.gameId || gameId);
         }
       }
     };
@@ -370,7 +301,7 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
       socket.off('move_made', handleOpponentMove);
       socket.off('board_sync', handleBoardSync);
     };
-  }, [socket, playerColor, gameId, boardState, moveHistory, onMoveHistoryChange]);
+  }, [socket, playerColor, gameId, boardState, moveHistory, onMoveHistoryChange, requestBoardSync, findMovingPiece, extractPieceInfoFromNotation]);
 
   // Handle going back one move
   const handleGoBack = useCallback(() => {
@@ -420,6 +351,37 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
     return (piece.color === 'white' && destRank === 8) || 
            (piece.color === 'black' && destRank === 1);
   }, []);
+
+  // Calculate position for promotion selector
+  const calculatePromotionPosition = useCallback((position: string) => {
+    if (!boardRef.current) return { x: 0, y: 0 };
+    
+    // Get the file (column) of the position (a-h)
+    const file = position.charAt(0);
+    // Get the rank (row) of the position (1-8)
+    const rank = parseInt(position.charAt(1));
+    
+    // Convert file to column index (a=0, b=1, etc.)
+    const colIndex = file.charCodeAt(0) - 'a'.charCodeAt(0);
+    
+    // Get board dimensions
+    const boardRect = boardRef.current.getBoundingClientRect();
+    const squareSize = boardRect.width / 8;
+    
+    // Calculate x position based on column
+    // Adjust if the piece is near the edge to keep the selector on the board
+    let adjustedCol = perspective === 'black' ? 7 - colIndex : colIndex;
+    
+    // If too close to the right edge, shift left
+    if (adjustedCol > 5) {
+      adjustedCol = 5;
+    }
+    
+    // Calculate x position (centered on the square)
+    const x = adjustedCol * squareSize;
+    
+    return { x, y: 0 };
+  }, [perspective]);
 
   // Handle promotion piece selection
   const handlePromotionSelect = useCallback((promotionPiece: PieceType) => {
@@ -503,37 +465,6 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
     // Clear promotion state
     setPromotionMove(null);
   }, [moveHistory, currentPlayer, onMoveHistoryChange, promotionMove, socket, playerColor, boardState.squares, gameId]);
-
-  // Calculate position for promotion selector
-  const calculatePromotionPosition = useCallback((position: string) => {
-    if (!boardRef.current) return { x: 0, y: 0 };
-    
-    // Get the file (column) of the position (a-h)
-    const file = position.charAt(0);
-    // Get the rank (row) of the position (1-8)
-    const rank = parseInt(position.charAt(1));
-    
-    // Convert file to column index (a=0, b=1, etc.)
-    const colIndex = file.charCodeAt(0) - 'a'.charCodeAt(0);
-    
-    // Get board dimensions
-    const boardRect = boardRef.current.getBoundingClientRect();
-    const squareSize = boardRect.width / 8;
-    
-    // Calculate x position based on column
-    // Adjust if the piece is near the edge to keep the selector on the board
-    let adjustedCol = perspective === 'black' ? 7 - colIndex : colIndex;
-    
-    // If too close to the right edge, shift left
-    if (adjustedCol > 5) {
-      adjustedCol = 5;
-    }
-    
-    // Calculate x position (centered on the square)
-    const x = adjustedCol * squareSize;
-    
-    return { x, y: 0 };
-  }, [perspective]);
 
   // Handle square click for move selection
   const handleSquareClick = (position: string, piece: { type: PieceType, color: PieceColor } | null) => {
@@ -821,90 +752,6 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
       </div>
     </div>
   );
-};
-
-// Helper function to simulate moving a piece - kept for reference only
-const simulateMove = (
-  currentBoardState: BoardState,
-  from: string,
-  to: string,
-  piece: { type: PieceType, color: PieceColor }
-): BoardState => {
-  // Create a deep copy of the current board state
-  const newBoardState = JSON.parse(JSON.stringify(currentBoardState)) as BoardState;
-  
-  // Find the source and destination squares
-  let fromSquare: BoardSquare | null = null;
-  let toSquare: BoardSquare | null = null;
-  let fromRow = -1, fromCol = -1;
-  let toRow = -1, toCol = -1;
-  
-  // Locate the squares
-  for (let row = 0; row < 8; row++) {
-    for (let col = 0; col < 8; col++) {
-      if (newBoardState.squares[row][col].position === from) {
-        fromSquare = newBoardState.squares[row][col];
-        fromRow = row;
-        fromCol = col;
-      }
-      if (newBoardState.squares[row][col].position === to) {
-        toSquare = newBoardState.squares[row][col];
-        toRow = row;
-        toCol = col;
-      }
-    }
-  }
-  
-  // Check if we found both squares
-  if (!fromSquare || !toSquare) {
-    console.error('Could not find squares for move');
-    return currentBoardState;
-  }
-  
-  // Check if there's a capture
-  if (toSquare.piece) {
-    const capturedPiece = toSquare.piece;
-    const capturedPieceWithId = {
-      ...capturedPiece,
-      id: `${capturedPiece.color[0]}${capturedPiece.type[0]}${Date.now()}` // Generate a unique ID
-    };
-    
-    // Add to captured pieces
-    if (capturedPiece.color === 'white') {
-      newBoardState.capturedPieces.white.push(capturedPieceWithId);
-    } else {
-      newBoardState.capturedPieces.black.push(capturedPieceWithId);
-    }
-  }
-  
-  // Move the piece
-  newBoardState.squares[toRow][toCol].piece = fromSquare.piece;
-  newBoardState.squares[fromRow][fromCol].piece = null;
-  
-  return newBoardState;
-};
-
-// Helper function to fully synchronize the board state from FEN
-const synchronizeBoardFromFen = (fen: string): BoardState => {
-  try {
-    // Reset the chess engine with the provided FEN
-    resetChessEngine();
-    const chess = getChessEngine();
-    
-    // Load the FEN into the chess engine
-    const loadSuccess = chess.load(fen);
-    
-    if (!loadSuccess) {
-      console.error('Failed to load FEN:', fen);
-      return getCurrentBoardState(); // Return current state as fallback
-    }
-    
-    // Get the new board state after successfully loading the FEN
-    return getCurrentBoardState();
-  } catch (error) {
-    console.error('Error synchronizing board from FEN:', error);
-    return getCurrentBoardState(); // Return current state as fallback
-  }
 };
 
 export default ChessBoard; 

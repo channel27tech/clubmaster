@@ -140,33 +140,39 @@ const GameOptionsDialog: React.FC<GameOptionsDialogProps> = ({
   };
 
   // Handle sound toggle with loading state
-  const handleSoundToggle = async () => {
+  const handleSoundToggle = () => {
     if (isToggling) return; // Prevent multiple clicks
     
-    try {
-      setIsToggling(true);
-      setToggleError(null);
-      
-      // Update the local state immediately for better UX
-      const newSoundEnabled = !soundEnabled;
-      
-      // Use specific button label to get the right sound
-      const buttonLabel = soundEnabled ? "Disable Sound" : "Enable Sound";
-      // Play sound with the correct button label
-      playSound('BUTTON_CLICK', true, 1.0, buttonLabel);
-      
-      // Try to update the server settings in the background
-      try {
-        await onSoundToggle(newSoundEnabled);
-        // Close dialog after successful toggle
-        onClose();
-      } catch (err: any) {
-        console.error('Error toggling sound:', err);
-        setToggleError(err?.message || 'Failed to save sound preference to server, but it will work for now');
-      }
-    } finally {
-      setIsToggling(false);
+    // Play click sound directly with the browser Audio API
+    // This is completely isolated from the WebSocket system
+    playDirectClickSound();
+    
+    // Store the new sound state
+    const newSoundEnabled = !soundEnabled;
+    
+    // Close dialog immediately - BEFORE any network operations
+    onClose();
+    
+    // Set sound in localStorage directly for immediate effect
+    // This ensures the change works even if server updates fail
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem('soundEnabled', newSoundEnabled.toString());
     }
+    
+    // Queue the server update with maximum isolation
+    // Use nested setTimeout to ensure maximum separation from any game operations
+    setTimeout(() => {
+      setTimeout(() => {
+        try {
+          onSoundToggle(newSoundEnabled).catch(err => {
+            console.error('Silent sound toggle error:', err);
+            // Errors are silently caught since dialog is closed and localStorage is set
+          });
+        } catch (err) {
+          console.error('Silent sound toggle outer error:', err);
+        }
+      }, 200);
+    }, 200);
   };
 
   if (!isOpen) return null;

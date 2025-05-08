@@ -47,10 +47,14 @@ export class TimerService {
     // Clean up existing timer if it exists
     this.cleanupTimer(gameId);
 
-    const initialTime = TIME_CONTROL_VALUES[timeControl];
-    if (!initialTime) {
-      throw new Error(`Invalid time control: ${timeControl}`);
+    // Validate time control
+    if (!Object.values(TimeControl).includes(timeControl)) {
+      this.logger.error(`Invalid time control received: ${timeControl}`);
+      timeControl = TimeControl.BLITZ; // Default to BLITZ if invalid
     }
+
+    const initialTime = TIME_CONTROL_VALUES[timeControl];
+    this.logger.log(`Initializing timer for game ${gameId} with time control ${timeControl} (${initialTime}ms)`);
 
     const timer: GameTimer = {
       gameId,

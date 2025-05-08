@@ -19,19 +19,42 @@ const ChessBoard = dynamic(() => import('./ChessBoard'), {
   ssr: false,
 });
 
-// Game time in seconds for different time controls
-const TIME_CONTROLS = {
-  BULLET: 180,  // 3 minutes
-  BLITZ: 300,   // 5 minutes
-  RAPID: 600    // 10 minutes
-};
-
 // Function to convert time string from backend to seconds
 const getTimeInSeconds = (timeControlStr: string): number => {
-  // Expected format: "3+0", "5+0", "10+0"
-  const mainTime = timeControlStr.split('+')[0];
-  // Convert to minutes then to seconds
-  return parseInt(mainTime) * 60;
+  try {
+    // Expected format: "3+0", "5+0", "10+0"
+    const mainTimePart = timeControlStr.split('+')[0];
+    const minutes = parseInt(mainTimePart);
+    
+    // Direct mapping for known values for reliability
+    if (minutes === 3) return 180; // 3 minutes
+    if (minutes === 5) return 300; // 5 minutes
+    if (minutes === 10) return 600; // 10 minutes
+    
+    // Fallback calculation for other values
+    return minutes * 60;
+  } catch (error) {
+    console.error('Error parsing time control string:', error);
+    return 300; // Default to 5 minutes (300 seconds)
+  }
+};
+
+// Map a timeControl string to a game mode
+const getGameModeFromTimeControl = (timeControlStr: string): string => {
+  try {
+    const minutes = parseInt(timeControlStr.split('+')[0]);
+    // Exact matches first
+    if (minutes === 3) return 'Bullet';
+    if (minutes === 5) return 'Blitz';
+    if (minutes === 10) return 'Rapid';
+    // Fallback ranges
+    if (minutes <= 3) return 'Bullet';
+    if (minutes <= 5) return 'Blitz';
+    return 'Rapid';
+  } catch (error) {
+    console.error('Error mapping time control to game mode:', error);
+    return 'Blitz'; // Default fallback
+  }
 };
 
 interface ChessBoardWrapperProps {
@@ -65,6 +88,9 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   const [capturedByWhite, setCapturedByWhite] = useState<CapturedPiece[]>([]);
   const [capturedByBlack, setCapturedByBlack] = useState<CapturedPiece[]>([]);
   
+  // Active player for timers
+  const [activePlayer, setActivePlayer] = useState<'white' | 'black' | null>('white');
+  
   // Game state
   const [gameState, setGameState] = useState({
     hasStarted: true,
@@ -72,31 +98,36 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     hasWhiteMoved: false,
     isGameOver: false,
     gameResult: '',
-    timeControl: timeControl || '5+0' // Use passed timeControl or default
+    timeControl: timeControl || '5+0', // Use passed timeControl or default
+    gameMode: getGameModeFromTimeControl(timeControl || '5+0') // Derive game mode from time control
   });
   
-  // Update gameState.timeControl when timeControl prop changes
+  // Update gameState when timeControl prop changes
   useEffect(() => {
     if (timeControl) {
+      const gameMode = getGameModeFromTimeControl(timeControl);
       setGameState(prev => ({
         ...prev,
-        timeControl: timeControl
+        timeControl: timeControl,
+        gameMode: gameMode
       }));
-      console.log('Updated timeControl to:', timeControl);
+      console.log(`Updated timeControl to: ${timeControl}, game mode: ${gameMode}`);
+      
+      // Validate time control format
+      if (!timeControl.match(/^\d+\+\d+$/)) {
+        console.warn('Invalid time control format:', timeControl);
+      }
     }
   }, [timeControl]);
   
   // Calculate time in seconds based on the time control string
   const gameTimeInSeconds = useMemo(() => {
-    console.log('Calculating time from:', gameState.timeControl);
-    // Direct mapping for known values for reliability
-    if (gameState.timeControl === '3+0') return 180;
-    if (gameState.timeControl === '5+0') return 300;
-    if (gameState.timeControl === '10+0') return 600;
-    
-    // Fallback to parsing
-    return getTimeInSeconds(gameState.timeControl);
-  }, [gameState.timeControl]);
+    if (!timeControl) return 300; // Default to 5 minutes
+    console.log('Calculating time from:', timeControl);
+    const seconds = getTimeInSeconds(timeControl);
+    console.log('Calculated seconds:', seconds);
+    return seconds;
+  }, [timeControl]);
   
   // Draw offer state
   const [drawOfferReceived, setDrawOfferReceived] = useState(false);
@@ -107,17 +138,16 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   const [opponentDisconnected, setOpponentDisconnected] = useState(false);
   const [disconnectedPlayerName, setDisconnectedPlayerName] = useState('');
   const [reconnectionTimeRemaining, setReconnectionTimeRemaining] = useState(120); // 2 minutes in seconds
-  const [maxReconnectionTime, setMaxReconnectionTime] = useState(120);
   const [reconnectionTimerId, setReconnectionTimerId] = useState<NodeJS.Timeout | null>(null);
 
   // Define captured pieces for each player
-  const [whiteCapturedPieces, setWhiteCapturedPieces] = useState<any[]>([]);
-  const [blackCapturedPieces, setBlackCapturedPieces] = useState<any[]>([]);
+  const [whiteCapturedPieces, setWhiteCapturedPieces] = useState<CapturedPiece[]>([]);
+  const [blackCapturedPieces, setBlackCapturedPieces] = useState<CapturedPiece[]>([]);
 
   // For this demo, we'll copy pieces from mock data
   useEffect(() => {
-    setWhiteCapturedPieces(player1.capturedPieces);
-    setBlackCapturedPieces(player2.capturedPieces);
+    setWhiteCapturedPieces(player1.capturedPieces as CapturedPiece[]);
+    setBlackCapturedPieces(player2.capturedPieces as CapturedPiece[]);
   }, []);
 
   // Preload sound effects when component mounts
@@ -250,18 +280,34 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   // Socket event listeners
   useEffect(() => {
     if (!socket) return;
+    
+    const safeSocket = socket;
+    
+    // Keep track of last established turn state with timestamps
+    // This helps prevent issues when other WebSocket operations like sound settings occur
+    const gameStateTracker = {
+      isWhiteTurn: true,
+      hasStarted: false,
+      lastUpdateTime: Date.now(),
+      // Store player turn by color for reliable referencing
+      activePlayer: 'white' as 'white' | 'black' | null,
+      // Store a reference to the active interval to prevent duplicates
+      stateCheckInterval: null as NodeJS.Timeout | null
+    };
 
     // Listen for draw offers
-    socket.on('offer_draw', () => {
+    safeSocket.on('offer_draw', () => {
       setDrawOfferReceived(true);
       
-      // Play notification sound
-      playSound('NOTIFICATION', soundEnabled);
+      // Play notification sound if enabled
+      if (soundEnabled) {
+        playSound('NOTIFICATION', true);
+      }
       
       // Set a timeout to auto-decline after 30 seconds
       const timeout = setTimeout(() => {
         setDrawOfferReceived(false);
-        socket.emit('decline_draw', { gameId: gameRoomId });
+        safeSocket.emit('decline_draw', { gameId: gameRoomId });
       }, 30000);
       
       setDrawOfferTimeout(timeout);
@@ -279,47 +325,131 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     });
 
     // Game events that would update the game state
-    socket.on('game_started', () => {
-      setGameState(prev => ({ ...prev, hasStarted: true }));
-      // Play game start sound
-      playSound('GAME_START', soundEnabled);
+    safeSocket.on('game_started', () => {
+      gameStateTracker.hasStarted = true;
+      gameStateTracker.lastUpdateTime = Date.now();
+      
+      setGameState(prev => ({ 
+        ...prev, 
+        hasStarted: true 
+      }));
+      
+      // Play game start sound if enabled
+      if (soundEnabled) {
+        playSound('GAME_START', true);
+      }
     });
     
-    socket.on('move_made', ({ player, isCapture, isCheck }) => {
-      // Play appropriate sound for the move
-      if (isCheck) {
-        playSound('CHECK', soundEnabled);
-      } else if (isCapture) {
-        playSound('CAPTURE', soundEnabled);
-      } else {
-        playSound('MOVE', soundEnabled);
-      }
+    safeSocket.on('move_made', ({ player, isCapture, isCheck }) => {
+      // Update our game state tracker
+      gameStateTracker.lastUpdateTime = Date.now();
       
+      // First update game state
       if (player === 'white') {
+        gameStateTracker.isWhiteTurn = false;
+        gameStateTracker.activePlayer = 'black';
+        
         setGameState(prev => ({ 
           ...prev, 
           isWhiteTurn: false,
           hasWhiteMoved: true 
         }));
+        
+        // Also ensure activePlayer state is synchronized
+        setActivePlayer('black');
       } else {
-        setGameState(prev => ({ ...prev, isWhiteTurn: true }));
+        gameStateTracker.isWhiteTurn = true;
+        gameStateTracker.activePlayer = 'white';
+        
+        setGameState(prev => ({ 
+          ...prev, 
+          isWhiteTurn: true 
+        }));
+        
+        // Also ensure activePlayer state is synchronized
+        setActivePlayer('white');
+      }
+      
+      // Then play sounds if enabled
+      if (soundEnabled) {
+        if (isCheck) {
+          playSound('CHECK', true);
+        } else if (isCapture) {
+          playSound('CAPTURE', true);
+        } else {
+          playSound('MOVE', true);
+        }
       }
     });
     
-    socket.on('checkmate', () => {
-      playSound('CHECKMATE', soundEnabled);
+    // Start a reliable state check interval 
+    // This is critical to ensure clocks continue running after WebSocket operations
+    if (gameStateTracker.stateCheckInterval === null) {
+      gameStateTracker.stateCheckInterval = setInterval(() => {
+        // Only verify if game has started and not ended
+        if (gameStateTracker.hasStarted) {
+          // Get current game state
+          setGameState(prev => {
+            // If the game is over, don't modify anything
+            if (prev.isGameOver) return prev;
+            
+            // If it's been over 5 seconds since our last update, force a re-sync
+            const needsForceUpdate = Date.now() - gameStateTracker.lastUpdateTime > 5000;
+            
+            // If no changes needed and not forcing update, return the same state to avoid re-renders
+            if (prev.isWhiteTurn === gameStateTracker.isWhiteTurn && !needsForceUpdate) {
+              return prev;
+            }
+            
+            // Otherwise update to match the last known turn state
+            console.log('⚠️ Correcting game clock state');
+            return {
+              ...prev,
+              isWhiteTurn: gameStateTracker.isWhiteTurn
+            };
+          });
+          
+          // Also ensure activePlayer state is synchronized
+          setActivePlayer(gameStateTracker.activePlayer);
+        }
+      }, 1000); // Check every second for more responsiveness
+    }
+    
+    safeSocket.on('checkmate', () => {
+      // Update game tracker state
+      gameStateTracker.activePlayer = null;
+      
+      if (soundEnabled) {
+        playSound('CHECKMATE', true);
+      }
     });
     
-    socket.on('draw', () => {
-      playSound('DRAW', soundEnabled);
+    safeSocket.on('draw', () => {
+      // Update game tracker state
+      gameStateTracker.activePlayer = null;
+      
+      if (soundEnabled) {
+        playSound('DRAW', true);
+      }
     });
     
-    socket.on('game_end', () => {
-      playSound('GAME_END', soundEnabled);
-    });
-
+    // Clean up intervals and event listeners on unmount
+    return () => {
+      if (gameStateTracker.stateCheckInterval) {
+        clearInterval(gameStateTracker.stateCheckInterval);
+        gameStateTracker.stateCheckInterval = null;
+      }
+      
+      // Clean up all event listeners to prevent memory leaks
+      safeSocket.off('offer_draw');
+      safeSocket.off('game_started');
+      safeSocket.off('move_made');
+      safeSocket.off('checkmate');
+      safeSocket.off('draw');
+    };
+    
     // Add disconnection event handlers
-    socket.on('opponent_disconnected', ({ playerId, reconnectTimeoutSeconds }) => {
+    safeSocket.on('opponent_disconnected', ({ playerId, reconnectTimeoutSeconds }) => {
       // Determine which player disconnected and set their name
       const isPlayer1 = playerId === player1.id;
       const disconnectedPlayer = isPlayer1 ? player1 : player2;
@@ -329,11 +459,12 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       
       // Set the reconnection time limit (either 2 minutes or remaining time on clock, whichever is less)
       const timeLimit = Math.min(reconnectTimeoutSeconds, 120);
-      setMaxReconnectionTime(timeLimit);
       setReconnectionTimeRemaining(timeLimit);
       
-      // Play disconnection sound
-      playSound('NOTIFICATION', soundEnabled);
+      // Play disconnection sound if enabled
+      if (soundEnabled) {
+        playSound('NOTIFICATION', true);
+      }
       
       // Start countdown timer
       const timerId = setInterval(() => {
@@ -349,7 +480,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       setReconnectionTimerId(timerId);
     });
     
-    socket.on('opponent_reconnected', () => {
+    safeSocket.on('opponent_reconnected', () => {
       // Clear disconnection state and timers
       setOpponentDisconnected(false);
       
@@ -358,19 +489,22 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         setReconnectionTimerId(null);
       }
       
-      // Play reconnection sound
-      playSound('GAME_START', soundEnabled);
+      // Play reconnection sound if enabled
+      if (soundEnabled) {
+        playSound('GAME_START', true);
+      }
     });
     
-    socket.on('game_timeout_disconnection', ({ winnerId, loserId, reason }) => {
+    safeSocket.on('game_timeout_disconnection', ({ winnerId, reason }) => {
       // Handle game ending due to disconnection timeout
-      const isWinner = socket.id === winnerId;
+      const isWinner = safeSocket.id === winnerId;
       
-      // Update game state
+      // Show appropriate message
       setGameState(prev => ({
         ...prev,
         isGameOver: true,
-        gameResult: `Game ended: ${reason}. ${isWinner ? 'You win!' : 'You lose.'}`,
+        gameResult: isWinner ? 'win' : 'loss',
+        gameOverReason: reason || 'Disconnection'
       }));
       
       // Clear disconnection state
@@ -385,11 +519,13 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       setActivePlayer(null);
       
       // Play game end sound
-      playSound('GAME_END', soundEnabled);
+      if (soundEnabled) {
+        playSound('GAME_END', true);
+      }
     });
 
     // Listen for game aborted event
-    socket.on('game_aborted', ({ gameId: abortedGameId, reason }) => {
+    safeSocket.on('game_aborted', ({ gameId: abortedGameId, reason }) => {
       if (gameRoomId === abortedGameId) {
         // Update game state to reflect abort
         setGameState(prevState => ({
@@ -402,19 +538,21 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         setActivePlayer(null);
 
         // Play notification sound
-        playSound('NOTIFICATION', soundEnabled);
+        if (soundEnabled) {
+          playSound('NOTIFICATION', true);
+        }
 
         console.log(`Game ${gameRoomId} has been aborted. Reason: ${reason}`);
       }
     });
 
     return () => {
-      socket.off('offer_draw');
-      socket.off('game_started');
-      socket.off('move_made');
-      socket.off('checkmate');
-      socket.off('draw');
-      socket.off('game_end');
+      safeSocket.off('offer_draw');
+      safeSocket.off('game_started');
+      safeSocket.off('move_made');
+      safeSocket.off('checkmate');
+      safeSocket.off('draw');
+      safeSocket.off('game_end');
       
       // Clear any existing timeouts
       if (drawOfferTimeout) {
@@ -422,19 +560,71 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       }
       
       // Cleanup disconnection event listeners
-      socket.off('opponent_disconnected');
-      socket.off('opponent_reconnected');
-      socket.off('game_timeout_disconnection');
+      safeSocket.off('opponent_disconnected');
+      safeSocket.off('opponent_reconnected');
+      safeSocket.off('game_timeout_disconnection');
       
       // Clear any existing timeouts
       if (reconnectionTimerId) {
         clearInterval(reconnectionTimerId);
       }
 
-      socket.off('game_aborted');
+      safeSocket.off('game_aborted');
     };
-  }, [socket, gameRoomId, drawOfferTimeout, reconnectionTimerId, soundEnabled, player1, player2]);
+  }, [socket, soundEnabled, gameRoomId]);
+
+  // Add redundant clock state synchronization
+  useEffect(() => {
+    // Sync activePlayer with gameState whiteTurn
+    // This adds redundancy to ensure clocks work even if one state gets out of sync
+    if (!gameState.isGameOver) {
+      const newActivePlayer = gameState.isWhiteTurn ? 'white' : 'black';
+      if (activePlayer !== newActivePlayer) {
+        setActivePlayer(newActivePlayer);
+      }
+    }
+  }, [gameState.isWhiteTurn, gameState.isGameOver, activePlayer]);
+
+  // Add a specific stable reference for making moves
+  // This helps ensure moves can be made even if other socket operations interrupt the connection
+  const [moveQueue, setMoveQueue] = useState<Array<{from: string, to: string, promotion?: string}>>([]);
   
+  // Dedicated effect for handling the move queue
+  // This is completely separated from sound settings or other game state updates
+  useEffect(() => {
+    if (!socket || !moveQueue.length || !gameRoomId) return;
+    
+    const move = moveQueue[0];
+    
+    // Create a function to handle a single move
+    const processMoveWithRetry = async () => {
+      try {
+        console.log(`Processing move: ${move.from} to ${move.to}`);
+        const currentPlayerColor = !gameState.isWhiteTurn ? 'white' : 'black'; // Invert since move is being made
+        
+        // Attempt to emit the move event
+        socket.emit('move_made', {
+          gameId: gameRoomId,
+          from: move.from,
+          to: move.to,
+          player: currentPlayerColor,
+          promotion: move.promotion
+        });
+        
+        // Remove this move from the queue
+        setMoveQueue(prev => prev.slice(1));
+      } catch (error) {
+        console.error('Error processing move:', error);
+        
+        // If there's an error, try again after a short delay
+        setTimeout(processMoveWithRetry, 500);
+      }
+    };
+    
+    // Execute immediately
+    processMoveWithRetry();
+  }, [socket, moveQueue, gameRoomId, gameState.isWhiteTurn]);
+
   // Handle move history updates from the ChessBoard component
   const handleMoveHistoryChange = useCallback((history: MoveHistoryState) => {
     setMoveHistory(history);
@@ -471,22 +661,18 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       setActivePlayer(status.turn === 'white' ? 'white' : 'black'); // Set the active player based on whose turn it is
     }
     
-    // If a move is made, notify the server
+    // If a move is made, add it to the move queue
     if (history.moves.length > 0 && history.currentMoveIndex === history.moves.length - 1) {
       const lastMove = history.moves[history.currentMoveIndex];
       
-      if (socket) {
-        socket.emit('move_made', {
-          gameId: gameRoomId,
-          from: lastMove.from,
-          to: lastMove.to,
-          player: lastMove.piece.color,
-          notation: lastMove.notation,
-          promotion: lastMove.promotion // Include promotion information if present
-        });
-      }
+      // Add to move queue instead of directly emitting
+      setMoveQueue(prev => [...prev, {
+        from: lastMove.from,
+        to: lastMove.to,
+        promotion: lastMove.promotion
+      }]);
     }
-  }, [socket, gameRoomId]);
+  }, []);
   
   // Get a human-readable game result string
   const getGameResult = (status: ReturnType<typeof getGameStatus>): string => {
@@ -532,9 +718,6 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   const canGoBack = moveHistory ? moveHistory.currentMoveIndex >= 0 : false;
   const canGoForward = moveHistory ? moveHistory.currentMoveIndex < moveHistory.moves.length - 1 : false;
   
-  // State to track active player (in a real game, this would be derived from game state)
-  const [activePlayer, setActivePlayer] = useState<'white' | 'black' | null>('white');
-  
   // Debug values
   useEffect(() => {
     console.log('ChessBoardWrapper received playerColor:', playerColor);
@@ -558,7 +741,9 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     }));
     
     // Play time out sound
-    playSound('GAME_END', soundEnabled);
+    if (soundEnabled) {
+      playSound('GAME_END', true);
+    }
   };
 
   // Handle draw offer responses
@@ -569,7 +754,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     setDrawOfferReceived(false);
     
     // Play button click sound
-    playSound('BUTTON_CLICK', soundEnabled);
+    playSound('BUTTON_CLICK', soundEnabled, 1.0, 'Accept');
     
     if (drawOfferTimeout) {
       clearTimeout(drawOfferTimeout);
@@ -594,7 +779,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     setDrawOfferReceived(false);
     
     // Play button click sound
-    playSound('BUTTON_CLICK', soundEnabled);
+    playSound('BUTTON_CLICK', soundEnabled, 1.0, 'Decline');
     
     if (drawOfferTimeout) {
       clearTimeout(drawOfferTimeout);
@@ -637,7 +822,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     socket.emit('abort_game', { gameId: gameRoomId });
     
     // Play sound
-    playSound('BUTTON_CLICK', soundEnabled);
+    playSound('BUTTON_CLICK', soundEnabled, 1.0, 'Abort');
   };
 
   // When gameRoomId changes, join the socket room
@@ -660,6 +845,17 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       };
     }
   }, [socket, gameRoomId]);
+
+  // When gameState.isGameOver changes, clear chess engine state if game is over
+  useEffect(() => {
+    if (gameState.isGameOver) {
+      // Clear persistent chess state from localStorage to prevent issues in future games
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('chess_engine_state');
+        console.log('Cleared chess engine state due to game end');
+      }
+    }
+  }, [gameState.isGameOver]);
 
   return (
     <div className="flex flex-col w-full h-full rounded-t-xl rounded-b-none sm:rounded-t-xl sm:rounded-b-none overflow-hidden flex-shrink-0" style={{ backgroundColor: '#4A7C59' }}>
