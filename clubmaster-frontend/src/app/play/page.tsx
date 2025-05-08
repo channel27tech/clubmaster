@@ -1,46 +1,101 @@
 'use client';
 
 import React, { useState, useRef } from 'react';
-import MatchmakingManager from '../components/MatchmakingManager';
+import MatchmakingManager, { MatchmakingManagerHandle } from '@/app/components/MatchmakingManager';
 import WaitingScreen from '../components/WaitingScreen';
-import { FaChessKnight, FaClock, FaArrowLeft, FaRandom } from 'react-icons/fa';
+import { FaArrowLeft } from 'react-icons/fa';
 import Link from 'next/link';
 import Image from 'next/image';
+import { useRouter } from 'next/navigation';
+
+// Define the window interface to properly type the window extensions
+declare global {
+  interface Window {
+    startMatchmakingDebug?: () => void;
+    cancelMatchmakingDebug?: () => void;
+  }
+}
+
+// Map time values to game modes for consistency
+const getGameModeFromTime = (timeInMinutes: number): string => {
+  if (timeInMinutes <= 3) return 'Bullet';
+  if (timeInMinutes <= 5) return 'Blitz';
+  return 'Rapid';
+};
 
 /**
  * Match Setup page component
  * Allows users to select game mode, time control, and starting side
  */
 const PlayPage: React.FC = () => {
-  const matchmakingRef = useRef<HTMLDivElement>(null);
+  const matchmakingRef = useRef<MatchmakingManagerHandle>(null);
   const [activeTab, setActiveTab] = useState<string>('Blitz');
   const [selectedTime, setSelectedTime] = useState<number>(5);
   const [playAs, setPlayAs] = useState<string>('white');
   const [isMatchmaking, setIsMatchmaking] = useState<boolean>(false);
+  const router = useRouter();
+  
+  // Function to get time value based on game mode
+  const getTimeFromGameMode = (mode: string): number => {
+    switch (mode.toLowerCase()) {
+      case 'bullet':
+        return 3;
+      case 'blitz':
+        return 5;
+      case 'rapid':
+        return 10;
+      default:
+        return 5;
+    }
+  };
+
+  // Set the appropriate time when tab changes
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab);
+    setSelectedTime(getTimeFromGameMode(tab));
+    console.log(`🔄 Tab changed to ${tab}, time set to: ${getTimeFromGameMode(tab)}`);
+  };
+
+  // Handle time selection
+  const handleTimeSelection = (time: number) => {
+    setSelectedTime(time);
+    setActiveTab(getGameModeFromTime(time));
+    console.log(`🔄 Time changed to ${time}, game mode set to: ${getGameModeFromTime(time)}`);
+  };
+  
+  const handleMatchmakingError = (error: string) => {
+    console.error('Matchmaking error:', error);
+    setIsMatchmaking(false);
+  };
+
+  const handleGameFound = (gameId: string) => {
+    console.log('Game found:', gameId);
+    router.push(`/play/game/${gameId}`);
+  };
   
   const handleStartMatchmaking = () => {
     console.log('Play Random clicked with:', { activeTab, selectedTime, playAs });
     
-    // Store the time control in localStorage immediately as a fallback
-    const timeControlStr = `${selectedTime}+0`;
+    // Get the correct time based on game mode
+    const timeForMode = getTimeFromGameMode(activeTab);
+    console.log('Time for selected game mode:', timeForMode);
+    
+    // Format time control string properly
+    const timeControlStr = `${timeForMode}+0`;
     localStorage.setItem('timeControl', timeControlStr);
-    console.log('Stored time control in localStorage (fallback):', timeControlStr);
+    console.log('📝 Stored time control in localStorage:', timeControlStr);
+    
+    // Also store the game mode (Bullet, Blitz, Rapid)
+    localStorage.setItem('gameMode', activeTab);
+    console.log('📝 Stored game mode in localStorage:', activeTab);
     
     setIsMatchmaking(true);
     
-    // Method 1: Try to find and click the start button directly
-    const startButton = document.getElementById('start-matchmaking-button');
-    if (startButton) {
-      console.log('Found start button, clicking it');
-      startButton.click();
-      return;
-    }
-    
-    // Method 2: Call the debug method directly
-    if (typeof window !== 'undefined' && (window as any).startMatchmakingDebug) {
-      console.log('Using debug method');
-      (window as any).startMatchmakingDebug();
-      return;
+    // Pass the correct time control to MatchmakingManager
+    if (matchmakingRef.current) {
+      matchmakingRef.current.startMatchmaking(activeTab, String(timeForMode), playAs);
+    } else {
+      console.error('❌ MatchmakingManager ref not available');
     }
   };
 
@@ -55,27 +110,9 @@ const PlayPage: React.FC = () => {
     }
     
     // Method 2: Call the debug method directly
-    if (typeof window !== 'undefined' && (window as any).cancelMatchmakingDebug) {
+    if (typeof window !== 'undefined' && window.cancelMatchmakingDebug) {
       console.log('Using debug method');
-      (window as any).cancelMatchmakingDebug();
-    }
-  };
-
-  // Set the appropriate time when tab changes
-  const handleTabChange = (tab: string) => {
-    setActiveTab(tab);
-    
-    // Set default time for each game type
-    switch (tab) {
-      case 'Bullet':
-        setSelectedTime(3);
-        break;
-      case 'Blitz':
-        setSelectedTime(5);
-        break;
-      case 'Rapid':
-        setSelectedTime(10);
-        break;
+      window.cancelMatchmakingDebug();
     }
   };
   
@@ -128,17 +165,17 @@ const PlayPage: React.FC = () => {
               <TimeButton 
                 time={3}
                 isActive={selectedTime === 3}
-                onClick={() => setSelectedTime(3)}
+                onClick={() => handleTimeSelection(3)}
               />
               <TimeButton 
                 time={5}
                 isActive={selectedTime === 5}
-                onClick={() => setSelectedTime(5)}
+                onClick={() => handleTimeSelection(5)}
               />
               <TimeButton 
                 time={10}
                 isActive={selectedTime === 10}
-                onClick={() => setSelectedTime(10)}
+                onClick={() => handleTimeSelection(10)}
               />
             </div>
             
@@ -187,13 +224,11 @@ const PlayPage: React.FC = () => {
       )}
       
       {/* Hidden MatchmakingManager component */}
-      <div ref={matchmakingRef} style={{ display: 'none' }}>
-        <MatchmakingManager 
-          defaultGameMode={activeTab}
-          defaultTimeControl={selectedTime.toString()}
-          defaultSide={playAs}
-        />
-      </div>
+      <MatchmakingManager
+        ref={matchmakingRef}
+        onError={handleMatchmakingError}
+        onGameFound={handleGameFound}
+      />
     </div>
   );
 };

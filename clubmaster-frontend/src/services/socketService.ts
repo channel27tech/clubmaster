@@ -90,16 +90,30 @@ export const startMatchmaking = (matchmakingOptions: {
   rated?: boolean;
   preferredSide?: string;
 }): void => {
+  console.log('🔍 StartMatchmaking called with options:', matchmakingOptions);
+  
+  // Validate and format time control
+  if (matchmakingOptions.timeControl) {
+    // Ensure time control is in the correct format
+    const timeControlStr = matchmakingOptions.timeControl;
+    console.log('Processing time control:', timeControlStr);
+    
+    // Store the validated time control
+    localStorage.setItem('timeControl', timeControlStr);
+    console.log('📝 Stored time control in localStorage:', timeControlStr);
+    
+    // Store the game mode for consistency
+    if (matchmakingOptions.gameMode) {
+      localStorage.setItem('gameMode', matchmakingOptions.gameMode);
+      console.log('📝 Stored game mode in localStorage:', matchmakingOptions.gameMode);
+    }
+  }
+  
   if (socket?.connected) {
+    console.log('🚀 Emitting startMatchmaking event with:', matchmakingOptions);
     socket.emit('startMatchmaking', matchmakingOptions);
   } else {
-    console.error('Cannot start matchmaking: Socket not connected');
-    // Try to reconnect
-    if (socket) {
-      socket.connect();
-    } else {
-      getSocket(); // Initialize socket if it doesn't exist
-    }
+    console.error('⚠️ Cannot start matchmaking: Socket not connected');
   }
 };
 
@@ -302,5 +316,79 @@ export const resignGame = (gameId: string): void => {
 export const abortGame = (gameId: string): void => {
   if (socket?.connected) {
     socket.emit('abort_game', { gameId });
+  }
+};
+
+// Map a timeControl string (e.g. "3+0") to the backend's TimeControl enum
+export const mapTimeControlToEnum = (timeControlStr: string): string => {
+  try {
+    // Extract minutes part from the timeControlStr (format: "3+0", "5+0", etc.)
+    const minutes = parseInt(timeControlStr.split('+')[0]);
+    
+    // Map to backend enum values with exact time matches
+    if (minutes === 3) return 'BULLET';
+    if (minutes === 5) return 'BLITZ';
+    if (minutes === 10) return 'RAPID';
+    
+    // Fallback mapping for non-standard times
+    if (minutes <= 3) return 'BULLET';
+    if (minutes <= 5) return 'BLITZ';
+    return 'RAPID';
+  } catch (error) {
+    console.error('Error mapping time control to enum:', error);
+    return 'BLITZ'; // Default fallback
+  }
+};
+
+/**
+ * Initialize the game timer
+ */
+export const initializeTimer = (gameId: string, timeControl: string): void => {
+  if (!socket?.connected) {
+    console.error('Cannot initialize timer: Socket not connected');
+    return;
+  }
+
+  try {
+    // Map the time control to the backend enum before sending
+    const timeControlEnum = mapTimeControlToEnum(timeControl);
+    console.log('Initializing timer with:', { gameId, timeControl, timeControlEnum });
+    socket.emit('initializeTimer', { gameId, timeControl: timeControlEnum });
+  } catch (error) {
+    console.error('Error initializing timer:', error);
+  }
+};
+
+// Helper function to format time control
+const formatTimeControl = (timeControl: string): string => {
+  try {
+    // If it's already in the correct format (e.g., "3+0"), return as is
+    if (/^\d+\+\d+$/.test(timeControl)) {
+      return timeControl;
+    }
+
+    // If it's just a number (e.g., "3"), format it
+    const minutes = parseInt(timeControl);
+    if (!isNaN(minutes)) {
+      return `${minutes}+0`;
+    }
+
+    throw new Error('Invalid time control format');
+  } catch (error) {
+    console.error('Error formatting time control:', error);
+    return '5+0'; // Default fallback
+  }
+};
+
+/**
+ * Get the current timer state for a game
+ * @param gameId The ID of the game
+ */
+export const getTimerState = (gameId: string): void => {
+  console.log('🕒 Getting timer state for game:', gameId);
+  if (socket?.connected) {
+    socket.emit('getTimerState', { gameId });
+  } else {
+    console.error('⚠️ Cannot get timer state: Socket not connected');
   }
 }; 

@@ -1,10 +1,21 @@
-import { io, Socket } from 'socket.io-client';
+/**
+ * Socket service proxy - forwards to the main socketService.ts
+ * @deprecated This file exists for backward compatibility. Please use @/services/socketService.ts directly.
+ */
 
+import * as socketServiceImplementation from '@/services/socketService';
+import { Socket } from 'socket.io-client';
+
+/**
+ * Singleton SocketService class that just forwards to the main socketService.ts
+ */
 class SocketService {
-  private socket: Socket | null = null;
   private static instance: SocketService;
 
-  private constructor() {}
+  private constructor() {
+    // Nothing to do here, just forwarding
+    console.warn('[DEPRECATED] Using deprecated SocketService class. Please use @/services/socketService.ts directly.');
+  }
 
   static getInstance(): SocketService {
     if (!SocketService.instance) {
@@ -13,67 +24,86 @@ class SocketService {
     return SocketService.instance;
   }
 
+  // Forward the connect method
   connect(): Socket {
-    if (!this.socket) {
-      this.socket = io(process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001', {
-        transports: ['websocket'],
-        autoConnect: true,
-      });
-
-      this.socket.on('connect', () => {
-        console.log('Connected to WebSocket server');
-      });
-
-      this.socket.on('disconnect', () => {
-        console.log('Disconnected from WebSocket server');
-      });
-
-      this.socket.on('connect_error', (error) => {
-        console.error('Connection error:', error);
-      });
-    }
-    return this.socket;
+    return socketServiceImplementation.getSocket();
   }
 
+  // Forward all methods
   getSocket(): Socket | null {
-    return this.socket;
+    return socketServiceImplementation.getSocket();
   }
 
   disconnect(): void {
-    if (this.socket) {
-      this.socket.disconnect();
-      this.socket = null;
-    }
+    return socketServiceImplementation.disconnectSocket();
   }
 
-  // Timer-specific methods
+  isConnected(): boolean {
+    return socketServiceImplementation.isConnected();
+  }
+
+  // Forward timer methods
   joinGame(gameId: string): void {
-    this.socket?.emit('joinGame', { gameId });
+    socketServiceImplementation.joinGame({ gameType: 'chess' });
   }
 
   leaveGame(gameId: string): void {
-    this.socket?.emit('leaveGame', { gameId });
+    // Not directly implemented in the functional service
+    const socket = socketServiceImplementation.getSocket();
+    if (socket?.connected) {
+      socket.emit('leaveGame', { gameId });
+    }
   }
 
-  initializeTimer(gameId: string, timeControl: 'BULLET' | 'BLITZ' | 'RAPID'): void {
-    this.socket?.emit('initializeTimer', { gameId, timeControl });
+  // Forward timer initialization with proper conversion
+  initializeTimer(gameId: string, timeControlStr: string): void {
+    return socketServiceImplementation.initializeTimer(gameId, timeControlStr);
   }
 
+  // Forward other timer methods
   startTimer(gameId: string): void {
-    this.socket?.emit('startTimer', { gameId });
+    const socket = socketServiceImplementation.getSocket();
+    if (socket?.connected) {
+      socket.emit('startTimer', { gameId });
+    }
   }
 
   pauseTimer(gameId: string): void {
-    this.socket?.emit('pauseTimer', { gameId });
+    const socket = socketServiceImplementation.getSocket();
+    if (socket?.connected) {
+      socket.emit('pauseTimer', { gameId });
+    }
   }
 
   switchTurn(gameId: string): void {
-    this.socket?.emit('switchTurn', { gameId });
+    const socket = socketServiceImplementation.getSocket();
+    if (socket?.connected) {
+      socket.emit('switchTurn', { gameId });
+    }
   }
 
   getTimerState(gameId: string): void {
-    this.socket?.emit('getTimerState', { gameId });
+    const socket = socketServiceImplementation.getSocket();
+    if (socket?.connected) {
+      socket.emit('getTimerState', { gameId });
+    }
   }
+
+  // Forward matchmaking methods
+  startMatchmaking(options: {
+    gameMode?: string;
+    timeControl?: string;
+    rated?: boolean;
+    preferredSide?: string;
+  }): void {
+    socketServiceImplementation.startMatchmaking(options);
+  }
+
+  cancelMatchmaking(): void {
+    socketServiceImplementation.cancelMatchmaking();
+  }
+
+  // Event handler registration is taken care of by the component directly calling the correct service
 }
 
 export const socketService = SocketService.getInstance(); 
