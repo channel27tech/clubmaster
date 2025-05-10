@@ -9,6 +9,8 @@ interface PlayerConnection {
   disconnectedAt: number | null;
   isReconnecting: boolean;
   reconnectionTimeout: NodeJS.Timeout | null;
+  username?: string;
+  isConnected: boolean;
 }
 
 interface GameState {
@@ -64,6 +66,7 @@ export class DisconnectionService {
         disconnectedAt: null,
         isReconnecting: false,
         reconnectionTimeout: null,
+        isConnected: false,
       });
     });
     
@@ -219,6 +222,8 @@ export class DisconnectionService {
    * Handle a player's request to abort a game
    */
   handleAbortRequest(server: Server, playerId: string, gameId: string): boolean {
+    this.logger.log(`Processing abort request for game ${gameId} from player ${playerId}`);
+    
     const gameState = this.gameStates.get(gameId);
     
     if (!gameState) {
@@ -245,14 +250,16 @@ export class DisconnectionService {
     }
     
     // Abort the game
-    this.abortGame(server, gameId, 'Player requested game abort');
+    this.abortGame(server, gameId, 'Player requested game abort', playerId);
     return true;
   }
 
   /**
    * Abort a game and notify all players
    */
-  abortGame(server: Server, gameId: string, reason: string): void {
+  abortGame(server: Server, gameId: string, reason: string, initiatorId?: string): void {
+    this.logger.log(`Aborting game ${gameId}. Reason: ${reason}. Initiator: ${initiatorId || 'System'}`);
+    
     const gameState = this.gameStates.get(gameId);
     
     if (!gameState) {
@@ -266,18 +273,38 @@ export class DisconnectionService {
     // Stop the game timer
     this.timerService.cleanupTimer(gameId);
     
-    // Notify all players
+    // Get player information for more detailed abort event
+    const players = gameState.playerIds.map(id => {
+      const connection = this.playerConnections.get(id);
+      return {
+        id,
+        isInitiator: id === initiatorId,
+        username: connection?.username || 'Unknown',
+        connected: !!connection?.isConnected
+      };
+    });
+    
+    // Prepare an informative abort payload
+    const abortPayload = {
+      gameId,
+      reason,
+      initiatorId,
+      timestamp: new Date().toISOString(),
+      players
+    };
+    
+    // Notify all players with detailed information
     gameState.playerIds.forEach(playerId => {
       const connection = this.playerConnections.get(playerId);
       if (connection && connection.socketId) {
         server.to(connection.socketId).emit('game_aborted', {
-          gameId,
-          reason,
+          ...abortPayload,
+          isInitiator: playerId === initiatorId
         });
       }
     });
     
-    this.logger.log(`Game ${gameId} aborted. Reason: ${reason}`);
+    this.logger.log(`Game ${gameId} successfully aborted. Notified ${gameState.playerIds.length} players.`);
   }
 
   /**

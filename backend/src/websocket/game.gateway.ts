@@ -5,14 +5,17 @@ import {
   OnGatewayConnection,
   OnGatewayDisconnect,
   SubscribeMessage,
+  ConnectedSocket,
+  MessageBody,
 } from '@nestjs/websockets';
 import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { MatchmakingService } from '../game/matchmaking.service';
 import { GameManagerService } from '../game/game-manager.service';
-import { GameEndService } from '../game/game-end/game-end.service';
+import { GameEndService, GameEndReason, GameResult } from '../game/game-end/game-end.service';
 import { RatingService } from '../game/rating/rating.service';
 import { DisconnectionService } from '../game/disconnection.service';
+import { JoinGameDto } from '../game/dto/join-game.dto';
 
 interface MatchmakingOptions {
   gameMode?: string;
@@ -20,6 +23,26 @@ interface MatchmakingOptions {
   rated?: boolean;
   preferredSide?: string;
 }
+
+// Define an interface for the move_made payload
+interface MoveMadePayload {
+  gameId: string;
+  from: string;
+  to: string;
+  player: string;
+  notation: string;
+  promotion?: string; // Add optional promotion field
+  isCapture?: boolean; // Already being added, but good to have in type if strict
+  fen?: string; // Already being added, good to have
+}
+
+// Add this mapping
+const pieceTypeToChessJs: Record<string, string | undefined> = {
+  'queen': 'q',
+  'rook': 'r',
+  'bishop': 'b',
+  'knight': 'n',
+};
 
 @WebSocketGateway({
   cors: {
@@ -49,6 +72,7 @@ export class GameGateway
    */
   afterInit() {
     this.logger.log('Chess Game WebSocket Gateway Initialized');
+    this.logger.warn('⚠ GAME STATE WARNING: All game state is stored in-memory only. Restarting the server will clear all active games.');
   }
 
   /**
@@ -81,22 +105,100 @@ export class GameGateway
   }
 
   /**
-   * Handle a client request to join a game
+   * Handle a client joining a game from the matchmaking queue
    */
-  @SubscribeMessage('joinGame')
-  handleJoinGame(client: Socket, payload: any) {
-    this.logger.log(
-      `Client ${client.id} requested to join game: ${JSON.stringify(payload)}`,
-    );
-    // For now, just acknowledge the request
-    // In future implementations, this will handle actual game joining logic
-    return {
-      event: 'gameJoinResponse',
-      data: {
-        success: true,
-        message: 'Request to join game received',
-        gameId: `test-game-${Date.now()}`,
+  @SubscribeMessage('join_game')
+  handleJoinGame(client: Socket, payload: JoinGameDto): { event: string; data: any } {
+    const { gameType } = payload;
+    
+    this.logger.log(`Client ${client.id} is joining a game type: ${gameType}`);
+    
+    try {
+      // Call the method but don't check its return value since it's void
+      this.matchmakingService.addPlayerToQueue(client, {
+        gameMode: gameType,
+        timeControl: payload.timeControl || '5+0',
+        rated: payload.rated !== undefined ? payload.rated : true,
+        preferredSide: payload.preferredSide || 'random'
+      });
+      
+      // Always return success if no exception was thrown
+      return {
+        event: 'joinGameResponse',
+        data: { success: true, message: 'Added to matchmaking queue' },
+      };
+    } catch (error) {
+      return {
+        event: 'joinGameResponse',
+        data: { 
+          success: false, 
+          message: error instanceof Error ? error.message : 'An error occurred' 
+        },
+      };
+    }
+  }
+
+  /**
+   * Handle a client connecting to an existing game
+   */
+  @SubscribeMessage('enter_game')
+  handleEnterGame(client: Socket, payload: { gameId: string }): { event: string; data: any } {
+    this.logger.log(`Client ${client.id} is entering game ${payload.gameId}`);
+    
+    // Join the game room for all real-time updates
+    client.join(payload.gameId);
+    
+    // Get the game state
+    const game = this.gameManagerService.getGame(payload.gameId);
+    
+    if (!game) {
+      this.logger.warn(`Game ${payload.gameId} not found in gameManagerService - Games registry might be broken.`);
+      
+      // Log currently active games for debugging
+      const activeGames = this.gameManagerService.getAllActiveGames();
+      this.logger.log(`Currently registered games: ${activeGames.length}`);
+      activeGames.forEach(g => {
+        this.logger.log(`Game ID: ${g.gameId}, White: ${g.whitePlayer.socketId}, Black: ${g.blackPlayer.socketId}`);
+      });
+      
+      return {
+        event: 'enterGameResponse',
+        data: { success: false, message: 'Game not found' },
+      };
+    }
+    
+    this.logger.log(`Game ${payload.gameId} found - White: ${game.whitePlayer.socketId}, Black: ${game.blackPlayer.socketId}`);
+    
+    // Send initial game state that explicitly includes hasWhiteMoved status
+    client.emit('game_state', {
+      gameId: payload.gameId,
+      hasWhiteMoved: !game.isFirstMove, // Inverse of isFirstMove
+      isWhiteTurn: game.whiteTurn,
+      hasStarted: game.started,
+      isGameOver: game.ended,
+      players: {
+        white: {
+          username: game.whitePlayer.username,
+          rating: game.whitePlayer.rating,
+          isGuest: game.whitePlayer.isGuest,
+        },
+        black: {
+          username: game.blackPlayer.username,
+          rating: game.blackPlayer.rating,
+          isGuest: game.blackPlayer.isGuest,
+        },
       },
+    });
+    
+    // Send timeControl to client
+    client.emit('time_control', {
+      gameId: payload.gameId,
+      timeControl: game.timeControl,
+    });
+    
+    return {
+      event: 'enterGameResponse',
+      data: { success: true, message: 'Joined game room' },
     };
   }
 
@@ -180,227 +282,309 @@ export class GameGateway
    */
   @SubscribeMessage('make_move')
   handleMakeMove(client: Socket, payload: { gameId: string; move: string }) {
-    this.logger.log(
-      `Client ${client.id} made move ${payload.move} in game ${payload.gameId}`,
-    );
-    
-    // Have game manager process the move
-    const moveSuccess = this.gameManagerService.makeMove(
-      payload.gameId,
-      payload.move,
-      client.id,
-    );
-    
-    if (moveSuccess) {
-      // Get updated game state
-      const game = this.gameManagerService.getGame(payload.gameId);
+    try {
+      this.logger.log(
+        `Client ${client.id} made move ${payload.move} in game ${payload.gameId}`,
+      );
       
-      if (game) {
-        // Broadcast the move to all players in the game room
-        this.server.to(payload.gameId).emit('move_made', {
-          gameId: payload.gameId,
-          move: payload.move,
-          playerId: client.id,
-          fen: game.chessInstance.fen(),
-          pgn: game.pgn,
-          isWhiteTurn: game.whiteTurn,
-        });
-        
-        // Check if the game has ended after this move
-        const gameResult = this.gameManagerService.checkGameEnd(
-          payload.gameId,
-          this.server,
-        );
-        
-        if (gameResult) {
-          // Game has ended, the gameEnd event has already been emitted
-          // from within the gameManagerService
-          return {
-            event: 'moveMade',
-            data: {
-              success: true,
-              message: 'Move made and game ended',
-              gameEnd: true,
-              result: gameResult,
-            },
-          };
-        }
+      // Check if the game exists before proceeding
+      const gameExists = this.gameManagerService.getGame(payload.gameId);
+      if (!gameExists) {
+        // Enhanced debugging for missing game
+        const allGames = this.gameManagerService.getAllActiveGames();
+        this.logger.warn(`[GameGateway] Game ${payload.gameId} not found for make_move! Games keys: [${allGames.map(g => g.gameId).join(', ')}]`);
         
         return {
           event: 'moveMade',
           data: {
-            success: true,
-            message: 'Move made',
-            gameEnd: false,
+            success: false,
+            message: 'Game not found in server registry',
           },
         };
       }
-    }
-    
-    return {
-      event: 'moveMade',
-      data: {
-        success: false,
-        message: moveSuccess ? 'Game not found' : 'Invalid move',
-      },
-    };
-  }
-  
-  /**
-   * Handle a client offer to draw
-   */
-  @SubscribeMessage('offer_draw')
-  handleOfferDraw(client: Socket, payload: { gameId: string }) {
-    this.logger.log(
-      `Client ${client.id} offered a draw in game ${payload.gameId}`,
-    );
-    
-    const game = this.gameManagerService.getGame(payload.gameId);
-    
-    if (!game) {
+      
+      // Have game manager process the move
+      const moveSuccess = this.gameManagerService.makeMove(
+        payload.gameId,
+        payload.move,
+        client.id,
+      );
+      
+      if (moveSuccess) {
+        // Get updated game state
+        const game = this.gameManagerService.getGame(payload.gameId);
+        
+        if (game) {
+          this.logger.log(`Move successfully processed for game ${payload.gameId}`);
+          
+          // Broadcast the move to all players in the game room
+          this.server.to(payload.gameId).emit('move_made', {
+            gameId: payload.gameId,
+            move: payload.move,
+            playerId: client.id,
+            fen: game.chessInstance.fen(),
+            pgn: game.pgn,
+            isWhiteTurn: game.whiteTurn,
+          });
+          
+          // Check if the game has ended after this move
+          const gameResult = this.gameManagerService.checkGameEnd(
+            payload.gameId,
+            this.server,
+          );
+          
+          if (gameResult) {
+            // Game has ended, the gameEnd event has already been emitted
+            // from within the gameManagerService
+            return {
+              event: 'moveMade',
+              data: {
+                success: true,
+                message: 'Move made and game ended',
+                gameEnd: true,
+                result: gameResult,
+              },
+            };
+          }
+          
+          return {
+            event: 'moveMade',
+            data: {
+              success: true,
+              message: 'Move made',
+              gameEnd: false,
+            },
+          };
+        } else {
+          this.logger.error(`Game ${payload.gameId} disappeared after successful move`);
+          return {
+            event: 'moveMade',
+            data: {
+              success: false,
+              message: 'Game state lost after move',
+            },
+          };
+        }
+      } else {
+        this.logger.warn(`Invalid move ${payload.move} attempted by client ${client.id} in game ${payload.gameId}`);
+        return {
+          event: 'moveMade',
+          data: {
+            success: false,
+            message: 'Invalid move',
+          },
+        };
+      }
+    } catch (error) {
+      this.logger.error(`Error processing move for game ${payload?.gameId}:`, error);
       return {
-        event: 'drawOfferSent',
+        event: 'moveMade',
         data: {
           success: false,
-          message: 'Game not found',
+          message: 'Server error processing move',
+          error: error.message
         },
       };
     }
-    
-    // Update the game state to record the draw offer
-    game.drawOfferBy = client.id;
-    
-    // Broadcast the draw offer to the opponent
-    client.to(payload.gameId).emit('draw_offered', {
-      gameId: payload.gameId,
-      playerId: client.id,
-    });
-    
-    return {
-      event: 'drawOfferSent',
-      data: {
-        success: true,
-        message: 'Draw offer sent to opponent',
-      },
-    };
-  }
-
-  /**
-   * Handle a client accepting a draw
-   */
-  @SubscribeMessage('accept_draw')
-  handleAcceptDraw(client: Socket, payload: { gameId: string }) {
-    this.logger.log(
-      `Client ${client.id} accepted a draw in game ${payload.gameId}`,
-    );
-    
-    const game = this.gameManagerService.getGame(payload.gameId);
-    
-    if (!game) {
-      return {
-        event: 'drawAccepted',
-        data: {
-          success: false,
-          message: 'Game not found',
-        },
-      };
-    }
-    
-    // Verify that there is a pending draw offer from the other player
-    const drawOfferFromOtherPlayer = game.drawOfferBy && 
-      game.drawOfferBy !== client.id;
-    
-    if (!drawOfferFromOtherPlayer) {
-      return {
-        event: 'drawAccepted',
-        data: {
-          success: false,
-          message: 'No valid draw offer to accept',
-        },
-      };
-    }
-    
-    // Register the draw agreement
-    const gameResult = this.gameManagerService.registerDrawAgreement(
-      payload.gameId,
-      this.server,
-    );
-    
-    if (gameResult) {
-      return {
-        event: 'drawAccepted',
-        data: {
-          success: true,
-          message: 'Draw accepted',
-          result: gameResult,
-        },
-      };
-    }
-    
-    return {
-      event: 'drawAccepted',
-      data: {
-        success: false,
-        message: 'Failed to process draw acceptance',
-      },
-    };
-  }
-
-  /**
-   * Handle a client declining a draw
-   */
-  @SubscribeMessage('decline_draw')
-  handleDeclineDraw(client: Socket, payload: { gameId: string }) {
-    this.logger.log(
-      `Client ${client.id} declined a draw in game ${payload.gameId}`,
-    );
-    
-    const game = this.gameManagerService.getGame(payload.gameId);
-    
-    if (!game) {
-      return {
-        event: 'drawDeclined',
-        data: {
-          success: false,
-          message: 'Game not found',
-        },
-      };
-    }
-    
-    // Clear the draw offer
-    game.drawOfferBy = undefined;
-    
-    // Broadcast the draw decline to the opponent
-    client.to(payload.gameId).emit('draw_declined', {
-      gameId: payload.gameId,
-      playerId: client.id,
-    });
-    
-    return {
-      event: 'drawDeclined',
-      data: {
-        success: true,
-        message: 'Draw declined',
-      },
-    };
   }
 
   /**
    * Handle a client resigning from a game
    */
-  @SubscribeMessage('resign_game')
-  handleResignGame(client: Socket, payload: { gameId: string }) {
-    this.logger.log(
-      `Client ${client.id} resigned from game ${payload.gameId}`,
-    );
-    
-    const gameResult = this.gameManagerService.registerResignation(
-      payload.gameId,
-      client.id,
-      this.server,
-    );
-    
-    if (gameResult) {
+  @SubscribeMessage('resign')
+  handleResign(client: Socket, payload: { gameId: string }) {
+    try {
+      this.logger.log(
+        `Client ${client.id} resigned from game ${payload.gameId}`,
+      );
+      
+      // First, check if the game exists and get its data
+      const game = this.gameManagerService.getGame(payload.gameId);
+      if (!game) {
+        this.logger.error(`Game ${payload.gameId} not found for resignation event`);
+        return {
+          event: 'gameResigned',
+          data: { success: false, message: 'Game not found' }
+        };
+      }
+
+      // Make sure we have valid socket IDs for both players
+      if (!game.whitePlayer?.socketId || !game.blackPlayer?.socketId) {
+        this.logger.error(`Missing socket IDs for players in game ${payload.gameId}`);
+        // Get any available socketId for valid fallback
+        const anyWhiteSocketId = game.whitePlayer?.socketId || 'unknown-white';
+        const anyBlackSocketId = game.blackPlayer?.socketId || 'unknown-black';
+        
+        // Log this critical error with available data
+        this.logger.error(`Critical: Player socketIds missing: white=${anyWhiteSocketId}, black=${anyBlackSocketId}, resigner=${client.id}`);
+      }
+      
+      // Explicitly identify winner and loser regardless of gameResult
+      // This ensures both client-specific events will work correctly
+      const isWhiteResigning = game.whitePlayer?.socketId === client.id;
+      const winnerSocketId = isWhiteResigning ? 
+        (game.blackPlayer?.socketId || 'unknown-black') : 
+        (game.whitePlayer?.socketId || 'unknown-white');
+      const loserSocketId = client.id; // Resigning player is always the loser
+      
+      this.logger.log(`Pre-resignation data - Winner: ${winnerSocketId}, Loser: ${loserSocketId}, isWhiteResigning: ${isWhiteResigning}`);
+      
+      // Now process the resignation with the game manager
+      const gameResult = this.gameManagerService.registerResignation(
+        payload.gameId,
+        client.id,
+        this.server,
+      );
+      
+      // If gameResult is null or undefined, handle it gracefully
+      if (!gameResult) {
+        this.logger.error(`Failed to register resignation - gameResult is ${gameResult}`);
+        
+        // Create a fallback gameResult using our explicitly determined winner/loser
+        const fallbackResult = {
+          winnerUserId: winnerSocketId,
+          loserUserId: loserSocketId,
+          gameId: payload.gameId,
+          reason: 'resignation',
+          isDraw: false
+        };
+        
+        this.logger.log(`Using fallback game result: ${JSON.stringify(fallbackResult)}`);
+        
+        // Create consistent payload for all emissions with fallback data
+        const resignPayload = {
+          gameId: payload.gameId,
+          reason: 'Player resigned',
+          winner: winnerSocketId,
+          loser: loserSocketId,
+          winnerId: winnerSocketId, // Add redundant fields for compatibility
+          loserId: loserSocketId,
+          winnerSocketId, // Explicit naming for frontend
+          loserSocketId,
+          isWhiteResigning,
+          resigning: false, // Will be overridden for resigning player
+          result: 'unknown' // Will be overridden per player
+        };
+        
+        // Broadcast to all clients
+        this.server.to(payload.gameId).emit('gameResigned', resignPayload);
+        
+        // Direct to white player
+        if (game.whitePlayer?.socketId) {
+          const isWinner = !isWhiteResigning;
+          this.server.to(game.whitePlayer.socketId).emit('gameResigned', {
+            ...resignPayload,
+            result: isWinner ? 'win' : 'loss',
+            resigning: isWhiteResigning
+          });
+        }
+        
+        // Direct to black player
+        if (game.blackPlayer?.socketId) {
+          const isWinner = isWhiteResigning;
+          this.server.to(game.blackPlayer.socketId).emit('gameResigned', {
+            ...resignPayload,
+            result: isWinner ? 'win' : 'loss',
+            resigning: !isWhiteResigning
+          });
+        }
+        
+        // Return error to client (but we've already handled the event)
+        return {
+          event: 'gameResigned',
+          data: { 
+            success: false, 
+            message: 'Failed to register resignation but event was processed'
+          }
+        };
+      }
+      
+      // Regular flow continues if gameResult exists
+      
+      // Log all relevant IDs for debugging
+      this.logger.log(`Resignation - Game details:
+        Game ID: ${payload.gameId}
+        Resigning client: ${client.id}
+        White player socket: ${game.whitePlayer?.socketId || 'unknown'}
+        Black player socket: ${game.blackPlayer?.socketId || 'unknown'}
+        Winner ID from gameResult: ${gameResult.winnerUserId || 'unknown'}
+        Loser ID from gameResult: ${gameResult.loserUserId || 'unknown'}
+        Explicitly determined Winner ID: ${winnerSocketId}
+        Explicitly determined Loser ID: ${loserSocketId}
+      `);
+      
+      // Create consistent payload for all emissions
+      // Use explicitly determined IDs to prevent any inconsistency
+      const resignPayload = {
+        gameId: payload.gameId,
+        reason: 'Player resigned',
+        winner: winnerSocketId,
+        loser: loserSocketId,
+        winnerId: winnerSocketId, // Add redundant fields for compatibility
+        loserId: loserSocketId,
+        winnerSocketId, // Explicit naming for frontend
+        loserSocketId,
+        isWhiteResigning,
+        timestamp: Date.now()
+      };
+      
+      // Enhanced broadcasting using multiple approaches to ensure both players receive events
+      
+      // 1. Emit to the game room (standard approach)
+      this.logger.log(`Broadcasting gameResigned to room ${payload.gameId}`);
+      this.server.to(payload.gameId).emit('gameResigned', resignPayload);
+      
+      // 2. Also emit game_ended event with consistent format for standardization
+      this.logger.log(`Broadcasting game_ended to room ${payload.gameId}`);
+      this.server.to(payload.gameId).emit('game_ended', {
+        ...resignPayload,
+        reason: 'resignation',
+      });
+      
+      // 3. Emit directly to both players as a fallback with player-specific result
+      if (game.whitePlayer && game.whitePlayer.socketId) {
+        const isWinner = !isWhiteResigning;
+        this.logger.log(`Emitting directly to white player: ${game.whitePlayer.socketId}`);
+        
+        this.server.to(game.whitePlayer.socketId).emit('gameResigned', {
+          ...resignPayload,
+          result: isWinner ? 'win' : 'loss',
+          resigning: isWhiteResigning
+        });
+        
+        this.server.to(game.whitePlayer.socketId).emit('game_ended', {
+          ...resignPayload,
+          reason: 'resignation',
+          isWhitePlayer: true,
+          result: isWinner ? 'win' : 'loss'
+        });
+      }
+      
+      if (game.blackPlayer && game.blackPlayer.socketId) {
+        const isWinner = isWhiteResigning;
+        this.logger.log(`Emitting directly to black player: ${game.blackPlayer.socketId}`);
+        
+        this.server.to(game.blackPlayer.socketId).emit('gameResigned', {
+          ...resignPayload,
+          result: isWinner ? 'win' : 'loss',
+          resigning: !isWhiteResigning
+        });
+        
+        this.server.to(game.blackPlayer.socketId).emit('game_ended', {
+          ...resignPayload,
+          reason: 'resignation',
+          isWhitePlayer: false,
+          result: isWinner ? 'win' : 'loss'
+        });
+      }
+      
+      // 4. Use the 'emit' method on client to send a response directly back to the resigning player
+      client.emit('gameResigned', {
+        ...resignPayload,
+        resigning: true, // Flag to indicate this is the resigning player
+        result: 'loss'   // Explicitly mark as loss for the resigning player
+      });
+      
       return {
         event: 'gameResigned',
         data: {
@@ -409,15 +593,17 @@ export class GameGateway
           result: gameResult,
         },
       };
+    } catch (error) {
+      // Catch any unexpected errors to prevent server crashes
+      this.logger.error(`Error in handleResign for game ${payload?.gameId}:`, error);
+      return {
+        event: 'gameResigned',
+        data: {
+          success: false,
+          message: 'Internal server error processing resignation',
+        },
+      };
     }
-    
-    return {
-      event: 'gameResigned',
-      data: {
-        success: false,
-        message: 'Failed to resign the game',
-      },
-    };
   }
 
   /**
@@ -470,27 +656,73 @@ export class GameGateway
     const game = this.gameManagerService.getGame(payload.gameId);
     
     if (!game) {
+      this.logger.warn(`Abort request failed: Game ${payload.gameId} not found`);
+      
+      // Even if the game is not found in the manager, we should still emit the abort event
+      // to ensure clients can properly handle the end of game state
+      
+      const abortPayload = {
+        gameId: payload.gameId,
+        playerId: client.id,
+        playerColor: 'unknown',
+        playerName: 'Player',
+        opponentName: 'Opponent',
+        reason: 'Game aborted by player',
+        timestamp: new Date().toISOString(),
+        error: 'GAME_NOT_FOUND' // Add error for tracking
+      };
+      
+      // Emit to the game room
+      this.server.to(payload.gameId).emit('game_aborted', abortPayload);
+      
+      // Also emit directly to the requesting client
+      client.emit('game_aborted', abortPayload);
+      
       return {
-        event: 'gameAborted',
+        event: 'abortGameResponse',
+        data: {
+          success: true, // Return success so client proceeds with cleanup
+          message: 'Game abort request processed',
+          error: 'GAME_NOT_FOUND'
+        },
+      };
+    }
+    
+    // Stricter validation: Check if any moves have been made
+    // This checks the PGN to see if any moves are recorded
+    if (game.pgn && game.pgn.trim().length > 0) {
+      this.logger.warn(`Abort request failed: Game ${payload.gameId} cannot be aborted - moves have been made. PGN: ${game.pgn}`);
+      return {
+        event: 'abortGameResponse',
         data: {
           success: false,
-          message: 'Game not found',
+          message: 'Cannot abort game after any moves have been made',
+          error: 'MOVES_ALREADY_MADE'
         },
       };
     }
     
     // Check if the game can be aborted (first move not made yet)
     if (!game.isFirstMove) {
+      this.logger.warn(`Abort request failed: Game ${payload.gameId} cannot be aborted after first move`);
       return {
-        event: 'gameAborted',
+        event: 'abortGameResponse',
         data: {
           success: false,
           message: 'Cannot abort game after first move',
+          error: 'FIRST_MOVE_MADE'
         },
       };
     }
     
     try {
+      // Determine the color of the player aborting
+      const isWhitePlayer = game.whitePlayer.socketId === client.id;
+      const abortingPlayer = isWhitePlayer ? game.whitePlayer : game.blackPlayer;
+      const otherPlayer = isWhitePlayer ? game.blackPlayer : game.whitePlayer;
+      
+      this.logger.log(`Aborting game ${payload.gameId}, requested by ${abortingPlayer.username || client.id}`);
+      
       // Validate and handle the abort request with the disconnection service
       const success = this.disconnectionService.handleAbortRequest(
         this.server,
@@ -498,17 +730,42 @@ export class GameGateway
         payload.gameId
       );
       
-      // Determine the color of the player aborting
-      const isWhitePlayer = game.whitePlayer.socketId === client.id;
-      
       if (success) {
-        // Emit game aborted event to all players
-        this.server.to(payload.gameId).emit('game_aborted', {
-          gameId: payload.gameId,
-          playerId: client.id,
-          playerColor: isWhitePlayer ? 'white' : 'black',
-          reason: 'Game aborted by player before first move'
-        });
+        // Mark the game as ended with abort result
+        if (game) {
+          game.ended = true;
+          game.endTime = new Date();
+          game.result = GameResult.ABORTED;
+          game.endReason = GameEndReason.ABORT;
+          
+          // Create an informative abort payload
+          const abortPayload = {
+            gameId: payload.gameId,
+            playerId: client.id,
+            playerColor: isWhitePlayer ? 'white' : 'black',
+            playerName: abortingPlayer.username || 'Unknown',
+            opponentName: otherPlayer.username || 'Unknown',
+            reason: 'Game aborted by player before first move',
+            timestamp: new Date().toISOString()
+          };
+          
+          // Use setTimeout to ensure clients have time to process any previous events
+          setTimeout(() => {
+            // Emit game aborted event to all players in the room
+            this.server.to(payload.gameId).emit('game_aborted', abortPayload);
+            
+            // Also emit directly to both players in case they're not in the room
+            if (game.whitePlayer && game.whitePlayer.socketId) {
+              this.server.to(game.whitePlayer.socketId).emit('game_aborted', abortPayload);
+            }
+            
+            if (game.blackPlayer && game.blackPlayer.socketId) {
+              this.server.to(game.blackPlayer.socketId).emit('game_aborted', abortPayload);
+            }
+            
+            this.logger.log(`Successfully emitted game_aborted event for game ${payload.gameId}`);
+          }, 300); // Small delay to ensure event sequence
+        }
       }
       
       return {
@@ -536,34 +793,186 @@ export class GameGateway
    * Mark that white has made the first move, preventing further abort requests
    */
   @SubscribeMessage('move_made')
-  handleMoveMade(client: Socket, payload: { gameId: string, from: string, to: string, player: string, notation: string }) {
-    this.logger.log(
-      `Move made in game ${payload.gameId} by ${payload.player}: ${payload.notation}`,
-    );
-    
-    // If this is the first move by white, update the game state
-    if (payload.player === 'white') {
-      this.disconnectionService.markWhiteFirstMove(payload.gameId);
+  handleMoveMade(client: Socket, payload: MoveMadePayload) {
+    try {
+      // Guard against missing payload properties
+      if (!payload || !payload.gameId || !payload.from || !payload.to || !payload.player) {
+        this.logger.error('Invalid move_made payload:', payload);
+        return {
+          event: 'moveMadeResponse',
+          data: {
+            success: false,
+            message: 'Invalid move payload - missing required fields',
+          },
+        };
+      }
+      
+      this.logger.log(
+        `Move made in game ${payload.gameId} by ${payload.player}: ${payload.from} -> ${payload.to} (${payload.notation})${payload.promotion ? ' promotion: ' + payload.promotion : ''}`,
+      );
+      
+      // Get game from gameManagerService
+      const game = this.gameManagerService.getGame(payload.gameId);
+      
+      // Handle case when game is not found
+      if (!game) {
+        this.logger.warn(`Game ${payload.gameId} not found for move_made event`);
+        
+        // Log all available game IDs for debugging
+        const availableGames = this.gameManagerService.getAllActiveGames();
+        this.logger.warn(`Available games: ${availableGames.map(g => g.gameId).join(', ')}`);
+        
+        return {
+          event: 'moveMadeResponse',
+          data: {
+            success: false,
+            message: 'Game not found',
+          },
+        };
+      }
+      
+      // Check if player is part of the game
+      const isWhitePlayer = game.whitePlayer.socketId === client.id;
+      const isBlackPlayer = game.blackPlayer.socketId === client.id;
+      
+      if (!isWhitePlayer && !isBlackPlayer) {
+        this.logger.warn(
+          `Client ${client.id} is not part of game ${payload.gameId}`,
+        );
+        return {
+          event: 'moveMadeResponse',
+          data: {
+            success: false,
+            message: 'You are not part of this game',
+          },
+        };
+      }
+      
+      // Mark that this is no longer the first move
+      if (payload.player === 'white' && game.isFirstMove) {
+        game.isFirstMove = false;
+        this.logger.log(`First move made by white in game ${payload.gameId}`);
+      }
+      
+      // Update PGN and last move time
+      game.lastMoveTime = new Date();
+      
+      // Update the chess instance
+      try {
+        const moveOptions: { from: string; to: string; promotion?: string } = {
+          from: payload.from,
+          to: payload.to,
+        };
+        if (payload.promotion) {
+          const mappedPromotion = pieceTypeToChessJs[payload.promotion.toLowerCase()];
+          if (mappedPromotion) {
+            moveOptions.promotion = mappedPromotion;
+          } else {
+            this.logger.warn(`Invalid or unmapped promotion piece received: ${payload.promotion}. Move will attempt without specific promotion piece if mapping failed.`);
+            // chess.js will likely error if promotion is required and not provided or malformed.
+            // Alternatively, could default to 'q' or throw an error.
+            // For now, log and let chess.js handle it.
+          }
+        }
+        const moveResult = game.chessInstance.move(moveOptions);
+        
+        if (moveResult) {
+          // Update PGN
+          game.pgn = game.chessInstance.pgn();
+        }
+      } catch (chessError) {
+        this.logger.error(`Chess engine error: ${chessError.message}`);
+      }
+      
+      // Determine if the move is a capture by checking notation
+      const isCapture = payload.notation.includes('x');
+      
+      // Determine if the move is a check by checking notation
+      const isCheck = payload.notation.includes('+') || payload.notation.includes('#');
+      
+      // Broadcast move to all clients in the game room
+      this.server.to(payload.gameId).emit('move_made', {
+        ...payload,
+        isCapture,
+        isCheck,
+        fen: game.chessInstance.fen(),
+      });
+      
+      return {
+        event: 'moveMadeResponse',
+        data: {
+          success: true,
+        },
+      };
+    } catch (error) {
+      this.logger.error(`Error in handleMoveMade:`, error);
+      return {
+        event: 'moveMadeResponse',
+        data: {
+          success: false,
+          message: 'Internal server error processing move',
+          error: error.message,
+        },
+      };
     }
-    
-    // Broadcast the move to all players in the game
-    this.server.to(payload.gameId).emit('move_made', {
-      gameId: payload.gameId,
-      from: payload.from,
-      to: payload.to,
-      player: payload.player,
-      notation: payload.notation,
-      isCapture: payload.notation.includes('x'),
-      isCheck: payload.notation.includes('+') || payload.notation.includes('#'),
-    });
-    
-    return {
-      event: 'moveMadeResponse',
-      data: {
-        success: true,
-        message: 'Move broadcast to all players',
-      },
-    };
+  }
+
+  /**
+   * Handle a request for board state synchronization
+   */
+  @SubscribeMessage('request_board_sync')
+  handleBoardSyncRequest(client: Socket, payload: { gameId: string, reason: string, clientState?: string }) {
+    try {
+      this.logger.log(`Client ${client.id} requested board sync for game ${payload.gameId}. Reason: ${payload.reason}`);
+      
+      // Get game from gameManagerService
+      const game = this.gameManagerService.getGame(payload.gameId);
+      
+      if (!game) {
+        this.logger.warn(`Game ${payload.gameId} not found for board sync request`);
+        return {
+          event: 'boardSyncResponse',
+          data: {
+            success: false,
+            message: 'Game not found',
+          },
+        };
+      }
+      
+      // Get the current FEN position from the chess instance
+      const fen = game.chessInstance.fen();
+      
+      // Log the client's current state vs server state if provided
+      if (payload.clientState) {
+        this.logger.log(`Client state: ${payload.clientState}`);
+        this.logger.log(`Server state: ${fen}`);
+      }
+      
+      // Send board sync event back to the client
+      client.emit('board_sync', {
+        gameId: payload.gameId,
+        fen,
+        timestamp: Date.now()
+      });
+      
+      return {
+        event: 'boardSyncResponse',
+        data: {
+          success: true,
+          message: 'Board sync sent',
+        },
+      };
+    } catch (error) {
+      this.logger.error(`Error in handleBoardSyncRequest:`, error);
+      return {
+        event: 'boardSyncResponse',
+        data: {
+          success: false,
+          message: 'Internal server error processing board sync request',
+          error: error.message,
+        },
+      };
+    }
   }
 
   /**
@@ -575,8 +984,21 @@ export class GameGateway
       `Client ${client.id} is joining game room ${payload.gameId}`,
     );
     
+    // Verify if the game exists in the game manager
+    const gameExists = this.gameManagerService.getGame(payload.gameId);
+    if (!gameExists) {
+      this.logger.warn(`Client ${client.id} attempted to join non-existent game room ${payload.gameId}`);
+      
+      // Log the keys of all active games for debugging
+      const activeGames = this.gameManagerService.getAllActiveGames();
+      this.logger.log(`Active game IDs: [${activeGames.map(g => g.gameId).join(', ')}]`);
+    }
+    
     // Add the client to the game room
     client.join(payload.gameId);
+    
+    // Log room join success
+    this.logger.log(`Client ${client.id} successfully joined room ${payload.gameId}`);
     
     // Notify the client that they've joined
     client.emit('joined_game_room', {
@@ -702,5 +1124,124 @@ export class GameGateway
         message: 'Invalid draw claim',
       },
     };
+  }
+
+  /**
+   * Handle a client offering a draw
+   */
+  @SubscribeMessage('draw_request')
+  handleDrawRequest(client: Socket, payload: { gameId: string }) {
+    this.logger.log(`Client ${client.id} offered a draw in game ${payload.gameId}`);
+    const game = this.gameManagerService.getGame(payload.gameId);
+    if (!game) {
+      return { event: 'draw_request', data: { success: false, message: 'Game not found' } };
+    }
+    // Store who offered the draw
+    (game as any).drawOfferBy = client.id;
+    // Find opponent
+    const opponentId = (game.whitePlayer.socketId === client.id)
+      ? game.blackPlayer.socketId
+      : game.whitePlayer.socketId;
+    // Emit to opponent
+    this.server.to(opponentId).emit('draw_request', { gameId: payload.gameId, playerId: client.id });
+    return { event: 'draw_request', data: { success: true } };
+  }
+
+  /**
+   * Handle a client responding to a draw offer
+   */
+  @SubscribeMessage('draw_response')
+  handleDrawResponse(client: Socket, payload: { gameId: string; accepted: boolean }) {
+    this.logger.log(`Client ${client.id} responded to draw in game ${payload.gameId}: ${payload.accepted}`);
+    const game = this.gameManagerService.getGame(payload.gameId);
+    if (!game) {
+      return { event: 'draw_response', data: { success: false, message: 'Game not found' } };
+    }
+    const offererId = (game as any).drawOfferBy;
+    if (!offererId) {
+      return { event: 'draw_response', data: { success: false, message: 'No draw offer to respond to' } };
+    }
+    if (payload.accepted) {
+      // End the game as a draw
+      this.server.to(payload.gameId).emit('game_drawn', { gameId: payload.gameId });
+      // Update game state and ratings for draw
+      if (game && !game.ended) {
+        this.gameManagerService['handleGameEnd'](
+          payload.gameId,
+          { result: GameResult.DRAW, reason: GameEndReason.DRAW_AGREEMENT },
+          this.server
+        );
+      }
+    } else {
+      // Notify the offerer that the draw was declined
+      this.server.to(offererId).emit('draw_response', { gameId: payload.gameId, accepted: false });
+    }
+    // Clear draw offer
+    (game as any).drawOfferBy = undefined;
+    return { event: 'draw_response', data: { success: true } };
+  }
+
+  @SubscribeMessage('game_abort_request')
+  async handleGameAbortRequest(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { gameId: string },
+  ): Promise<void> {
+    const { gameId } = payload;
+    const game = this.gameManagerService.getGame(gameId);
+
+    if (!game) {
+      this.logger.warn(`[GameAbortRequest] Game not found: ${gameId}`);
+      // Optionally emit an error back to the client if game not found
+      client.emit('error_occurred', { message: 'Game not found for abort request.', gameId });
+      return;
+    }
+
+    this.logger.log(`[GameAbortRequest] Client ${client.id} requested to abort game ${gameId}`);
+
+    // Validate that the requesting client is part of the game
+    if (client.id !== game.whitePlayer.socketId && client.id !== game.blackPlayer.socketId) {
+      this.logger.warn(`[GameAbortRequest] Client ${client.id} is not a player in game ${gameId}. Abort request denied.`);
+      client.emit('game_abort_rejected', { gameId, message: 'You are not a player in this game.' });
+      return;
+    }
+
+    // Check if any moves have been made.
+    // The `game.chessInstance.history()` will be empty if no moves are made.
+    // Or, you might have a flag like `game.isFirstMove` or check `game.pgn` length.
+    // Using `game.chessInstance.history().length` is a reliable way from chess.js perspective.
+    const movesMade = game.chessInstance.history().length > 0;
+
+    if (movesMade) {
+      this.logger.log(`[GameAbortRequest] Game ${gameId} has moves. Abort request rejected.`);
+      // Optionally inform the requesting client
+      client.emit('game_abort_rejected', { gameId, message: 'Cannot abort game, moves have already been made.' });
+    } else {
+      this.logger.log(`[GameAbortRequest] Game ${gameId} has no moves. Processing abort.`);
+      
+      // Call a method in GameManagerService to handle the game end logic for an abort.
+      // This method should mark the game as ended, set the reason to ABORTED, and NOT update ratings.
+      // It should then be responsible for emitting 'game_aborted' if this gateway isn't doing it directly.
+      // For now, let's assume handleGameEnd is robust enough or we adapt it.
+      
+      // IMPORTANT: Ensure GameEndReason.ABORTED exists and handleGameEnd respects it for no rating changes.
+      const gameEndResult = (this.gameManagerService as any).handleGameEnd(
+        gameId,
+        { result: GameResult.DRAW, reason: GameEndReason.ABORT }, // Using ABORT as suggested by linter
+        this.server,
+      );
+
+      if (gameEndResult) {
+         this.logger.log(`[GameAbortRequest] Game ${gameId} successfully aborted. Broadcasting game_aborted.`);
+         // handleGameEnd should ideally emit the game_aborted event if it's the central place for game ending.
+         // If not, we emit it here. Assuming handleGameEnd might emit a generic game_ended, 
+         // but the spec requires a specific game_aborted.
+         this.server.to(gameId).emit('game_aborted', { gameId });
+      } else {
+        this.logger.error(`[GameAbortRequest] Failed to process game end for abort in game ${gameId}.`);
+        // Fallback: Still try to notify clients if gameEndResult was not as expected
+        this.server.to(gameId).emit('game_aborted', { gameId }); // Emit even if handleGameEnd had issues, as a safeguard
+        client.emit('error_occurred', { message: 'Error processing game abort on server.', gameId });
+      }
+    }
   }
 } 

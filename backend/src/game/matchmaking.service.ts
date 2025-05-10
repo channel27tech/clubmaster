@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Socket } from 'socket.io';
+import { GameManagerService } from './game-manager.service';
 
 interface Player {
   socketId: string;
@@ -10,6 +11,10 @@ interface Player {
   rated: boolean;
   preferredSide?: string;
   joinedAt: Date;
+  userId?: string;
+  username?: string;
+  isGuest?: boolean;
+  gamesPlayed?: number;
 }
 
 interface GameOptions {
@@ -27,8 +32,13 @@ export class MatchmakingService {
   private readonly MATCHMAKING_INTERVAL = 2000; // Check for matches every 2 seconds
   private readonly MATCH_RATING_DIFFERENCE = 200; // Maximum rating difference for matching players
 
-  constructor() {
+  constructor(
+    private readonly gameManagerService: GameManagerService,
+  ) {
     this.startMatchmakingProcess();
+    
+    // Add a warning about in-memory game storage
+    this.logger.warn("⚠ Game state is in-memory only. Restarting the server clears all games.");
   }
 
   /**
@@ -200,6 +210,37 @@ export class MatchmakingService {
     const whitePlayer = isPlayer1White ? player1 : player2;
     const blackPlayer = isPlayer1White ? player2 : player1;
     
+    // Create player objects for GameManagerService
+    const whiteGamePlayer = {
+      socketId: whitePlayer.socketId,
+      userId: whitePlayer.userId,
+      rating: whitePlayer.rating,
+      username: whitePlayer.username || `Player-${whitePlayer.socketId.substring(0, 5)}`,
+      isGuest: whitePlayer.isGuest || true,
+      gamesPlayed: whitePlayer.gamesPlayed || 0,
+      connected: true
+    };
+    
+    const blackGamePlayer = {
+      socketId: blackPlayer.socketId,
+      userId: blackPlayer.userId,
+      rating: blackPlayer.rating,
+      username: blackPlayer.username || `Player-${blackPlayer.socketId.substring(0, 5)}`,
+      isGuest: blackPlayer.isGuest || true,
+      gamesPlayed: blackPlayer.gamesPlayed || 0,
+      connected: true
+    };
+    
+    // Register the game with the GameManagerService
+    this.gameManagerService.createGame(
+      gameId,
+      whiteGamePlayer,
+      blackGamePlayer,
+      player1.gameMode,
+      player1.timeControl,
+      player1.rated
+    );
+    
     const gameData = {
       gameId,
       gameMode: player1.gameMode,
@@ -217,6 +258,7 @@ export class MatchmakingService {
     };
     
     this.logger.log(`Match created: ${gameId} between ${player1.socketId} and ${player2.socketId}`);
+    this.logger.log(`Game registered: ${gameId}`);
     
     // Notify both players that a match has been found
     player1.socket.emit('matchFound', { ...gameData, playerColor: isPlayer1White ? 'white' : 'black' });

@@ -6,14 +6,12 @@ interface AbortConfirmationDialogProps {
   isOpen: boolean;
   onConfirm: () => void;
   onCancel: () => void;
-  isPlayerWhite: boolean;
 }
 
 const AbortConfirmationDialog: React.FC<AbortConfirmationDialogProps> = ({
   isOpen,
   onConfirm,
   onCancel,
-  isPlayerWhite,
 }) => {
   const dialogRef = useRef<HTMLDivElement>(null);
 
@@ -32,25 +30,16 @@ const AbortConfirmationDialog: React.FC<AbortConfirmationDialogProps> = ({
       }
     };
 
-    // Handle Enter key to confirm
-    const handleEnterKey = (event: KeyboardEvent) => {
-      if (event.key === 'Enter') {
-        onConfirm();
-      }
-    };
-
     if (isOpen) {
       document.addEventListener('mousedown', handleOutsideClick);
       document.addEventListener('keydown', handleEscKey);
-      document.addEventListener('keydown', handleEnterKey);
     }
 
     return () => {
       document.removeEventListener('mousedown', handleOutsideClick);
       document.removeEventListener('keydown', handleEscKey);
-      document.removeEventListener('keydown', handleEnterKey);
     };
-  }, [isOpen, onCancel, onConfirm]);
+  }, [isOpen, onCancel]);
 
   // Focus trap inside dialog when open
   useEffect(() => {
@@ -67,31 +56,43 @@ const AbortConfirmationDialog: React.FC<AbortConfirmationDialogProps> = ({
 
   if (!isOpen) return null;
 
-  const message = isPlayerWhite
-    ? "Aborting the game will end it immediately with no rating change. This option is only available before you make your first move."
-    : "Aborting the game will end it immediately with no rating change. This option is only available before White makes their first move.";
-
   return (
-    <div className="fixed inset-0 flex items-center justify-center z-50">
-      <div className="fixed inset-0 bg-black bg-opacity-50" onClick={onCancel}></div>
-      <div className="relative bg-gray-800 rounded-lg p-6 max-w-md w-full shadow-lg">
-        <h2 className="text-xl font-bold text-white mb-4">Abort Game?</h2>
-        
-        <p className="text-white mb-6">{message}</p>
-        
-        <div className="flex justify-end space-x-4">
-          <button
-            onClick={onCancel}
-            className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+    <div 
+      className="fixed inset-0 flex items-center justify-center z-50"
+      style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)' }}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="abort-dialog-title"
+    >
+      <div 
+        ref={dialogRef}
+        className="bg-[#333939] text-white rounded-md shadow-lg w-64 overflow-hidden"
+      >
+        <div className="p-4 flex flex-col items-center">
+          <h2 
+            id="abort-dialog-title" 
+            className="text-lg font-medium mb-1"
           >
             Abort Game
-          </button>
+          </h2>
+          <p className="mb-4 text-center text-sm">
+            Are you sure you want to abort this game?
+          </p>
+          <div className="flex justify-center space-x-3 w-full">
+            <button 
+              className="flex-1 py-2 rounded transition-colors"
+              style={{ backgroundColor: '#4A7C59' }}
+              onClick={onConfirm}
+            >
+              Yes
+            </button>
+            <button 
+              className="flex-1 py-2 rounded bg-gray-500 hover:bg-gray-600 transition-colors"
+              onClick={onCancel}
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       </div>
     </div>

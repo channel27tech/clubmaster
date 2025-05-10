@@ -38,7 +38,8 @@ export type GameEndReason =
   | 'stalemate'
   | 'insufficient_material'
   | 'threefold_repetition'
-  | 'fifty_move_rule';
+  | 'fifty_move_rule'
+  | 'abort';
 
 // Game result interface
 export interface GameResult {

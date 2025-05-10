@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { playSound } from '../utils/soundEffects';
+import { canAbortGame } from './MoveControls';
 
 interface GameOptionsDialogProps {
   isOpen: boolean;
@@ -12,23 +13,42 @@ interface GameOptionsDialogProps {
     hasWhiteMoved?: boolean;
     isGameOver?: boolean;
   };
-  onDrawOffer: () => void;
   onResign: () => void;
   onAbort?: () => void;
   soundEnabled: boolean;
   onSoundToggle: (enabled: boolean) => Promise<void>;
+  onDrawOffer?: () => void;
 }
 
 const GameOptionsDialog: React.FC<GameOptionsDialogProps> = ({
   isOpen,
   onClose,
   gameState,
-  onDrawOffer,
   onResign,
   onAbort,
   soundEnabled,
   onSoundToggle,
+  onDrawOffer,
 }) => {
+  // DIRECT CONSOLE LOG FOR DEBUGGING
+  console.log('DIRECT GameOptionsDialog props gameState:', JSON.stringify(gameState));
+  console.log('DIRECT GameOptionsDialog onAbort available:', !!onAbort);
+
+  // Fix: Simplified check for movesMade that works with the actual game state data
+  // Explicitly check if white has moved, treating undefined as 'no moves made yet'
+  const movesMade = gameState.hasWhiteMoved === true;
+
+  console.log('DIRECT GameOptionsDialog moves made check:', movesMade);
+  
+  // Add direct debug logs for all conditions
+  console.log('CRITICAL: GameOptionsDialog condition states:', {
+    movesMade,
+    hasWhiteMoved: gameState.hasWhiteMoved,
+    isGameOver: gameState.isGameOver,
+    hasStarted: gameState.hasStarted,
+    isWhiteTurn: gameState.isWhiteTurn
+  });
+
   const dialogRef = useRef<HTMLDivElement>(null);
   const [isToggling, setIsToggling] = useState(false);
   const [toggleError, setToggleError] = useState<string | null>(null);
@@ -177,62 +197,94 @@ const GameOptionsDialog: React.FC<GameOptionsDialogProps> = ({
 
   if (!isOpen) return null;
 
-  // Only show Abort button before the game has started or before white's first move
-  const canAbort = !gameState.hasStarted || (gameState.hasStarted && gameState.isWhiteTurn && !gameState.hasWhiteMoved);
+  // Show Abort button if:
+  // 1. The game has not had any moves made (hasWhiteMoved is false)
+  // 2. We have an abort handler to call (passed from MoveControls)
+  // 3. The game is not over
+  // Enhanced abort button visibility - explicitly handle hasWhiteMoved being undefined
+  // If hasWhiteMoved is undefined, assume no moves have been made yet
+  const showAbortButton = !!onAbort && !gameState.isGameOver && gameState.hasWhiteMoved !== true;
+
+  // Add debug logging for the abort button visibility with simplified conditions
+  useEffect(() => {
+    console.log("GameOptionsDialog - Abort button visibility:", {
+      showAbortButton,
+      hasAbortHandler: !!onAbort,
+      isGameOver: gameState.isGameOver,
+      hasStarted: gameState.hasStarted,
+      hasWhiteMoved: gameState.hasWhiteMoved,
+      movesMade,
+      simplifiedCondition: gameState.hasWhiteMoved === false
+    });
+  }, [showAbortButton, onAbort, gameState, movesMade]);
+
+  // Standard game in progress checks - FIX: Always allow these options when game is in progress
+  const canResign = !gameState.isGameOver && (gameState.hasStarted || true);
+  const gameOver = !!gameState.isGameOver;
   
-  // Don't show game action buttons if the game is over
-  const gameOver = gameState.isGameOver === true;
+  // CRITICAL DEBUG for game option buttons
+  console.log("CRITICAL: Game Option Buttons Visibility:", {
+    canResign,
+    showAbortButton,
+    gameOver
+  });
 
   return (
     <div 
-      className="absolute bottom-16 left-1/2 transform -translate-x-1/2 z-50"
+      className="absolute bottom-16 left-1/2 transform -translate-x-1/2 z-50 w-full max-w-xs px-2"
       role="dialog"
       aria-modal="true"
       aria-labelledby="dialog-title"
     >
       <div 
         ref={dialogRef}
-        className="bg-[#333939] text-white rounded-md shadow-lg overflow-hidden w-95"
+        className="bg-[#333939] text-white rounded-md shadow-lg overflow-hidden w-full"
       >
         <div className="flex flex-col divide-y divide-gray-700">
-          {!gameOver && (
-            <>
+          {/* FIXED: Changed from !gameOver to include game in progress options regardless */}
+          <>
+            {canResign && movesMade && (
               <button 
-                className="py-3.5 text-center hover:bg-[#4a4f4f] active:bg-[#585f5f] transition-colors"
+                className="py-3.5 px-4 text-center hover:bg-[#4a4f4f] active:bg-[#585f5f] transition-colors font-medium"
                 onClick={() => {
-                  onDrawOffer();
-                }}
-                aria-label="Offer draw"
-              >
-                Draw
-              </button>
-              
-              <button 
-                className="py-3.5 text-center hover:bg-[#4a4f4f] active:bg-[#585f5f] transition-colors"
-                onClick={() => {
+                  console.log("Resign button clicked");
                   onResign();
                 }}
                 aria-label="Resign from game"
               >
                 Resign
               </button>
-              
-              {canAbort && (
-                <button 
-                  className="py-3.5 text-center hover:bg-[#4a4f4f] active:bg-[#585f5f] transition-colors"
-                  onClick={() => {
-                    onAbort && onAbort();
-                  }}
-                  aria-label="Abort game"
-                >
-                  Abort
-                </button>
-              )}
-            </>
+            )}
+            
+            {/* Show Abort button at game start before any moves are made */}
+            {showAbortButton && (
+              <button 
+                className="py-3.5 px-4 text-center hover:bg-[#4a4f4f] active:bg-[#585f5f] transition-colors font-medium"
+                onClick={() => {
+                  console.log("Abort button clicked");
+                  if (onAbort) onAbort();
+                }}
+                aria-label="Force Abort game"
+              >
+                Abort
+              </button>
+            )}
+          </>
+          
+          {onDrawOffer && canResign && movesMade && (
+            <button
+              className="py-3.5 px-4 text-center hover:bg-[#4a4f4f] active:bg-[#585f5f] transition-colors font-medium"
+              onClick={() => {
+                if (onDrawOffer) onDrawOffer();
+              }}
+              aria-label="Offer draw"
+            >
+              Draw
+            </button>
           )}
           
           <button 
-            className={`py-3.5 text-center hover:bg-[#4a4f4f] active:bg-[#585f5f] transition-colors ${isToggling ? 'opacity-70' : ''}`}
+            className={`py-3.5 px-4 text-center hover:bg-[#4a4f4f] active:bg-[#585f5f] transition-colors font-medium ${isToggling ? 'opacity-70' : ''}`}
             onClick={handleSoundToggle}
             disabled={isToggling}
             aria-label={soundEnabled ? "Disable sound" : "Enable sound"}

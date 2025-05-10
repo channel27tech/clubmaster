@@ -104,32 +104,6 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
     }
   }, []);
 
-  // Helper to request board synchronization
-  const requestBoardSync = useCallback((gameId: string | undefined) => {
-    if (!socket || !gameId) {
-      console.error('Cannot request board sync: missing socket or gameId');
-      return;
-    }
-    
-    console.log('Requesting board state synchronization', { gameId });
-    socket.emit('request_board_sync', { gameId });
-  }, [socket]);
-  
-  // Initialize the chess engine
-  useEffect(() => {
-    resetChessEngine();
-  }, []);
-
-  // Debug logging for playerColor
-  useEffect(() => {
-    console.log('ChessBoard received playerColor:', playerColor);
-  }, [playerColor]);
-
-  // Debug logging for props
-  useEffect(() => {
-    console.log('ChessBoard received props:', { playerColor, gameId });
-  }, [playerColor, gameId]);
-
   // Initialize the chess board with pieces in standard positions
   useEffect(() => {
     // Initialize move history
@@ -151,16 +125,18 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
     const handleBoardSync = (data: { fen: string, gameId: string }) => {
       console.log('Received board sync:', data);
       try {
-        // Synchronize the board state from the FEN
+        // Synchronize the board state from the FEN - use the existing utility
         const newBoardState = synchronizeBoardFromFen(data.fen);
         
         // Update the board state
         setBoardState(newBoardState);
-        console.log('Board synchronized successfully');
+        console.log('Board synchronized successfully with FEN:', data.fen);
         
         // Create a new move history based on this state
         const newHistory = {
           ...moveHistory,
+          moves: moveHistory.moves,
+          currentMoveIndex: moveHistory.moves.length - 1,
           initialBoardState: newBoardState,
         };
         
@@ -192,45 +168,44 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
       if (playerColor && data.player !== playerColor) {
         console.log(`Processing opponent move. Our color: ${playerColor}, move made by: ${data.player}`);
         
-        // Prioritize FEN synchronization if available (most reliable method)
+        // Check if we need to resync based on current state
+        const currentFen = getFen();
+        console.log('Current board state FEN:', currentFen);
+        
+        // ENHANCED ERROR HANDLING: Try FEN synchronization first in all cases
         if (data.fen) {
           try {
             console.log('Using provided FEN for synchronization:', data.fen);
             
-            // Force a reset and use the FEN
-            const success = setChessPosition(data.fen);
+            // Use the existing synchronization function
+            const newBoardState = synchronizeBoardFromFen(data.fen);
             
-            if (success) {
-              // Get the synchronized board state
-              const newBoardState = getCurrentBoardState();
+            // Extract piece information from the move
+            const movingPiece = extractPieceInfoFromNotation(data.notation, data.player as PieceColor);
+            
+            if (movingPiece) {
+              // Add the move to history
+              const newHistory = addMove(moveHistory, {
+                from: data.from,
+                to: data.to,
+                piece: movingPiece,
+                notation: data.notation,
+                promotion: data.promotion
+              }, newBoardState);
               
-              // Extract piece information from the move
-              const movingPiece = extractPieceInfoFromNotation(data.notation, data.player as PieceColor);
+              // Update all the state
+              setMoveHistory(newHistory);
+              setBoardState(newBoardState);
+              setLastMove({ from: data.from, to: data.to });
+              setCurrentPlayer(data.player === 'white' ? 'black' : 'white');
               
-              if (movingPiece) {
-                // Add the move to history
-                const newHistory = addMove(moveHistory, {
-                  from: data.from,
-                  to: data.to,
-                  piece: movingPiece,
-                  notation: data.notation,
-                  promotion: data.promotion
-                }, newBoardState);
-                
-                // Update all the state
-                setMoveHistory(newHistory);
-                setBoardState(newBoardState);
-                setLastMove({ from: data.from, to: data.to });
-                setCurrentPlayer(data.player === 'white' ? 'black' : 'white');
-                
-                // Notify parent
-                if (onMoveHistoryChange) {
-                  onMoveHistoryChange(newHistory);
-                }
-                
-                console.log('Successfully synchronized with FEN');
-                return; // Success! Exit early
+              // Notify parent
+              if (onMoveHistoryChange) {
+                onMoveHistoryChange(newHistory);
               }
+              
+              console.log('Successfully synchronized with FEN');
+              return; // Success! Exit early
             }
           } catch (error) {
             console.error('Error synchronizing from FEN:', error);
@@ -238,19 +213,25 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
           }
         }
         
-        // Fallback: Try to make the move directly if FEN sync failed
+        // FALLBACK APPROACH: Try to make the move directly
         try {
-          // Ensure chess engine is in sync with our UI state
-          const currentFen = getFen();
-          console.log('Current engine state:', currentFen);
-          
           // Try to find the piece that would be moving
           const movingPiece = findMovingPiece(data.from, boardState) || 
                              extractPieceInfoFromNotation(data.notation, data.player as PieceColor);
           
           if (!movingPiece) {
-            console.error('Could not determine which piece is moving');
-            requestBoardSync(data.gameId || gameId);
+            console.error('Could not determine which piece is moving from', data.from);
+            console.log('Current board state:', boardState);
+            
+            // Request a board sync
+            console.warn("Requesting resync due to invalid move");
+            if (socket && data.gameId) {
+              socket.emit('request_board_sync', { 
+                gameId: data.gameId,
+                reason: 'invalid_move',
+                clientState: getFen()
+              });
+            }
             return;
           }
           
@@ -259,7 +240,7 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
           const moveSuccess = makeMove(data.from, data.to, data.promotion);
           
           if (moveSuccess) {
-            console.log('Move applied successfully through fallback method');
+            console.log('Move applied successfully through direct move method');
             
             // Update board state
             const newBoardState = getCurrentBoardState();
@@ -284,12 +265,73 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
               onMoveHistoryChange(newHistory);
             }
           } else {
-            console.error(`Failed to apply move: ${data.from} -> ${data.to}`);
-            requestBoardSync(data.gameId || gameId);
+            console.error(`Failed to apply move: ${data.from} -> ${data.to}. Error making move:`, { from: data.from, to: data.to });
+            
+            // LAST RESORT FALLBACK: If move fails, try a position reset before requesting sync
+            try {
+              console.log('Attempting position reset as last resort');
+              // Reset the chess engine
+              resetChessEngine();
+              
+              // Try the move again after reset
+              const retrySuccess = makeMove(data.from, data.to, data.promotion);
+              
+              if (retrySuccess) {
+                console.log('Move succeeded after position reset');
+                
+                // Update board state
+                const newBoardState = getCurrentBoardState();
+                
+                // Add to history
+                const newHistory = addMove(moveHistory, {
+                  from: data.from,
+                  to: data.to,
+                  piece: movingPiece,
+                  notation: data.notation,
+                  promotion: data.promotion
+                }, newBoardState);
+                
+                // Update state
+                setMoveHistory(newHistory);
+                setBoardState(newBoardState);
+                setLastMove({ from: data.from, to: data.to });
+                setCurrentPlayer(data.player === 'white' ? 'black' : 'white');
+                
+                // Notify parent
+                if (onMoveHistoryChange) {
+                  onMoveHistoryChange(newHistory);
+                }
+              } else {
+                // If all methods fail, request a sync from the server
+                console.warn('All move application methods failed, requesting board sync');
+                if (socket && data.gameId) {
+                  socket.emit('request_board_sync', { 
+                    gameId: data.gameId,
+                    reason: 'all_methods_failed',
+                    clientState: getFen()
+                  });
+                }
+              }
+            } catch (resetError) {
+              console.error('Error during last resort reset:', resetError);
+              if (socket && data.gameId) {
+                socket.emit('request_board_sync', { 
+                  gameId: data.gameId,
+                  reason: 'error_during_reset',
+                  clientState: getFen()
+                });
+              }
+            }
           }
         } catch (error) {
           console.error('Error handling opponent move:', error);
-          requestBoardSync(data.gameId || gameId);
+          if (socket && data.gameId) {
+            socket.emit('request_board_sync', { 
+              gameId: data.gameId,
+              reason: 'handle_move_error',
+              clientState: getFen()
+            });
+          }
         }
       }
     };
@@ -301,7 +343,7 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
       socket.off('move_made', handleOpponentMove);
       socket.off('board_sync', handleBoardSync);
     };
-  }, [socket, playerColor, gameId, boardState, moveHistory, onMoveHistoryChange, requestBoardSync, findMovingPiece, extractPieceInfoFromNotation]);
+  }, [socket, playerColor, gameId, boardState, moveHistory, onMoveHistoryChange, findMovingPiece, extractPieceInfoFromNotation]);
 
   // Handle going back one move
   const handleGoBack = useCallback(() => {
@@ -385,86 +427,84 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
 
   // Handle promotion piece selection
   const handlePromotionSelect = useCallback((promotionPiece: PieceType) => {
-    // Hide promotion selector
-    setShowPromotion(false);
-    
     if (!promotionMove) return;
-    
+
     const { from, to, piece } = promotionMove;
-    
-    // Check if there's a piece at the destination (capture)
-    let isCapture = false;
-    for (const row of boardState.squares) {
-      for (const square of row) {
-        if (square.position === to && square.piece) {
-          isCapture = true;
-          break;
-        }
-      }
-    }
-    
-    // Make the move with promotion
+
+    // Make the move in the local chess engine first
     const moveSuccess = makeMove(from, to, promotionPiece);
-    
+
     if (moveSuccess) {
-      // Update board state based on chess.js
       const newBoardState = getCurrentBoardState();
+      const gameStatus = getGameStatus();
+      const currentFen = getFen();
+
+      // Determine if it was a capture. Check the board state *before* this move.
+      // `boardState` (React state) is the state before this current move was applied to it.
+      let isCapture = false;
+      const toRowIndex = 8 - parseInt(to[1], 10);
+      const toColIndex = to.charCodeAt(0) - 'a'.charCodeAt(0);
+      if (boardState.squares[toRowIndex] && 
+          boardState.squares[toRowIndex][toColIndex] && 
+          boardState.squares[toRowIndex][toColIndex].piece) {
+        isCapture = true;
+      }
+
+      // Generate notation using the local utility.
+      // The 'piece' for generateNotation should be the pawn that moved.
+      const notation = generateNotation(from, to, piece, isCapture, promotionPiece, gameStatus.isCheck, gameStatus.isCheckmate);
       
-      // Add move to history with promotion information
-      const notation = generateNotation(from, to, piece, isCapture, promotionPiece);
-      const newHistory = addMove(moveHistory, {
-        from,
-        to,
-        piece,
-        promotion: promotionPiece,
-        notation
-      }, newBoardState);
-      
-      // Update state
+      const newHistory = addMove(
+        moveHistory,
+        {
+          from,
+          to,
+          piece: { type: promotionPiece, color: piece.color },
+          notation,
+          promotion: promotionPiece,
+        },
+        newBoardState,
+      );
+
       setMoveHistory(newHistory);
       setBoardState(newBoardState);
       setLastMove({ from, to });
       setCurrentPlayer(currentPlayer === 'white' ? 'black' : 'white');
-      
-      // Notify parent
       if (onMoveHistoryChange) {
         onMoveHistoryChange(newHistory);
       }
-      
-      // Check game status
-      const gameStatus = getGameStatus();
-      if (gameStatus.isGameOver) {
-        // Handle game over
-        console.log('Game over:', gameStatus);
-      }
-      
-      // Get current FEN for synchronization
-      let currentFen = '';
-      try {
-        const chess = getChessEngine();
-        currentFen = chess.fen();
-      } catch (error) {
-        console.error('Error getting FEN:', error);
-      }
-      
-      // Emit this move with promotion info to other players via socket
+
       if (socket && playerColor === piece.color) {
-        socket.emit('move_made', {
+        const movePayload = {
           from,
           to,
           player: piece.color,
-          notation,
+          notation, 
           promotion: promotionPiece,
           isCapture,
-          fen: currentFen, // Add FEN for better synchronization
-          gameId: gameId || socket.id
-        });
+          fen: currentFen,
+          gameId: gameId || socket.id,
+        };
+        console.log('[ChessBoard] Emitting move_made (promotion selection): ', JSON.stringify(movePayload));
+        socket.emit('move_made', movePayload);
+      }
+      
+      if (gameStatus.isGameOver) {
+        console.log('Game Over after promotion:', gameStatus);
+        // Optional: Dispatch a custom event for game over to be handled elsewhere
+        // This depends on how game over is globally managed.
+        // Example:
+        // if (typeof window !== 'undefined') {
+        //     window.dispatchEvent(new CustomEvent('game_ended', {
+        //         detail: { /* appropriate game end details from gameStatus */ }
+        //     }));
+        // }
       }
     }
-    
-    // Clear promotion state
+
+    setShowPromotion(false);
     setPromotionMove(null);
-  }, [moveHistory, currentPlayer, onMoveHistoryChange, promotionMove, socket, playerColor, boardState.squares, gameId]);
+  }, [boardState, promotionMove, playerColor, gameId, socket, moveHistory, currentPlayer, onMoveHistoryChange]);
 
   // Handle square click for move selection
   const handleSquareClick = (position: string, piece: { type: PieceType, color: PieceColor } | null) => {

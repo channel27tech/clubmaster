@@ -1,5 +1,4 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { getChessEngine } from '../utils/chessEngine';
 
 // SVG paths for chess pieces
 const CHESS_PIECES = {
@@ -45,8 +44,8 @@ const CHESS_PIECES = {
 interface ChessMoveDisplay {
   moveNumber: number;
   white: {
-    piece: string;
-    notation: string;
+    piece: string; // e.g., 'p', 'n', 'k'
+    notation: string; // SAN, e.g., 'e4', 'Nf3'
   };
   black: {
     piece: string;
@@ -54,97 +53,89 @@ interface ChessMoveDisplay {
   } | null;
 }
 
-const MoveTracker: React.FC = () => {
+interface MoveTrackerProps {
+  moves: string[]; // Array of SAN strings from parent
+}
+
+// Helper to infer piece character from SAN for icon display
+const getPieceCharFromSan = (san: string): string => {
+  if (!san) return 'p'; // Default to pawn if SAN is empty
+  if (san.startsWith('O-O')) return 'k'; // Castle king side or queen side
+  const firstChar = san.charAt(0);
+  if (['K', 'Q', 'R', 'B', 'N'].includes(firstChar)) {
+    return firstChar.toLowerCase();
+  }
+  return 'p'; // Pawn move (e.g., e4, d5, exd5)
+};
+
+const MoveTracker: React.FC<MoveTrackerProps> = ({ moves }) => {
   const [formattedMoves, setFormattedMoves] = useState<ChessMoveDisplay[]>([]);
-  const [currentMove, setCurrentMove] = useState<number>(0);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Get moves from chess.js
-    updateMoveList();
+    const newFormattedMoves: ChessMoveDisplay[] = [];
+    for (let i = 0; i < moves.length; i += 2) {
+      const whiteSan = moves[i];
+      const blackSan = i + 1 < moves.length ? moves[i + 1] : null;
 
-    // Set up an interval to check for new moves
-    const interval = setInterval(updateMoveList, 500);
-    
-    return () => clearInterval(interval);
-  }, []);
+      newFormattedMoves.push({
+        moveNumber: Math.floor(i / 2) + 1,
+        white: {
+          piece: getPieceCharFromSan(whiteSan),
+          notation: whiteSan,
+        },
+        black: blackSan
+          ? {
+              piece: getPieceCharFromSan(blackSan),
+              notation: blackSan,
+            }
+          : null,
+      });
+    }
+    setFormattedMoves(newFormattedMoves);
+  }, [moves]);
 
-  // Scroll to current move when it changes
+  // Scroll to the last move when formattedMoves changes
   useEffect(() => {
     if (scrollContainerRef.current && formattedMoves.length > 0) {
-      const currentMoveElement = scrollContainerRef.current.querySelector(`[data-move-number="${currentMove}"]`);
-      if (currentMoveElement) {
-        currentMoveElement.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'start' });
+      // Scroll to the last move item
+      const lastMoveElement = scrollContainerRef.current.lastElementChild;
+      if (lastMoveElement) {
+        lastMoveElement.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'end' });
       }
     }
-  }, [currentMove, formattedMoves]);
-
-  const updateMoveList = () => {
-    try {
-      const chessEngine = getChessEngine();
-      const history = chessEngine.history({ verbose: true });
-      
-      if (history.length === 0) {
-        setFormattedMoves([]);
-        setCurrentMove(0);
-        return;
-      }
-
-      const formattedMovesList: ChessMoveDisplay[] = [];
-      
-      for (let i = 0; i < history.length; i += 2) {
-        const whiteMove = history[i];
-        const blackMove = i + 1 < history.length ? history[i + 1] : null;
-        
-        formattedMovesList.push({
-          moveNumber: Math.floor(i / 2) + 1,
-          white: {
-            piece: whiteMove.piece,
-            notation: whiteMove.san
-          },
-          black: blackMove ? {
-            piece: blackMove.piece,
-            notation: blackMove.san
-          } : null
-        });
-      }
-      
-      setFormattedMoves(formattedMovesList);
-      
-      // Update current move - this sets it to the latest move number
-      if (formattedMovesList.length > 0) {
-        setCurrentMove(Math.floor((history.length - 1) / 2) + 1);
-      }
-    } catch (error) {
-      console.error('Error updating move list:', error);
-    }
-  };
+  }, [formattedMoves]);
 
   return (
     <div className="w-full bg-[#1A1D1D] border-b border-black">
       <div 
         ref={scrollContainerRef}
         className="flex items-center h-[28px] overflow-x-auto whitespace-nowrap touch-pan-x no-scrollbar"
-        style={{ scrollbarWidth: 'none' }}
+        style={{ scrollbarWidth: 'none' }} // For Firefox
       >
-        {formattedMoves.map((move) => (
+        {formattedMoves.map((move, index) => (
           <div 
             key={move.moveNumber} 
-            data-move-number={move.moveNumber}
-            className={`flex items-center flex-shrink-0 relative ${move.moveNumber === currentMove ? 'bg-[#474F4F]' : ''}`}
+            data-move-number={move.moveNumber} // Keep for potential future use or styling
+            // Highlight the very last move pair for simplicity
+            className={`flex items-center flex-shrink-0 relative ${index === formattedMoves.length - 1 ? 'bg-[#474F4F]' : ''}`}
           >
             <span className="text-[#9DA792] text-xs pl-2 pr-1 z-10 w-8">{move.moveNumber}.</span>
             <div className="flex items-center z-10 px-1">
-              <div className="flex items-center mr-1">
-                {CHESS_PIECES[move.white.piece as keyof typeof CHESS_PIECES]}
-              </div>
+              {CHESS_PIECES[move.white.piece as keyof typeof CHESS_PIECES] && (
+                <div className="flex items-center mr-1">
+                  {CHESS_PIECES[move.white.piece as keyof typeof CHESS_PIECES]}
+                </div>
+              )}
               <span className="text-[#9DA792] text-xs">{move.white.notation}</span>
             </div>
             {move.black && (
               <div className="flex items-center z-10 px-1 mr-2">
-                <div className="flex items-center mr-1">
-                  {CHESS_PIECES[move.black.piece as keyof typeof CHESS_PIECES]}
-                </div>
+                {CHESS_PIECES[move.black.piece as keyof typeof CHESS_PIECES] && (
+                  <div className="flex items-center mr-1">
+                    {CHESS_PIECES[move.black.piece as keyof typeof CHESS_PIECES]}
+                  </div>
+                )}
                 <span className="text-[#9DA792] text-xs">{move.black.notation}</span>
               </div>
             )}
@@ -157,7 +148,7 @@ const MoveTracker: React.FC = () => {
 
 export default MoveTracker;
 
-// Add this CSS to hide scrollbars while keeping scrolling functionality
+// CSS to hide scrollbars (can be moved to a global CSS file if preferred)
 const styles = `
   .no-scrollbar::-webkit-scrollbar {
     display: none;
@@ -168,9 +159,12 @@ const styles = `
   }
 `;
 
-// Add style tag to document
 if (typeof document !== 'undefined') {
   const styleTag = document.createElement('style');
   styleTag.textContent = styles;
-  document.head.appendChild(styleTag);
+  // Check if a style tag with this ID already exists to prevent duplicates during HMR
+  if (!document.getElementById('no-scrollbar-styles')) {
+    styleTag.id = 'no-scrollbar-styles';
+    document.head.appendChild(styleTag);
+  }
 } 

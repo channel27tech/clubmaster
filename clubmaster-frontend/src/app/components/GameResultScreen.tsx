@@ -21,38 +21,88 @@ const GameResultScreen: React.FC<GameResultScreenProps> = ({
 }) => {
   // Get title text based on result
   const getTitleText = (): string => {
+    // Add safety check for resignations
+    if (reason === 'resignation') {
+      return result === 'win' ? 'Congratulations!' : 'Game Over';
+    }
+
     if (result === 'win') return 'Congratulations!';
     if (result === 'loss') return 'Better luck next time';
-    return 'Game Drawn';
+    if (reason === 'abort') return 'Game Aborted';
+    
+    // Only use Game Drawn when we're sure it's a draw
+    if (result === 'draw') return 'Game Drawn';
+    
+    // Use a generic fallback for unknown states
+    return 'Game Over';
   };
 
   // Get secondary text based on result
   const getSecondaryText = (): string => {
+    // Ensure resignations always show the correct text
+    if (reason === 'resignation') {
+      if (result === 'win') return 'OPPONENT RESIGNED';
+      if (result === 'loss') return 'YOU RESIGNED';
+      // Fallback if result is somehow unknown for resignation
+      return 'PLAYER RESIGNED';
+    }
+
     if (result === 'win') return 'YOU WON';
     if (result === 'loss') return 'YOU LOST';
-    return 'DRAW';
+    if (reason === 'abort') return 'NO RESULT';
+    
+    // Only use DRAW when we're sure it's a draw
+    if (result === 'draw') return 'DRAW';
+    
+    // Generic fallback
+    return 'GAME COMPLETE';
   };
 
   // Get color for the result header
   const getResultColor = (): string => {
     if (result === 'win') return 'bg-[#4A7C59]'; // Green for win
     if (result === 'loss') return 'bg-[#C25450]'; // Red for loss
+    if (reason === 'abort') return 'bg-[#6B717E]'; // Dark gray for aborted game
     return 'bg-[#8A9199]'; // Gray for draw
   };
 
   // Get rating display
   const getRatingDisplay = (): { rating: number, change: number } => {
-    if (result === 'win') {
-      return { rating: playerRating, change: playerRatingChange };
-    } else if (result === 'loss') {
-      return { rating: opponentRating, change: opponentRatingChange };
-    } else {
-      // For a draw, show player's rating by default
-      return { rating: playerRating, change: playerRatingChange };
-    }
+    // Always show player's rating regardless of result
+    return { rating: playerRating, change: playerRatingChange };
   };
 
   const ratingInfo = getRatingDisplay();
+
+  // Get score display for the result banner
+  const getScoreDisplay = (): string => {
+    if (reason === 'abort') return 'Aborted';
+    
+    // Specific handling for resignations to ensure correct score display
+    if (reason === 'resignation') {
+      if (result === 'win') return '1 - 0';
+      if (result === 'loss') return '0 - 1';
+      // Fallback for unknown state in resignations (should never happen)
+      console.warn('Resignation with unknown result type:', result);
+      return '? - ?';
+    }
+    
+    if (result === 'win') return '1 - 0';
+    if (result === 'loss') return '0 - 1';
+    if (result === 'draw') return '½ - ½'; // Draw
+    
+    // Generic fallback
+    return '? - ?';
+  };
+
+  // Debug log for diagnosing rendering issues
+  console.log('GameResultScreen rendering with:', {
+    result,
+    reason,
+    title: getTitleText(),
+    secondaryText: getSecondaryText(),
+    scoreDisplay: getScoreDisplay()
+  });
 
   return (
     <div className="fixed inset-0 flex items-center justify-center z-50">
@@ -87,7 +137,7 @@ const GameResultScreen: React.FC<GameResultScreenProps> = ({
 
             {/* Score */}
             <div className="text-2xl font-bold text-[#F9F3DD] mx-3">
-              {result === 'win' ? '1 - 0' : (result === 'loss' ? '0 - 1' : '½ - ½')}
+              {getScoreDisplay()}
             </div>
 
             {/* Opponent */}

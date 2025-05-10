@@ -1,17 +1,19 @@
-'use client';
-
 import React, { useEffect, useRef } from 'react';
 
-interface DrawOfferDialogProps {
+interface DrawConfirmationDialogProps {
   isOpen: boolean;
   onConfirm: () => void;
   onCancel: () => void;
+  isIncoming?: boolean;
+  opponentName?: string;
 }
 
-const DrawOfferDialog: React.FC<DrawOfferDialogProps> = ({
+const DrawConfirmationDialog: React.FC<DrawConfirmationDialogProps> = ({
   isOpen,
   onConfirm,
   onCancel,
+  isIncoming = false,
+  opponentName,
 }) => {
   const dialogRef = useRef<HTMLDivElement>(null);
 
@@ -47,7 +49,6 @@ const DrawOfferDialog: React.FC<DrawOfferDialogProps> = ({
       const focusableElements = dialogRef.current.querySelectorAll(
         'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
       );
-      
       if (focusableElements.length > 0) {
         (focusableElements[0] as HTMLElement).focus();
       }
@@ -73,10 +74,12 @@ const DrawOfferDialog: React.FC<DrawOfferDialogProps> = ({
             id="draw-dialog-title" 
             className="text-lg font-medium mb-1"
           >
-            Draw
+            {isIncoming ? 'Draw Offer' : 'Offer Draw'}
           </h2>
           <p className="mb-4 text-center text-sm">
-            Are you sure?
+            {isIncoming
+              ? `${opponentName ? opponentName + ' has' : 'Your opponent has'} offered a draw.`
+              : 'Offer a draw to your opponent?'}
           </p>
           <div className="flex justify-center space-x-3 w-full">
             <button 
@@ -84,13 +87,13 @@ const DrawOfferDialog: React.FC<DrawOfferDialogProps> = ({
               style={{ backgroundColor: '#4A7C59' }}
               onClick={onConfirm}
             >
-              Yes
+              {isIncoming ? 'Accept' : 'Yes'}
             </button>
             <button 
               className="flex-1 py-2 rounded bg-gray-500 hover:bg-gray-600 transition-colors"
               onClick={onCancel}
             >
-              Cancel
+              {isIncoming ? 'Decline' : 'Cancel'}
             </button>
           </div>
         </div>
@@ -99,4 +102,4 @@ const DrawOfferDialog: React.FC<DrawOfferDialogProps> = ({
   );
 };
 
-export default DrawOfferDialog; 
+export default DrawConfirmationDialog; 

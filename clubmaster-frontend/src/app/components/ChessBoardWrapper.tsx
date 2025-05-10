@@ -4,14 +4,14 @@ import dynamic from 'next/dynamic';
 import PlayerInfo from './PlayerInfo';
 import MoveControls from './MoveControls';
 import GameClock from './GameClock';
+import GameResultScreen from './GameResultScreen';
 import { player1, player2 } from '../utils/mockData';
 import { MoveHistoryState } from '../utils/moveHistory';
-import DrawOfferNotification from './DrawOfferNotification';
-import { useSocket } from '../../contexts/SocketContext';
 import { getGameStatus, getChessEngine } from '../utils/chessEngine';
 import { useSound } from '../../contexts/SoundContext';
+import { useSocket } from '../../contexts/SocketContext';
 import { playSound, preloadSoundEffects } from '../utils/soundEffects';
-import { CapturedPiece } from '../utils/types';
+import { CapturedPiece, GameResultType, GameEndReason } from '../utils/types';
 import DisconnectionNotification from './DisconnectionNotification';
 
 // Use dynamic import in a client component
@@ -61,28 +61,21 @@ interface ChessBoardWrapperProps {
   playerColor?: 'white' | 'black' | null;
   timeControl?: string;
   gameId?: string;
+  onSanMoveListChange?: (sanMoves: string[]) => void;
 }
 
-export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', gameId = '' }: ChessBoardWrapperProps) {
+export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', gameId = '', onSanMoveListChange }: ChessBoardWrapperProps) {
   // Get game ID from props or use derived from URL if available
   const [gameRoomId, setGameRoomId] = useState<string>(gameId);
   
-  // useEffect to get gameId from URL if not provided as prop
-  useEffect(() => {
-    if (!gameRoomId && typeof window !== 'undefined') {
-      // Extract gameId from URL /game/[gameId]
-      const pathParts = window.location.pathname.split('/');
-      const urlGameId = pathParts[pathParts.length - 1];
-      if (urlGameId && urlGameId !== 'game') {
-        setGameRoomId(urlGameId);
-        console.log('Using gameId from URL:', urlGameId);
-      }
-    }
-  }, [gameRoomId]);
+  // Socket context for real-time communication
+  const { socket } = useSocket();
+  
+  // Sound context
+  const { soundEnabled } = useSound();
   
   const [moveHistory, setMoveHistory] = useState<MoveHistoryState | null>(null);
-  const { socket } = useSocket();
-  const { soundEnabled } = useSound();
+  const [sanMoveList, setSanMoveList] = useState<string[]>([]);
   
   // Captured pieces state
   const [capturedByWhite, setCapturedByWhite] = useState<CapturedPiece[]>([]);
@@ -102,6 +95,23 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     gameMode: getGameModeFromTimeControl(timeControl || '5+0') // Derive game mode from time control
   });
   
+  // Add debugging log when component first renders
+  useEffect(() => {
+    console.log('ChessBoardWrapper initial gameState with hasWhiteMoved=false:', gameState);
+  }, []);
+  
+  // Debug gameState.hasWhiteMoved changes
+  useEffect(() => {
+    console.log('DEBUG ChessBoardWrapper - hasWhiteMoved changed:', {
+      hasWhiteMoved: gameState.hasWhiteMoved,
+      moveHistory: moveHistory ? {
+        length: moveHistory?.moves?.length,
+        currentMoveIndex: moveHistory?.currentMoveIndex
+      } : 'null',
+      canAbortGame: !gameState.hasWhiteMoved && (!moveHistory || !moveHistory.moves || moveHistory.moves.length === 0)
+    });
+  }, [gameState.hasWhiteMoved, moveHistory]);
+  
   // Update gameState when timeControl prop changes
   useEffect(() => {
     if (timeControl) {
@@ -119,6 +129,31 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       }
     }
   }, [timeControl]);
+  
+  // Listen for game state updates from the server
+  useEffect(() => {
+    // Define listener for game state updates
+    const handleGameStateUpdated = (event: CustomEvent) => {
+      console.log('Game state update received:', event.detail);
+      
+      // Update local game state with the received state
+      setGameState(prev => ({
+        ...prev,
+        hasWhiteMoved: event.detail.hasWhiteMoved,
+        isWhiteTurn: event.detail.isWhiteTurn,
+        hasStarted: event.detail.hasStarted,
+        isGameOver: event.detail.isGameOver
+      }));
+    };
+    
+    // Add the event listener
+    window.addEventListener('game_state_updated', handleGameStateUpdated as EventListener);
+    
+    // Clean up when component unmounts
+    return () => {
+      window.removeEventListener('game_state_updated', handleGameStateUpdated as EventListener);
+    };
+  }, []);
   
   // Calculate time in seconds based on the time control string
   const gameTimeInSeconds = useMemo(() => {
@@ -363,7 +398,9 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         
         setGameState(prev => ({ 
           ...prev, 
-          isWhiteTurn: true 
+          isWhiteTurn: true,
+          // Always mark hasWhiteMoved as true after any move (even black's moves)
+          hasWhiteMoved: true
         }));
         
         // Also ensure activePlayer state is synchronized
@@ -542,7 +579,222 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
           playSound('NOTIFICATION', true);
         }
 
+        // Set game result data for abort
+        setGameResultData({
+          result: 'draw',
+          reason: 'abort',
+          playerName: player1.username,
+          opponentName: player2.username,
+          playerRating: player1.rating || 1500,
+          opponentRating: player2.rating || 1500,
+          playerRatingChange: 0, // No rating change on abort
+          opponentRatingChange: 0  // No rating change on abort
+        });
+
+        // Show the result screen
+        setShowResultScreen(true);
+
         console.log(`Game ${gameRoomId} has been aborted. Reason: ${reason}`);
+      }
+    });
+
+    // Listen for game resigned event
+    safeSocket.on('gameResigned', ({ gameId: resignedGameId, reason, winner, loser, resigning }) => {
+      console.log(`=========== RECEIVED GAME RESIGNED EVENT ===========`);
+      console.log(`Game resigned event received with gameId: ${resignedGameId}, current gameId: ${gameRoomId}`);
+      console.log(`Winner socketId: ${winner}, Loser socketId: ${loser}, My socketId: ${safeSocket.id}, Resigning: ${resigning}`);
+      
+      if (gameRoomId === resignedGameId) {
+        console.log('MATCHED GAME ID - Processing resignation event');
+        
+        // Update game state to reflect resignation
+        setGameState(prevState => ({
+          ...prevState,
+          isGameOver: true,
+          gameResult: `Game Resigned: ${reason}`,
+        }));
+
+        // Stop both clocks when game is resigned
+        setActivePlayer(null);
+
+        // Play notification sound
+        if (soundEnabled) {
+          playSound('GAME_END', true);
+        }
+
+        // Determine if current player is the winner or loser
+        // Use multiple methods to determine winner/loser status for redundancy
+        const isResigningPlayer = resigning === true;
+        const isWinner = safeSocket.id === winner;
+        const isLoser = safeSocket.id === loser || isResigningPlayer;
+        
+        // If neither match, fallback to comparing colors and last move
+        let resultType: 'win' | 'loss' | 'draw' = isWinner ? 'win' : (isLoser ? 'loss' : 'draw');
+        
+        // Last resort fallback if we couldn't determine winner/loser
+        if (!isWinner && !isLoser) {
+          console.warn('Cannot determine winner/loser from socket IDs, using fallback logic');
+          
+          // For resignation, if we're not sure, fallback to the player who last moved as the winner
+          // This is not perfect but better than showing nothing
+          resultType = playerColor === 'white' ? 
+            (!gameState.isWhiteTurn ? 'win' : 'loss') : 
+            (gameState.isWhiteTurn ? 'win' : 'loss');
+            
+          console.log(`Fallback result determination: ${resultType}`);
+        }
+
+        // Get player names based on perspective (determined by the result)
+        const myName = resultType === 'win' ? player1.username : player2.username;
+        const opponentName = resultType === 'win' ? player2.username : player1.username;
+
+        // Log the resulting data for debugging
+        console.log('Creating game result data with:', {
+          result: resultType,
+          reason: 'resignation',
+          myName,
+          opponentName,
+          isWinner,
+          isLoser,
+          isResigningPlayer
+        });
+
+        // Set game result data for resignation
+        setGameResultData({
+          result: resultType,
+          reason: 'resignation',
+          playerName: myName,
+          opponentName: opponentName,
+          playerRating: resultType === 'win' ? player1.rating || 1500 : player2.rating || 1500,
+          opponentRating: resultType === 'win' ? player2.rating || 1500 : player1.rating || 1500,
+          playerRatingChange: resultType === 'win' ? 10 : -10, 
+          opponentRatingChange: resultType === 'win' ? -10 : 10
+        });
+
+        // Dispatch a game_ended event to ensure result screen shows
+        console.log('Dispatching game_ended event for resignation from ChessBoardWrapper');
+        try {
+          const gameEndedEvent = new CustomEvent('game_ended', {
+            detail: {
+              reason: 'resignation',
+              result: resultType,
+              source: 'chessBoardWrapper',
+              timestamp: Date.now()
+            }
+          });
+          window.dispatchEvent(gameEndedEvent);
+        } catch (error) {
+          console.error('Error dispatching game_ended event:', error);
+        }
+
+        // Forcefully attempt to show the result screen directly without delays
+        setShowResultScreen(true);
+        console.log('Result screen activated, showResultScreen set to true');
+        
+        // Also trigger with a delay as a fallback - try multiple times
+        const showResultDelays = [200, 1000, 2000];
+        showResultDelays.forEach(delay => {
+          setTimeout(() => {
+            if (!showResultScreen) {
+              console.log(`FALLBACK ${delay}ms: Result screen not shown, forcing display`);
+              setShowResultScreen(true);
+              
+              // Also dispatch another event as a backup
+              try {
+                window.dispatchEvent(new CustomEvent('game_ended', {
+                  detail: {
+                    reason: 'resignation',
+                    result: resultType,
+                    source: `chessBoardWrapper-fallback-${delay}`,
+                    timestamp: Date.now()
+                  }
+                }));
+              } catch (error) {
+                console.error(`Error dispatching fallback game_ended event at ${delay}ms:`, error);
+              }
+            }
+          }, delay);
+        });
+
+        console.log(`Game ${gameRoomId} has been resigned. Current player ${resultType === 'win' ? 'won' : 'lost'}.`);
+      } else {
+        console.log(`Ignored resign event for different game ID (received: ${resignedGameId}, current: ${gameRoomId})`);
+      }
+    });
+
+    // Add explicit listener for the game_end event from the server
+    safeSocket.on('game_end', (data) => {
+      console.log('========= RECEIVED GAME_END EVENT FROM SERVER =========', data);
+
+      // Determine if this is a resignation
+      if (data.reason === 'resignation' || data.endReason === 'resignation') {
+        console.log('Game ended due to resignation - showing result screen');
+        
+        // Determine winner/loser using multiple approaches for redundancy
+        const mySocketId = safeSocket.id;
+        const isWinner = mySocketId === data.winner || mySocketId === data.winnerId;
+        const isLoser = mySocketId === data.loser || mySocketId === data.loserId;
+        const resultType: 'win' | 'loss' | 'draw' = isWinner ? 'win' : (isLoser ? 'loss' : 'draw');
+        
+        console.log('Socket ID comparison for game_end event:', {
+          mySocketId,
+          winner: data.winner || data.winnerId,
+          loser: data.loser || data.loserId,
+          isWinner,
+          isLoser,
+          resultType
+        });
+        
+        // Set game result data
+        setGameResultData({
+          result: resultType,
+          reason: 'resignation',
+          playerName: player1.username,
+          opponentName: player2.username,
+          playerRating: player1.rating || 1500,
+          opponentRating: player2.rating || 1500,
+          playerRatingChange: resultType === 'win' ? 10 : -10,
+          opponentRatingChange: resultType === 'win' ? -10 : 10
+        });
+        
+        // Update game state
+        setGameState(prev => ({
+          ...prev,
+          isGameOver: true,
+          gameResult: `Game Resigned: Player resigned`
+        }));
+        
+        // Stop clocks
+        setActivePlayer(null);
+        
+        // Show result screen
+        setShowResultScreen(true);
+        console.log('Result screen activated for game_end event');
+        
+        // Also dispatch a custom event for consistency
+        try {
+          window.dispatchEvent(new CustomEvent('game_ended', {
+            detail: {
+              reason: 'resignation',
+              result: resultType,
+              source: 'game_end-event',
+              timestamp: Date.now()
+            }
+          }));
+        } catch (error) {
+          console.error('Error dispatching game_ended event from game_end handler:', error);
+        }
+        
+        // Set backup timers to ensure the result screen appears
+        const showResultDelays = [500, 1500];
+        showResultDelays.forEach(delay => {
+          setTimeout(() => {
+            if (!showResultScreen) {
+              console.log(`FALLBACK ${delay}ms from game_end: Forcing result screen display`);
+              setShowResultScreen(true);
+            }
+          }, delay);
+        });
       }
     });
 
@@ -553,6 +805,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       safeSocket.off('checkmate');
       safeSocket.off('draw');
       safeSocket.off('game_end');
+      safeSocket.off('gameResigned');
       
       // Clear any existing timeouts
       if (drawOfferTimeout) {
@@ -625,10 +878,37 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     processMoveWithRetry();
   }, [socket, moveQueue, gameRoomId, gameState.isWhiteTurn]);
 
+  // Effect to notify parent about SAN move list changes
+  useEffect(() => {
+    if (onSanMoveListChange) {
+      onSanMoveListChange(sanMoveList);
+    }
+  }, [sanMoveList, onSanMoveListChange]);
+
   // Handle move history updates from the ChessBoard component
   const handleMoveHistoryChange = useCallback((history: MoveHistoryState) => {
     setMoveHistory(history);
     
+    if (history && history.moves && history.moves.length > 0) {
+      const currentSanMoves = history.moves.map(move => move.notation);
+      // Ensure we are not causing an infinite loop if onSanMoveListChange itself causes a re-render
+      // that somehow feeds back into history. This check is a basic safeguard.
+      // A more robust solution might involve comparing previous and current sanMoveList.
+      setSanMoveList(prevSanMoveList => {
+        if (JSON.stringify(prevSanMoveList) !== JSON.stringify(currentSanMoves)) {
+          return currentSanMoves;
+        }
+        return prevSanMoveList;
+      });
+    } else {
+      setSanMoveList(prevSanMoveList => {
+        if (prevSanMoveList.length > 0) {
+          return [];
+        }
+        return prevSanMoveList;
+      });
+    }
+
     // Update captured pieces based on the current move
     if (history.moves.length > 0 && history.currentMoveIndex >= 0) {
       const currentMove = history.moves[history.currentMoveIndex];
@@ -787,22 +1067,53 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     }
   }, [socket, gameRoomId, drawOfferTimeout, soundEnabled]);
 
-  // Handle resigning from the game
-  const handleResign = useCallback(() => {
-    if (!socket) return;
+  // Handle resignation from the current player
+  const handleResignGame = () => {
+    console.log('Handling resignation - emitting resign', { gameId });
     
-    socket.emit('resign', { gameId: gameRoomId });
-    
-    // Update game state
+    // Immediately update UI state for the resigning player
     setGameState(prev => ({
       ...prev,
       isGameOver: true,
-      gameResult: `${gameState.isWhiteTurn ? 'White' : 'Black'} resigned. ${gameState.isWhiteTurn ? 'Black' : 'White'} wins`,
+      gameResult: `Game Resigned: You resigned`
     }));
     
-    // Stop the clocks
+    // Create explicit game result data for the resigning player
+    const resignResultData = {
+      result: 'loss' as GameResultType, // Explicitly type as 'loss'
+      reason: 'resignation' as GameEndReason,
+      playerName: player1.username,
+      opponentName: player2.username,
+      playerRating: player1.rating || 1500,
+      opponentRating: player2.rating || 1500,
+      playerRatingChange: -10, // Always negative for resigner
+      opponentRatingChange: 10  // Always positive for opponent
+    };
+    
+    // Set result data and show result screen immediately
+    setGameResultData(resignResultData);
+    setShowResultScreen(true);
+    
+    // Emit the resignation to the server
+    if (socket) {
+      socket.emit('resign', { gameId });
+      console.log('Emitted resign event');
+    }
+    
+    // Stop clocks
     setActivePlayer(null);
-  }, [socket, gameRoomId, gameState.isWhiteTurn]);
+    
+    // Broadcast a local game_ended event with explicit result type
+    const gameEndedEvent = new CustomEvent('game_ended', {
+      detail: {
+        reason: 'resignation',
+        result: 'loss',  // Explicit result for the player who resigned
+        source: 'local_resign',
+        loserSocketId: socket?.id // Mark self as loser
+      }
+    });
+    window.dispatchEvent(gameEndedEvent);
+  };
 
   // Handle offering a draw
   const handleOfferDraw = useCallback(() => {
@@ -829,7 +1140,11 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   useEffect(() => {
     if (socket && gameRoomId) {
       console.log(`Joining game room: ${gameRoomId}`);
-      // Use the explicit join_game_room handler
+      
+      // First emit enter_game to get the initial game state
+      socket.emit('enter_game', { gameId: gameRoomId });
+      
+      // Then use the explicit join_game_room handler
       socket.emit('join_game_room', { gameId: gameRoomId });
 
       // Listen for confirmation of joining the room
@@ -857,19 +1172,194 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     }
   }, [gameState.isGameOver]);
 
+  // Add game result screen state
+  const [showResultScreen, setShowResultScreen] = useState(false);
+  const [gameResultData, setGameResultData] = useState<{
+    result: GameResultType;
+    reason: GameEndReason;
+    playerName: string;
+    opponentName: string;
+    playerRating: number;
+    opponentRating: number;
+    playerRatingChange: number;
+    opponentRatingChange: number;
+  } | null>(null);
+
+  // Add handler to close game result screen
+  const handleCloseResultScreen = useCallback(() => {
+    setShowResultScreen(false);
+    
+    // Redirect to home or matchmaking page
+    window.location.href = '/';
+  }, []);
+
+  // Listen for the game_ended custom event
+  useEffect(() => {
+    const handleGameEnded = (event: CustomEvent) => {
+      const { reason, result, winnerSocketId, loserSocketId, source } = event.detail;
+      console.log('Game ended event received:', { 
+        reason, 
+        result, 
+        winnerSocketId, 
+        loserSocketId,
+        source, 
+        mySocketId: socket?.id
+      });
+      
+      let finalResult: GameResultType;
+      
+      // Determine result type with multiple fallbacks
+      if (result === 'win' || result === 'loss' || result === 'draw') {
+        // Use the result directly if it's valid
+        finalResult = result as GameResultType;
+        console.log(`Using provided result: ${finalResult}`);
+      } else if (socket && (winnerSocketId || loserSocketId)) {
+        // If we have socket IDs, use them to determine winner/loser
+        if (winnerSocketId && socket.id === winnerSocketId) {
+          finalResult = 'win';
+          console.log('Result determined from winnerSocketId match: win');
+        } else if (loserSocketId && socket.id === loserSocketId) {
+          finalResult = 'loss';
+          console.log('Result determined from loserSocketId match: loss');
+        } else if (reason === 'resignation') {
+          // For resignation with no match, NEVER default to draw
+          // Always default to loss for resignation events if we can't determine otherwise
+          finalResult = 'loss';
+          console.log('Using fallback for resignation with no socket match: loss');
+        } else {
+          // Default to draw for other cases (not resignations)
+          finalResult = 'draw';
+          console.log('Using default fallback: draw (non-resignation event)');
+        }
+      } else {
+        // Last resort default - special handling for resignation
+        if (reason === 'resignation') {
+          // For resignations, default to loss if still unknown 
+          finalResult = 'loss'; 
+          console.log('Last resort fallback for resignation: loss');
+        } else {
+          // For other reasons, default to draw
+          finalResult = result as GameResultType || 'draw';
+          console.log(`Last resort fallback for ${reason}: ${finalResult}`);
+        }
+      }
+      
+      // Create game result data
+      const resultData = {
+        result: finalResult,
+        reason: reason as GameEndReason,
+        playerName: player1.username,
+        opponentName: player2.username,
+        playerRating: player1.rating || 1500,
+        opponentRating: player2.rating || 1500,
+        playerRatingChange: finalResult === 'win' ? 10 : (finalResult === 'loss' ? -10 : 0),
+        opponentRatingChange: finalResult === 'win' ? -10 : (finalResult === 'loss' ? 10 : 0)
+      };
+      
+      // Log the final game result data for debugging
+      console.log('Final game result data:', resultData);
+      
+      // Set the game result data state
+      setGameResultData(resultData);
+      
+      // Show the result screen
+      setShowResultScreen(true);
+      
+      // Stop both clocks
+      setActivePlayer(null);
+      
+      // Update game state
+      setGameState(prev => ({
+        ...prev,
+        isGameOver: true,
+      }));
+    };
+    
+    // Add event listener
+    window.addEventListener('game_ended', handleGameEnded as EventListener);
+    
+    // Clean up
+    return () => {
+      window.removeEventListener('game_ended', handleGameEnded as EventListener);
+    };
+  }, [socket]);
+
+  // Add dedicated result screen visibility effect to ensure it shows when needed
+  useEffect(() => {
+    // If the game is over and we have result data but the screen isn't shown, show it
+    if (gameState.isGameOver && gameResultData && !showResultScreen) {
+      console.log('Game is over with result data but screen not showing - forcing display', {
+        isGameOver: gameState.isGameOver,
+        hasResultData: !!gameResultData,
+        showResultScreen
+      });
+      setShowResultScreen(true);
+    }
+    
+    // If a resign event happened and we received result data, ensure the screen is shown
+    if (gameState.gameResult?.includes('Game Resigned') && !showResultScreen) {
+      console.log('RESIGNATION DETECTED: Game was resigned but result screen not showing');
+      
+      // If we somehow don't have gameResultData yet, create a default one
+      if (!gameResultData) {
+        console.log('Creating default gameResultData for resignation');
+        setGameResultData({
+          result: 'loss', // Default assumption - can be corrected by socket event
+          reason: 'resignation',
+          playerName: player1.username,
+          opponentName: player2.username,
+          playerRating: player1.rating || 1500,
+          opponentRating: player2.rating || 1500,
+          playerRatingChange: -10, // Default loss
+          opponentRatingChange: 10
+        });
+      }
+      
+      setShowResultScreen(true);
+      console.log('FORCIBLY showing result screen for resignation');
+    }
+  }, [gameState.isGameOver, gameState.gameResult, gameResultData, showResultScreen]);
+
+  // Debug logging for move controls
+  useEffect(() => {
+    console.log('DEBUG ChessBoardWrapper - Move Controls Debug:', {
+      hasWhiteMoved: gameState.hasWhiteMoved,
+      moveHistory: moveHistory ? {
+        length: moveHistory?.moves?.length,
+        currentMoveIndex: moveHistory?.currentMoveIndex
+      } : 'null',
+      canAbortGame: !gameState.hasWhiteMoved && (!moveHistory || !moveHistory.moves || moveHistory.moves.length === 0)
+    });
+  }, [gameState.hasWhiteMoved, moveHistory, gameState]);
+
   return (
     <div className="flex flex-col w-full h-full rounded-t-xl rounded-b-none sm:rounded-t-xl sm:rounded-b-none overflow-hidden flex-shrink-0" style={{ backgroundColor: '#4A7C59' }}>
+      {/* Game Result Screen */}
+      {showResultScreen && gameResultData && (
+        <GameResultScreen
+          result={gameResultData.result}
+          reason={gameResultData.reason}
+          playerName={gameResultData.playerName}
+          opponentName={gameResultData.opponentName}
+          playerRating={gameResultData.playerRating}
+          opponentRating={gameResultData.opponentRating}
+          playerRatingChange={gameResultData.playerRatingChange}
+          opponentRatingChange={gameResultData.opponentRatingChange}
+          onClose={handleCloseResultScreen}
+        />
+      )}
+      
       {/* Draw Offer Notification */}
-      <DrawOfferNotification
+      {/* <DrawOfferNotification
         isOpen={drawOfferReceived}
         onAccept={handleAcceptDraw}
         onDecline={handleDeclineDraw}
         opponentName={player2.username}
         timeRemaining={drawOfferTimeRemaining}
-      />
+      /> */}
       
       {/* Game Result Display */}
-      {gameState.isGameOver && (
+      {gameState.isGameOver && !showResultScreen && (
         <div className="p-4 my-2 bg-amber-100 rounded-md text-center font-bold">
           {gameState.gameResult}
         </div>
@@ -986,6 +1476,8 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         </>
       )}
       
+      {/* Debug logging moved to useEffect */}
+      
       {/* Move Controls */}
       <MoveControls 
         onBack={handleBackClick}
@@ -994,9 +1486,12 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         canGoForward={canGoForward}
         gameId={gameRoomId}
         gameState={gameState}
-        onResign={handleResign}
-        onOfferDraw={handleOfferDraw}
+        onResign={handleResignGame}
         onAbortGame={handleAbortGame}
+        moveHistory={moveHistory ? {
+          length: moveHistory.moves.length,
+          currentMoveIndex: moveHistory.currentMoveIndex
+        } : undefined}
       />
       
       {/* Disconnection Notification */}
