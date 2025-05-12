@@ -29,8 +29,8 @@ const getGameModeFromTime = (timeInMinutes: number): string => {
  */
 const PlayPage: React.FC = () => {
   const matchmakingRef = useRef<MatchmakingManagerHandle>(null);
-  const [activeTab, setActiveTab] = useState<string>('Blitz');
-  const [selectedTime, setSelectedTime] = useState<number>(5);
+  const [activeTab, setActiveTab] = useState<string>('Rapid');
+  const [selectedTime, setSelectedTime] = useState<number>(10);
   const [playAs, setPlayAs] = useState<string>('white');
   const [isMatchmaking, setIsMatchmaking] = useState<boolean>(false);
   const router = useRouter();
@@ -125,65 +125,90 @@ const PlayPage: React.FC = () => {
           onCancel={handleCancelMatchmaking}
         />
       ) : (
-        <div className="w-full max-w-md md:max-w-lg lg:max-w-xl flex flex-col h-screen sm:h-auto sm:min-h-[600px] sm:max-h-[90vh] sm:rounded-xl sm:shadow-lg sm:my-8" style={{ backgroundColor: '#333939' }}>
-          {/* Header with back button */}
-          <div className="p-4 pt-6 md:p-6 flex items-center">
-            <Link href="/" className="text-white hover:text-gray-300 transition-colors">
+        <div className="w-full max-w-[430px] flex flex-col h-screen sm:h-auto sm:min-h-[600px] sm:max-h-[90vh] sm:rounded-xl sm:shadow-lg sm:my-8" style={{ backgroundColor: '#333939' }}>
+          {/* Header with back button - 21px padding */}
+          <div className="px-[21px] pt-[21px] flex items-center">
+            <Link href="/" className="text-[#BFC0C0] hover:text-gray-300 transition-colors">
               <FaArrowLeft size={20} />
             </Link>
-            <h1 className="text-xl md:text-2xl font-semibold mx-auto text-white">Match Setup</h1>
+            <h1 className="text-[22px] font-semibold mx-auto text-[#FAF3DD] font-poppins tracking-[0.25%]">Match Setup</h1>
           </div>
           
-          <div className="flex flex-col flex-1 p-4 sm:p-6 pt-6 sm:pt-8">
-            {/* Game type headers */}
-            <div className="flex justify-between mb-6 sm:mb-8">
-              <div 
-                className={`flex items-center gap-1 cursor-pointer ${activeTab === 'Bullet' ? 'text-white' : 'text-gray-400'} hover:text-white transition-colors`}
-                onClick={() => handleTabChange('Bullet')}
-              >
-                <span>🚀</span>
-                <span className="font-medium">Bullet</span>
+          <div className="flex flex-col flex-1 px-[21px] pt-[21px] pb-[21px]">
+            {/* Game mode selection and time buttons in a grid layout */}
+            <div className="grid grid-cols-3 gap-x-4 mb-[21px]">
+              {/* Column 1: Bullet */}
+              <div className="flex flex-col items-center gap-3">
+                <div 
+                  className={`flex items-center gap-1 cursor-pointer ${activeTab === 'Bullet' ? 'text-[#FAF3DD]' : 'text-gray-400'} hover:text-[#FAF3DD] transition-colors`}
+                  onClick={() => handleTabChange('Bullet')}
+                >
+                  <Image 
+                    src="/icons/time-modes/bullet.svg" 
+                    alt="Bullet" 
+                    width={16} 
+                    height={16} 
+                    className="w-[16px] h-[16px]"
+                  />
+                  <span className="font-semibold text-[16px] font-poppins tracking-[0.25%]">Bullet</span>
+                </div>
+                <TimeButton 
+                  time={3}
+                  isActive={selectedTime === 3}
+                  onClick={() => handleTimeSelection(3)}
+                />
               </div>
-              <div 
-                className={`flex items-center gap-1 cursor-pointer ${activeTab === 'Blitz' ? 'text-white' : 'text-gray-400'} hover:text-white transition-colors`}
-                onClick={() => handleTabChange('Blitz')}
-              >
-                <span>⚡</span>
-                <span className="font-medium">Blitz</span>
+              
+              {/* Column 2: Blitz */}
+              <div className="flex flex-col items-center gap-3">
+                <div 
+                  className={`flex items-center gap-1 cursor-pointer ${activeTab === 'Blitz' ? 'text-[#FAF3DD]' : 'text-gray-400'} hover:text-[#FAF3DD] transition-colors`}
+                  onClick={() => handleTabChange('Blitz')}
+                >
+                  <Image 
+                    src="/icons/time-modes/blitz.svg" 
+                    alt="Blitz" 
+                    width={16} 
+                    height={16} 
+                    className="w-[16px] h-[16px]"
+                  />
+                  <span className="font-semibold text-[16px] font-poppins tracking-[0.25%]">Blitz</span>
+                </div>
+                <TimeButton 
+                  time={5}
+                  isActive={selectedTime === 5}
+                  onClick={() => handleTimeSelection(5)}
+                />
               </div>
-              <div 
-                className={`flex items-center gap-1 cursor-pointer ${activeTab === 'Rapid' ? 'text-white' : 'text-gray-400'} hover:text-white transition-colors`}
-                onClick={() => handleTabChange('Rapid')}
-              >
-                <span>⏱️</span>
-                <span className="font-medium">Rapid</span>
+              
+              {/* Column 3: Rapid */}
+              <div className="flex flex-col items-center gap-3">
+                <div 
+                  className={`flex items-center gap-1 cursor-pointer ${activeTab === 'Rapid' ? 'text-[#FAF3DD]' : 'text-gray-400'} hover:text-[#FAF3DD] transition-colors`}
+                  onClick={() => handleTabChange('Rapid')}
+                >
+                  <Image 
+                    src="/icons/time-modes/rapid.svg" 
+                    alt="Rapid" 
+                    width={16} 
+                    height={16} 
+                    className="w-[16px] h-[16px]"
+                  />
+                  <span className="font-semibold text-[16px] font-poppins tracking-[0.25%]">Rapid</span>
+                </div>
+                <TimeButton 
+                  time={10}
+                  isActive={selectedTime === 10}
+                  onClick={() => handleTimeSelection(10)}
+                />
               </div>
             </div>
             
-            {/* Time selection buttons */}
-            <div className="flex justify-between gap-2 sm:gap-4 mb-8 sm:mb-12">
-              <TimeButton 
-                time={3}
-                isActive={selectedTime === 3}
-                onClick={() => handleTimeSelection(3)}
-              />
-              <TimeButton 
-                time={5}
-                isActive={selectedTime === 5}
-                onClick={() => handleTimeSelection(5)}
-              />
-              <TimeButton 
-                time={10}
-                isActive={selectedTime === 10}
-                onClick={() => handleTimeSelection(10)}
-              />
-            </div>
-            
-            {/* Play as selection */}
-            <div className="mb-8 sm:mb-12">
-              <div className="rounded-lg p-3 sm:p-4 border border-[#4C5454] bg-[#4C5454]">
-                <p className="text-center mb-2 sm:mb-3 text-gray-300 font-medium sm:text-lg">I play as</p>
-                <div className="flex justify-center gap-3 sm:gap-6">
+            {/* Play as selection - 21px bottom margin */}
+            <div className="mb-[21px]">
+              <div className="rounded-[10px] py-[10px] px-[14px] bg-[#4C5454] flex items-center">
+                <p className="text-[#D9D9D9] text-[16px] font-roboto font-normal mr-auto">I play as</p>
+                <div className="flex items-center gap-[12px]">
                   <PlayAsButton 
                     type="white"
                     isActive={playAs === 'white'}
@@ -203,18 +228,18 @@ const PlayPage: React.FC = () => {
               </div>
             </div>
             
-            {/* Action buttons */}
-            <div className="mt-auto flex flex-col gap-3 sm:gap-4">
+            {/* Action buttons - 16px gap between buttons */}
+            <div className="mt-auto flex flex-col gap-[16px]">
               <button
                 onClick={handleStartMatchmaking}
-                className="py-3 sm:py-4 bg-[#4A7C59] hover:bg-[#3d6549] rounded-lg font-medium transition-colors w-full border-2 border-[#E9CB6B] text-white text-base sm:text-lg"
+                className="h-[57px] bg-[#4A7C59] hover:bg-[#3d6549] rounded-[10px] font-semibold transition-colors w-full border-2 border-[#E9CB6B] text-[#FAF3DD] text-[18px] font-poppins"
               >
                 Play Random
               </button>
               
               <button
                 onClick={() => console.log('Create link')}
-                className="py-3 sm:py-4 bg-[#4C5454] hover:bg-[#3d4343] rounded-lg font-medium transition-colors w-full border border-[#5a6363] text-white text-base sm:text-lg"
+                className="h-[57px] bg-[#4C5454] hover:bg-[#3d4343] rounded-[10px] font-semibold transition-colors w-full text-[#FAF3DD] text-[18px] font-poppins"
               >
                 Create Link
               </button>
@@ -247,9 +272,9 @@ const TimeButton: React.FC<TimeButtonProps> = ({
   return (
     <button
       onClick={onClick}
-      className={`flex-1 py-2 sm:py-3 rounded-lg transition-colors ${
-        isActive ? 'bg-[#4A7C59] hover:bg-[#3d6549] border border-[#5d8f6c]' : 'bg-[#4C5454] hover:bg-[#3d4343] border border-[#5a6363]'
-      } text-white text-sm sm:text-base`}
+      className={`w-[117px] h-[47px] rounded-[10px] transition-colors ${
+        isActive ? 'bg-[#4A7C59] hover:bg-[#3d6549]' : 'bg-[#4C5454] hover:bg-[#3d4343]'
+      } text-[#FAF3DD] text-[16px] font-semibold font-poppins`}
     >
       {time} min
     </button>
@@ -284,14 +309,14 @@ const PlayAsButton: React.FC<PlayAsButtonProps> = ({
   return (
     <button
       onClick={onClick}
-      className={`p-2 sm:p-3 ${isActive ? 'bg-[#4A7C59] rounded-lg' : ''} transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center`}
+      className={`w-[36px] h-[36px] flex items-center justify-center ${isActive ? 'bg-[#4A7C59] rounded-[10px]' : ''} transition-colors`}
     >
       <Image 
         src={getIconPath()} 
         alt={`${type} piece`}
-        width={24}
-        height={24}
-        className="w-5 h-5 sm:w-6 sm:h-6"
+        width={22}
+        height={22}
+        className="w-[22px] h-[22px]"
         priority
       />
     </button>
