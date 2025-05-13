@@ -7,7 +7,7 @@ import {
   GameEndReason,
   GameResult
 } from './game-end/game-end.service';
-import { RatingService, RatingResult, RatingChange } from './rating/rating.service';
+import { RatingService, RatingChange, RatingResult as RatingServiceResult } from './rating/rating.service';
 
 // Player type for active games
 export interface GamePlayer {
@@ -42,7 +42,6 @@ export interface GameState {
   blackTimeRemaining: number; // In milliseconds
   whiteTurn: boolean; // Is it white's turn?
   isFirstMove: boolean; // Is this the first move of the game?
-  drawOfferBy?: string; // Socket ID of player who offered draw
 }
 
 // Result of a completed game
@@ -278,7 +277,14 @@ export class GameManagerService {
     if (!game || game.ended) return null;
     
     // Determine which player resigned
-    const resigningColor = game.whitePlayer.socketId === socketId ? 'w' : 'b';
+    const isWhiteResigning = game.whitePlayer.socketId === socketId;
+    const resigningColor = isWhiteResigning ? 'w' : 'b';
+    
+    // Explicitly identify winner and loser by socketId
+    const winnerSocketId = isWhiteResigning ? game.blackPlayer.socketId : game.whitePlayer.socketId;
+    const loserSocketId = socketId; // the resigning player is always the loser
+    
+    this.logger.log(`Resignation details - Winner: ${winnerSocketId}, Loser: ${loserSocketId}, isWhiteResigning: ${isWhiteResigning}`);
     
     // Check game end based on resignation
     const gameEndDetails = this.gameEndService.checkGameEnd(
@@ -293,32 +299,11 @@ export class GameManagerService {
     );
     
     if (gameEndDetails) {
-      return this.handleGameEnd(gameId, gameEndDetails, server);
-    }
-    
-    return null;
-  }
-
-  /**
-   * Register a draw agreement in a game
-   */
-  registerDrawAgreement(gameId: string, server: Server): GameResultData | null {
-    const game = this.activeGames.get(gameId);
-    if (!game || game.ended) return null;
-    
-    // Check game end based on draw agreement
-    const gameEndDetails = this.gameEndService.checkGameEnd(
-      game.chessInstance,
-      game.whitePlayer.socketId,
-      game.blackPlayer.socketId,
-      undefined, // No timeout
-      undefined, // No resignation
-      true, // Draw agreement
-      undefined, // No disconnection
-      game.isFirstMove,
-    );
-    
-    if (gameEndDetails) {
+      // Override the game end details to ensure socket IDs are always set correctly
+      // This ensures frontend always receives valid IDs for winner/loser display
+      gameEndDetails.winnerSocketId = winnerSocketId;
+      gameEndDetails.loserSocketId = loserSocketId;
+      
       return this.handleGameEnd(gameId, gameEndDetails, server);
     }
     
@@ -461,73 +446,102 @@ export class GameManagerService {
   ): GameResultData {
     const game = this.activeGames.get(gameId);
     if (!game) {
-      throw new Error(`Game ${gameId} not found`);
+      this.logger.error(`Game not found in handleGameEnd: ${gameId}`);
+      throw new Error(`Game ${gameId} not found during handleGameEnd.`);
     }
-    
-    // Mark game as ended
+
+    if (game.ended) {
+      this.logger.warn(`Game ${gameId} already ended. Ignoring duplicate handleGameEnd call.`);
+      return {
+        gameId: game.gameId,
+        result: game.result || gameEndDetails.result,
+        reason: game.endReason || gameEndDetails.reason,
+        winnerUserId: gameEndDetails.winnerSocketId === game.whitePlayer.socketId ? game.whitePlayer.userId : (gameEndDetails.winnerSocketId === game.blackPlayer.socketId ? game.blackPlayer.userId : undefined),
+        loserUserId: gameEndDetails.loserSocketId === game.whitePlayer.socketId ? game.whitePlayer.userId : (gameEndDetails.loserSocketId === game.blackPlayer.socketId ? game.blackPlayer.userId : undefined),
+        pgn: game.pgn,
+        gameMode: game.gameMode,
+        timeControl: game.timeControl,
+        rated: game.rated,
+        startTime: game.startTime,
+        endTime: game.endTime || new Date(),
+        whitePlayer: {
+          userId: game.whitePlayer.userId,
+          username: game.whitePlayer.username,
+          isGuest: game.whitePlayer.isGuest,
+          rating: game.whitePlayer.rating,
+        },
+        blackPlayer: {
+          userId: game.blackPlayer.userId,
+          username: game.blackPlayer.username,
+          isGuest: game.blackPlayer.isGuest,
+          rating: game.blackPlayer.rating,
+        },
+      };
+    }
+
+    this.logger.log(
+      `Handling game end for ${gameId}. Reason: ${gameEndDetails.reason}, Result: ${gameEndDetails.result}`,
+    );
+
     game.ended = true;
     game.endTime = new Date();
     game.result = gameEndDetails.result;
     game.endReason = gameEndDetails.reason;
-    
-    // Calculate rating changes if:
-    // 1. The game is rated
-    // 2. Both players are registered (not guests)
-    // 3. The game wasn't aborted
+
     let whiteRatingChange: RatingChange | undefined;
     let blackRatingChange: RatingChange | undefined;
-    
-    if (
-      game.rated &&
-      !game.whitePlayer.isGuest &&
-      !game.blackPlayer.isGuest &&
-      gameEndDetails.result !== GameResult.ABORTED
-    ) {
-      // Determine the result for white player
-      let whiteResult: RatingResult;
-      
-      switch (gameEndDetails.result) {
-        case GameResult.WHITE_WINS:
-          whiteResult = RatingResult.WIN;
-          break;
-        case GameResult.BLACK_WINS:
-          whiteResult = RatingResult.LOSS;
-          break;
-        case GameResult.DRAW:
-          whiteResult = RatingResult.DRAW;
-          break;
-        default:
-          whiteResult = RatingResult.DRAW;
+
+    if (game.rated && gameEndDetails.reason !== GameEndReason.ABORT) {
+      if (!game.whitePlayer.isGuest && !game.blackPlayer.isGuest) {
+        let whiteResultForRating: RatingServiceResult;
+
+        if (gameEndDetails.result === GameResult.WHITE_WINS) {
+          whiteResultForRating = RatingServiceResult.WIN;
+        } else if (gameEndDetails.result === GameResult.BLACK_WINS) {
+          whiteResultForRating = RatingServiceResult.LOSS;
+        } else if (gameEndDetails.result === GameResult.DRAW) {
+          whiteResultForRating = RatingServiceResult.DRAW;
+        } else {
+          this.logger.warn(`Unexpected game result type for rating calculation: ${gameEndDetails.result}. Treating as DRAW for safety.`);
+          whiteResultForRating = RatingServiceResult.DRAW;
+        }
+        
+        if (whiteResultForRating !== undefined) { 
+            const ratingChanges = this.ratingService.calculateGameRatingChanges(
+                game.whitePlayer.rating || (this.ratingService as any).DEFAULT_RATING, 
+                game.blackPlayer.rating || (this.ratingService as any).DEFAULT_RATING,
+                whiteResultForRating,
+                game.whitePlayer.gamesPlayed || 0,
+                game.blackPlayer.gamesPlayed || 0,
+            );
+            
+            if (ratingChanges) {
+                whiteRatingChange = ratingChanges.white;
+                blackRatingChange = ratingChanges.black;
+                this.logger.log(`Ratings updated for game ${gameId}: White ${whiteRatingChange?.newRating}, Black ${blackRatingChange?.newRating}`);
+            }
+        } else {
+             this.logger.log(`Game ${gameId} result (${gameEndDetails.result}) not suitable for standard win/loss/draw rating. Skipping.`);
+        }
+      } else {
+        this.logger.log(
+          `Game ${gameId} is rated, but one or both players are guests. Skipping rating changes.`,
+        );
       }
-      
-      // Calculate rating changes
-      const ratingChanges = this.ratingService.calculateGameRatingChanges(
-        game.whitePlayer.rating || 1500,
-        game.blackPlayer.rating || 1500,
-        whiteResult,
-        game.whitePlayer.gamesPlayed || 0,
-        game.blackPlayer.gamesPlayed || 0,
-      );
-      
-      whiteRatingChange = ratingChanges.white;
-      blackRatingChange = ratingChanges.black;
+    } else {
+      if (gameEndDetails.reason === GameEndReason.ABORT) {
+        this.logger.log(`Game ${gameId} was aborted. Skipping rating changes.`);
+      } else if (!game.rated) {
+        this.logger.log(`Game ${gameId} is not rated. Skipping rating changes.`);
+      }
     }
-    
-    // Create game result data for database storage and client notification
-    const resultData: GameResultData = {
+
+    const finalResultData: GameResultData = {
       gameId: game.gameId,
-      result: gameEndDetails.result,
-      reason: gameEndDetails.reason,
-      winnerUserId: gameEndDetails.winnerSocketId
-        ? game.whitePlayer.socketId === gameEndDetails.winnerSocketId
-          ? game.whitePlayer.userId
-          : game.blackPlayer.userId
-        : undefined,
-      loserUserId: gameEndDetails.loserSocketId
-        ? game.whitePlayer.socketId === gameEndDetails.loserSocketId
-          ? game.whitePlayer.userId
-          : game.blackPlayer.userId
-        : undefined,
+      result: game.result!,
+      reason: game.endReason!,
+      winnerUserId: gameEndDetails.winnerSocketId === game.whitePlayer.socketId ? game.whitePlayer.userId : (gameEndDetails.winnerSocketId === game.blackPlayer.socketId ? game.blackPlayer.userId : undefined),
+      loserUserId: gameEndDetails.loserSocketId === game.whitePlayer.socketId ? game.whitePlayer.userId : (gameEndDetails.loserSocketId === game.blackPlayer.socketId ? game.blackPlayer.userId : undefined),
       whiteRatingChange,
       blackRatingChange,
       pgn: game.pgn,
@@ -535,7 +549,7 @@ export class GameManagerService {
       timeControl: game.timeControl,
       rated: game.rated,
       startTime: game.startTime,
-      endTime: game.endTime,
+      endTime: game.endTime!,
       whitePlayer: {
         userId: game.whitePlayer.userId,
         username: game.whitePlayer.username,
@@ -549,25 +563,13 @@ export class GameManagerService {
         rating: game.blackPlayer.rating,
       },
     };
-    
-    // Notify players of game end
-    server.to(gameId).emit('gameEnd', resultData);
-    
-    // TODO: Save game result to database (will be implemented by another service)
-    
-    // Clean up game after a delay
-    setTimeout(
-      () => {
-        this.cleanupGame(gameId);
-      },
-      5 * 60 * 1000,
-    ); // Clean up after 5 minutes
-    
-    this.logger.log(
-      `Game ${gameId} ended: ${gameEndDetails.result} due to ${gameEndDetails.reason}`,
-    );
-    
-    return resultData;
+
+    this.logger.log(`Emitting 'game_ended' for ${gameId} with data:`, JSON.stringify(finalResultData, null, 2));
+    server.to(gameId).emit('game_ended', finalResultData);
+
+    this.cleanupGame(gameId);
+
+    return finalResultData;
   }
 
   /**

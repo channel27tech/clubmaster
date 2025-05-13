@@ -48,47 +48,19 @@ const PlayerInfo: React.FC<PlayerInfoProps> = ({
       // Sort by value (higher value first)
       return pieceValues[b.type] - pieceValues[a.type];
     });
-    
+   
     // Remove the "No pieces" message - the area will remain blank until pieces are captured
     if (sortedCapturedPieces.length === 0) {
       return null;
     }
-
-    // Group pieces by type for more compact display
-    const groupedPieces: Record<PieceType, number> = {
-      'queen': 0,
-      'rook': 0,
-      'bishop': 0,
-      'knight': 0,
-      'pawn': 0,
-      'king': 0
-    };
-
-    sortedCapturedPieces.forEach(piece => {
-      groupedPieces[piece.type]++;
-    });
-
+ 
     return (
-      <div className="flex flex-wrap gap-1">
-        {Object.entries(groupedPieces).map(([type, count]) => {
-          if (count === 0) return null;
-          
-          const pieceType = type as PieceType;
-          const pieceColor = sortedCapturedPieces[0].color; // All pieces have the same color
-          
-          return (
-            <div key={type} className="flex items-center">
-              <div className="w-5 h-5">
-                <ChessPiece type={pieceType} color={pieceColor} />
-              </div>
-              {count > 1 && (
-                <span className="text-xs font-semibold text-gray-200 ml-0.5 mr-1">
-                  ×{count}
-                </span>
-              )}
-            </div>
-          );
-        })}
+      <div className="flex flex-wrap gap-2 justify-center">
+        {sortedCapturedPieces.map((piece) => (
+          <div key={piece.id} className="w-6 h-6">
+            <ChessPiece type={piece.type} color={piece.color} />
+          </div>
+        ))}
       </div>
     );
   };

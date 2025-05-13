@@ -78,6 +78,9 @@ const ResignConfirmationDialog: React.FC<ResignConfirmationDialogProps> = ({
           <p className="mb-4 text-center text-sm">
             Are you sure?
           </p>
+          <p className="mb-4 text-center text-sm">
+            Are you sure you want to resign this game? Your opponent will win and your rating will be affected.
+          </p>
           <div className="flex justify-center space-x-3 w-full">
           <button 
               className="flex-1 py-2 rounded transition-colors"
