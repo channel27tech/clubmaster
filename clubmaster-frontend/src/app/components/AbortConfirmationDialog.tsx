@@ -73,17 +73,16 @@ const AbortConfirmationDialog: React.FC<AbortConfirmationDialogProps> = ({
             id="abort-dialog-title" 
             className="text-lg font-medium mb-1"
           >
-            Abort
+            Abort Game
           </h2>
           <p className="mb-4 text-center text-sm">
-            Are you sure?
+            Are you sure you want to abort this game?
           </p>
           <div className="flex justify-center space-x-3 w-full">
             <button 
               className="flex-1 py-2 rounded transition-colors"
               style={{ backgroundColor: '#4A7C59' }}
               onClick={onConfirm}
-              
             >
               Yes
             </button>
