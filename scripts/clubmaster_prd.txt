@@ -1,0 +1,61 @@
+# ClubMaster - Chess Club Management Application
+
+## Objective
+Develop a comprehensive chess club management application with features for club discovery, creation, membership management, and interactive chess game capabilities.
+
+## Target Audience
+- Chess players of all skill levels
+- Chess club organizers and administrators
+- Chess enthusiasts looking to join or create clubs
+
+## Core Features
+
+### Club Discovery & Browsing
+- View a list of available chess clubs with key information
+- Search and filter clubs by name, location, and other criteria
+- View detailed club profiles with member information, rankings, and club activities
+
+### Club Creation & Management
+- Create new chess clubs with customizable profiles
+- Set club type (public, private, etc.)
+- Upload club logo/profile image
+- Specify club location and description
+- Manage club membership and roles
+
+### User Profile & Authentication
+- User registration and authentication
+- Player profiles with chess ratings and history
+- Track membership in multiple clubs
+
+### Chess Game Features
+- Interactive chess board for play
+- Game history and move tracker
+- Timer functionality for timed games
+- Player matchmaking within clubs
+
+## Technical Requirements
+- Frontend: React with Next.js framework
+- Styling: Tailwind CSS for responsive design
+- Authentication: JWT-based authentication
+- Responsive design for both desktop and mobile devices
+
+## MVP Scope
+For the initial version, focus on the following features:
+1. Club discovery and browsing interface
+2. Club creation functionality
+3. Basic club profile management
+4. Simple user profiles
+5. Frontend UI implementation for all core features
+
+## Design Guidelines
+- Clean, modern interface with chess-themed elements
+- Intuitive navigation between club discovery and management
+- Consistent component styling across the application
+- Mobile-responsive design, with special attention to club listing and creation forms
+
+## Success Criteria
+- Users can browse and search for clubs
+- Users can create new clubs with all required information
+- Club listings display relevant information in a clear, organized manner
+- Intuitive navigation between screens
+- Responsive design works well on both desktop and mobile 
