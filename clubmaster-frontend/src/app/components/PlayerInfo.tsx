@@ -17,16 +17,6 @@ interface PlayerInfoProps {
   isActive?: boolean; // New prop to indicate if it's this player's turn
 }
 
-// Value mapping for pieces to sort by importance
-const pieceValues: Record<PieceType, number> = {
-  'pawn': 1,
-  'knight': 3,
-  'bishop': 3,
-  'rook': 5,
-  'queen': 9,
-  'king': 0 // Kings shouldn't be captured, but including for completeness
-};
-
 const PlayerInfo: React.FC<PlayerInfoProps> = ({
   position,
   username,
