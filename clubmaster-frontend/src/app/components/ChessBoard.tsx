@@ -1,7 +1,9 @@
+
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import ChessPiece from './ChessPiece';
+import PromotionSelector from './PromotionSelector';
 import { BoardState, BoardSquare, initializeMoveHistory, MoveHistoryState, goBackOneMove, goForwardOneMove, addMove, generateNotation, PieceType, PieceColor } from '../utils/moveHistory';
 import { getChessEngine, resetChessEngine, isLegalMove, makeMove, getGameStatus, getCurrentBoardState } from '../utils/chessEngine';
 
@@ -18,6 +20,18 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange }: ChessBoardPr
   const [legalMoves, setLegalMoves] = useState<string[]>([]);
   const [currentPlayer, setCurrentPlayer] = useState<'white' | 'black'>('white');
   
+  // Promotion state
+  const [showPromotion, setShowPromotion] = useState(false);
+  const [promotionMove, setPromotionMove] = useState<{
+    from: string;
+    to: string;
+    piece: { type: PieceType, color: PieceColor };
+    position: { x: number, y: number };
+  } | null>(null);
+
+  // Reference to the board element for positioning the promotion selector
+  const boardRef = useRef<HTMLDivElement>(null);
+  
   // Initialize the chess engine
   useEffect(() => {
     resetChessEngine();
@@ -31,9 +45,9 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange }: ChessBoardPr
     setBoardState(initialHistory.initialBoardState);
     
     // Notify parent component of initial state
-    if (onMoveHistoryChange) {
+      if (onMoveHistoryChange) {
       onMoveHistoryChange(initialHistory);
-    }
+      }
   }, [onMoveHistoryChange]);
 
   // Handle going back one move
@@ -72,6 +86,99 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange }: ChessBoardPr
     }
   }, [moveHistory, onMoveHistoryChange]);
 
+  // Check if a move requires pawn promotion
+  const isPawnPromotion = useCallback((from: string, to: string, piece: { type: PieceType, color: PieceColor }) => {
+    // Only pawns can be promoted
+    if (piece.type !== 'pawn') return false;
+    
+    // Get the rank (row) of the destination square
+    const destRank = parseInt(to[1]);
+    
+    // White pawns are promoted on rank 8, black pawns on rank 1
+    return (piece.color === 'white' && destRank === 8) || 
+           (piece.color === 'black' && destRank === 1);
+  }, []);
+
+  // Handle promotion piece selection
+  const handlePromotionSelect = useCallback((promotionPiece: PieceType) => {
+    // Hide promotion selector
+    setShowPromotion(false);
+    
+    if (!promotionMove) return;
+    
+    const { from, to, piece } = promotionMove;
+    
+    // Make the move with promotion
+    const moveSuccess = makeMove(from, to, promotionPiece);
+    
+    if (moveSuccess) {
+      // Update board state based on chess.js
+      const newBoardState = getCurrentBoardState();
+      
+      // Add move to history with promotion information
+      const notation = generateNotation(from, to, piece, false, promotionPiece);
+      const newHistory = addMove(moveHistory, {
+        from,
+        to,
+        piece,
+        promotion: promotionPiece,
+        notation
+      }, newBoardState);
+      
+      // Update state
+      setMoveHistory(newHistory);
+      setBoardState(newBoardState);
+      setLastMove({ from, to });
+      setCurrentPlayer(currentPlayer === 'white' ? 'black' : 'white');
+      
+      // Notify parent
+      if (onMoveHistoryChange) {
+        onMoveHistoryChange(newHistory);
+      }
+      
+      // Check game status
+      const gameStatus = getGameStatus();
+      if (gameStatus.isGameOver) {
+        // Handle game over
+        console.log('Game over:', gameStatus);
+      }
+    }
+    
+    // Clear promotion state
+    setPromotionMove(null);
+  }, [moveHistory, currentPlayer, onMoveHistoryChange, promotionMove]);
+
+  // Calculate position for promotion selector
+  const calculatePromotionPosition = useCallback((position: string) => {
+    if (!boardRef.current) return { x: 0, y: 0 };
+    
+    // Get the file (column) of the position (a-h)
+    const file = position.charAt(0);
+    // Get the rank (row) of the position (1-8)
+    const rank = parseInt(position.charAt(1));
+    
+    // Convert file to column index (a=0, b=1, etc.)
+    const colIndex = file.charCodeAt(0) - 'a'.charCodeAt(0);
+    
+    // Get board dimensions
+    const boardRect = boardRef.current.getBoundingClientRect();
+    const squareSize = boardRect.width / 8;
+    
+    // Calculate x position based on column
+    // Adjust if the piece is near the edge to keep the selector on the board
+    let adjustedCol = perspective === 'black' ? 7 - colIndex : colIndex;
+    
+    // If too close to the right edge, shift left
+    if (adjustedCol > 5) {
+      adjustedCol = 5;
+    }
+    
+    // Calculate x position (centered on the square)
+    const x = adjustedCol * squareSize;
+    
+    return { x, y: 0 };
+  }, [perspective]);
+
   // Handle square click for move selection
   const handleSquareClick = (position: string, piece: { type: PieceType, color: PieceColor } | null) => {
     // If we're in replay mode, don't allow moves
@@ -98,38 +205,51 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange }: ChessBoardPr
         }
         
         if (movingPiece) {
-          // Try to make the move in chess.js
-          const moveSuccess = makeMove(selectedSquare, position);
-          
-          if (moveSuccess) {
-            // Update board state based on chess.js
-            const newBoardState = getCurrentBoardState();
-            
-            // Add move to history
-            const notation = generateNotation(selectedSquare, position, movingPiece);
-            const newHistory = addMove(moveHistory, {
+          // Check if this move would be a pawn promotion
+          if (isPawnPromotion(selectedSquare, position, movingPiece)) {
+            // Show promotion selector
+            const promotionPos = calculatePromotionPosition(position);
+            setPromotionMove({
               from: selectedSquare,
               to: position,
               piece: movingPiece,
-              notation
-            }, newBoardState);
+              position: promotionPos
+            });
+            setShowPromotion(true);
+          } else {
+            // Try to make the move in chess.js
+            const moveSuccess = makeMove(selectedSquare, position);
             
-            // Update state
-            setMoveHistory(newHistory);
-            setBoardState(newBoardState);
-            setLastMove({ from: selectedSquare, to: position });
-            setCurrentPlayer(currentPlayer === 'white' ? 'black' : 'white');
-            
-            // Notify parent
-            if (onMoveHistoryChange) {
-              onMoveHistoryChange(newHistory);
-            }
-            
-            // Check game status
-            const gameStatus = getGameStatus();
-            if (gameStatus.isGameOver) {
-              // Handle game over
-              console.log('Game over:', gameStatus);
+            if (moveSuccess) {
+              // Update board state based on chess.js
+              const newBoardState = getCurrentBoardState();
+              
+              // Add move to history
+              const notation = generateNotation(selectedSquare, position, movingPiece);
+              const newHistory = addMove(moveHistory, {
+                from: selectedSquare,
+                to: position,
+                piece: movingPiece,
+                notation
+              }, newBoardState);
+              
+              // Update state
+              setMoveHistory(newHistory);
+              setBoardState(newBoardState);
+              setLastMove({ from: selectedSquare, to: position });
+              setCurrentPlayer(currentPlayer === 'white' ? 'black' : 'white');
+              
+              // Notify parent
+              if (onMoveHistoryChange) {
+                onMoveHistoryChange(newHistory);
+              }
+              
+              // Check game status
+              const gameStatus = getGameStatus();
+              if (gameStatus.isGameOver) {
+                // Handle game over
+                console.log('Game over:', gameStatus);
+              }
             }
           }
         }
@@ -204,15 +324,11 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange }: ChessBoardPr
     : boardState.squares;
 
   return (
-    <div className="w-full mx-auto">
-      {/* Turn indicator - shows which player's turn it is */}
-      {/* <div className="w-full mb-2 flex justify-center">
-        <div className={`px-3 py-1 rounded-md font-semibold ${currentPlayer === 'white' ? 'bg-white text-black' : 'bg-black text-white'}`}>
-          {currentPlayer === 'white' ? 'White' : 'Black'}'s Turn
-        </div>
-      </div> */} 
-      
-      <div className="aspect-square grid grid-cols-8 grid-rows-8 border-8 rounded-sm border-[#333939]">
+    <div className="w-full mx-auto relative">
+      <div 
+        ref={boardRef}
+        className={`aspect-square grid grid-cols-8 grid-rows-8 border-8 rounded-sm border-[#333939] shadow-md ${showPromotion ? 'filter blur-sm' : ''}`}
+      >
         {displayBoard.map((row, rowIndex) => (
           row.map((square, colIndex) => {
             return (
@@ -239,6 +355,15 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange }: ChessBoardPr
           })
         ))}
       </div>
+      
+      {/* Pawn promotion selector */}
+      {showPromotion && promotionMove && (
+        <PromotionSelector
+          color={promotionMove.piece.color}
+          onSelect={handlePromotionSelect}
+          position={promotionMove.position}
+        />
+      )}
       
       {/* Export these controls so parent can use them */}
       <div className="hidden">

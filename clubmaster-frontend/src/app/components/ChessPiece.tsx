@@ -8,18 +8,19 @@ type PieceColor = 'white' | 'black';
 interface ChessPieceProps {
   type: PieceType;
   color: PieceColor;
+  large?: boolean; // Add option for larger pieces (in promotion selector)
 }
 
-const ChessPiece: React.FC<ChessPieceProps> = ({ type, color }) => {
+const ChessPiece: React.FC<ChessPieceProps> = ({ type, color, large = false }) => {
   // Use inline SVGs with custom colors instead of external files
   return (
     <div className="w-full h-full flex items-center justify-center">
-      <div className="w-4/5 h-4/5 relative">
+      <div className={large ? "w-full h-full" : "w-4/5 h-4/5"} style={{ maxWidth: large ? '100%' : '85%' }}>
         <svg
           viewBox="0 0 45 45"
           width="100%"
           height="100%"
-          className="absolute inset-0"
+          className={`${large ? 'drop-shadow-md' : ''}`}
         >
           {renderPieceSVG(type, color)}
         </svg>
@@ -80,17 +81,74 @@ const renderPieceSVG = (type: PieceType, color: PieceColor) => {
     case 'queen':
       return (
         <g fillRule="evenodd" stroke={strokeColor} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-          <g fill={fillColor} stroke="none">
-            <circle cx="6" cy="12" r="2.75"/>
-            <circle cx="14" cy="9" r="2.75"/>
-            <circle cx="22.5" cy="8" r="2.75"/>
-            <circle cx="31" cy="9" r="2.75"/>
-            <circle cx="39" cy="12" r="2.75"/>
-          </g>
-          <path d="M9 26c8.5-1.5 21-1.5 27 0l2.5-12.5L31 25l-.3-14.1-5.2 13.6-3-14.5-3 14.5-5.2-13.6L14 25 6.5 13.5 9 26z" strokeLinecap="butt" fill={fillColor}/>
-          <path d="M9 26c0 2 1.5 2 2.5 4 1 1.5 1 1 .5 3.5-1.5 1-1.5 2.5-1.5 2.5-1.5 1.5.5 2.5.5 2.5 6.5 1 16.5 1 23 0 0 0 1.5-1 0-2.5 0 0 .5-1.5-1-2.5-.5-2.5-.5-2 .5-3.5 1-2 2.5-2 2.5-4-8.5-1.5-18.5-1.5-27 0z" strokeLinecap="butt" fill={fillColor}/>
-          <path d="M11 38.5a35 35 1 0 0 23 0" fill="none" strokeLinecap="butt"/>
-          <path d="M11 29a35 35 1 0 1 23 0M12.5 31.5h20M11.5 34.5h21M10.5 37.5h24" fill="none" stroke={accentColor}/>
+          {/* Better aligned crown points with improved positioning */}
+          <path 
+            d="M9,12 L9,13 L8,13.5 L8,14.5 L10,15 L9,12 Z" 
+            fill={fillColor} 
+            stroke={strokeColor} 
+            strokeWidth="0.5"
+          />
+          <path 
+            d="M15,9 L15,10 L14,10.5 L14,11.5 L16,12 L15,9 Z" 
+            fill={fillColor} 
+            stroke={strokeColor} 
+            strokeWidth="0.5"
+          />
+          <path 
+            d="M22.5,7 L22.5,8 L21.5,8.5 L21.5,9.5 L23.5,10 L22.5,7 Z" 
+            fill={fillColor} 
+            stroke={strokeColor} 
+            strokeWidth="0.5"
+          />
+          <path 
+            d="M30,9 L30,10 L29,10.5 L29,11.5 L31,12 L30,9 Z" 
+            fill={fillColor} 
+            stroke={strokeColor} 
+            strokeWidth="0.5"
+          />
+          <path 
+            d="M36,12 L36,13 L35,13.5 L35,14.5 L37,15 L36,12 Z" 
+            fill={fillColor} 
+            stroke={strokeColor} 
+            strokeWidth="0.5"
+          />
+          
+          {/* Perfectly symmetrical crown spheres */}
+          <circle cx="9" cy="12" r="1.8" fill={fillColor} stroke={strokeColor} strokeWidth="1" />
+          <circle cx="15" cy="9" r="1.8" fill={fillColor} stroke={strokeColor} strokeWidth="1" />
+          <circle cx="22.5" cy="7" r="1.8" fill={fillColor} stroke={strokeColor} strokeWidth="1" />
+          <circle cx="30" cy="9" r="1.8" fill={fillColor} stroke={strokeColor} strokeWidth="1" />
+          <circle cx="36" cy="12" r="1.8" fill={fillColor} stroke={strokeColor} strokeWidth="1" />
+          
+          {/* Enhanced body with more elegant shape */}
+          <path 
+            d="M9,26 C17.5,24.5 30,24.5 36,26 L38.5,13.5 L31,25 L30.7,10.9 L25.5,24.5 L22.5,10 L19.5,24.5 L14.3,10.9 L14,25 L6.5,13.5 L9,26 Z" 
+            strokeLinecap="butt" 
+            fill={fillColor} 
+            stroke={strokeColor} 
+            strokeWidth="1.5"
+          />
+          
+          {/* Enhanced base with smoother curves */}
+          <path 
+            d="M9,26 C9,28 10.5,28 11.5,30 C12.5,31.5 12.5,31 12,33.5 C10.5,34.5 10.5,36 10.5,36 C9,37.5 11,38.5 11,38.5 C17.5,39.5 27.5,39.5 34,38.5 C34,38.5 36,37.5 34.5,36 C34.5,36 34.5,34.5 33,33.5 C32.5,31 32.5,31.5 33.5,30 C34.5,28 36,28 36,26 C27.5,24.5 17.5,24.5 9,26 Z" 
+            strokeLinecap="butt" 
+            fill={fillColor} 
+            stroke={strokeColor} 
+            strokeWidth="1.5"
+          />
+          
+          {/* Base lines for definition */}
+          <path d="M11,38.5 A35,35 0 0,0 34,38.5" fill="none" stroke={strokeColor} strokeLinecap="butt" />
+          
+          {/* Decorative lines on the base with accent color */}
+          <path d="M11,29 A35,35 0 0,1 34,29" fill="none" stroke={accentColor} />
+          <path d="M12.5,31.5 h20" fill="none" stroke={accentColor} />
+          <path d="M11.5,34.5 h22" fill="none" stroke={accentColor} />
+          <path d="M10.5,37.5 h24" fill="none" stroke={accentColor} />
+          
+          {/* Central decorative gem on the crown */}
+          <circle cx="22.5" cy="7" r="0.65" fill={accentColor} stroke={accentColor} strokeWidth="0.3" />
         </g>
       );
     case 'king':
