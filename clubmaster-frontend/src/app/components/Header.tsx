@@ -8,7 +8,7 @@ const Header = () => {
         <div className="flex items-center justify-center">
           {/* New SVG logo loaded as an Image component */}
           <Image 
-            src="/logo.svg" 
+            src="/logos/clubmaster-logo.svg" 
             alt="Club Master Logo" 
             width={118} 
             height={48} 
