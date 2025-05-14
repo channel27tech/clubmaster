@@ -1,6 +1,7 @@
 "use client";
 import Image from "next/image";
 import React from "react";
+import { useRouter } from "next/navigation";
 
 const USP_CARDS = [
   {
@@ -26,19 +27,21 @@ const USP_CARDS = [
 ];
 
 export default function LoginPage() {
+  const router = useRouter();
+
   return (
     <div className="min-h-screen w-full flex flex-col items-center justify-between" style={{ background: "#4A7C59" }}>
       {/* Logo */}
       <div className="w-full flex justify-center mt-8 mb-6">
         <Image src="/logos/clubmaster_logo_login_page.svg" alt="ClubMaster Logo" width={118} height={48} />
       </div>
-     {/* USP Cards */}
-     <div className="w-full flex justify-center mb-8">
-        <div className="flex gap-8 overflow-x-auto px-4 scrollbar-hide hide-scrollbar" style={{ maxWidth: 400 }}>
+      {/* USP Cards */}
+      <div className="w-full flex justify-center mb-8">
+        <div className="flex gap-8 overflow-x-auto px-5 scrollbar-hide hide-scrollbar" style={{ maxWidth: 400 }}>
           {USP_CARDS.map((card, idx) => (
             <div
               key={idx}
-              className="flex items-center rounded-[10px] shadow-lg min-w-[366px] max-w-[366px] h-[111px] bg-gradient-to-l from-[#3D6649] to-[#333939] p-2"
+              className="flex items-center rounded-[10px] shadow-lg min-w-[350px] max-w-[350px] h-[111px] bg-gradient-to-l from-[#3D6649] to-[#333939] p-2"
               style={{ flex: "0 0 366px" }}
             >
               <div className="flex-shrink-0  mr-4 flex items-center justify-center">
@@ -68,7 +71,7 @@ export default function LoginPage() {
             Continue with Google
           </button>
           {/* Phone */}
-          <button className="w-full h-[56px] bg-[#EBEBEB] rounded-[10px] flex items-center justify-center gap-2 px-4 font-poppins font-semibold text-[16px] text-[#1A1E1D] mb-2">
+          <button className="w-full h-[56px] bg-[#EBEBEB] rounded-[10px] flex items-center justify-center gap-2 px-4 font-poppins font-semibold text-[16px] text-[#1A1E1D] mb-2" onClick={() => router.push('/login/login_with_phone')}>
             <span className="w-7 h-7 flex items-center justify-center mr-2">
               <Image src="/icons/login-icons/register_icon.svg" alt="Register with Phone" width={28} height={28} />
             </span>

@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -746,9 +745,12 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
 
   return (
     <div className="w-full mx-auto relative">
+      {/* Top border for mobile - only shows on small screens */}
+      <div className="block sm:hidden h-[13px] bg-[#333939] w-full m-0 p-0"></div>
+      
       <div 
         ref={boardRef}
-        className={`aspect-square grid grid-cols-8 grid-rows-8 border-8 rounded-sm border-[#333939] shadow-md ${showPromotion ? 'filter blur-sm' : ''}`}
+        className={`aspect-square grid grid-cols-8 grid-rows-8 border-0 sm:border-[13px] sm:border-[#333939] sm:rounded-sm shadow-md ${showPromotion ? 'filter blur-sm' : ''}`}
       >
         {displayBoard.map((row, rowIndex) => (
           row.map((square, colIndex) => {
@@ -776,6 +778,9 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
           })
         ))}
       </div>
+      
+      {/* Bottom border for mobile - only shows on small screens */}
+      <div className="block sm:hidden h-[13px] bg-[#333939] w-full m-0 p-0"></div>
       
       {/* Pawn promotion selector */}
       {showPromotion && promotionMove && (
