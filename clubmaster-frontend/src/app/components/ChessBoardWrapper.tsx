@@ -66,6 +66,7 @@ interface ChessBoardWrapperProps {
 
 export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', gameId = '', onSanMoveListChange }: ChessBoardWrapperProps) {
   // Get game ID from props or use derived from URL if available
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [gameRoomId, setGameRoomId] = useState<string>(gameId);
   
   // Socket context for real-time communication
@@ -90,7 +91,6 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     isWhiteTurn: true,
     hasWhiteMoved: false,
     isGameOver: false,
-    gameResult: '',
     timeControl: timeControl || '5+0', // Use passed timeControl or default
     gameMode: getGameModeFromTimeControl(timeControl || '5+0') // Derive game mode from time control
   });
@@ -165,7 +165,9 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   }, [timeControl]);
   
   // Draw offer state
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [drawOfferReceived, setDrawOfferReceived] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [drawOfferTimeRemaining, setDrawOfferTimeRemaining] = useState(30);
   const [drawOfferTimeout, setDrawOfferTimeout] = useState<NodeJS.Timeout | null>(null);
 
@@ -540,17 +542,24 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       setGameState(prev => ({
         ...prev,
         isGameOver: true,
-        gameResult: isWinner ? 'win' : 'loss',
         gameOverReason: reason || 'Disconnection'
       }));
       
-      // Clear disconnection state
-      setOpponentDisconnected(false);
+      // Create game result data
+      const resultData = {
+        result: isWinner ? 'win' : 'loss' as GameResultType,
+        reason: 'disconnection' as GameEndReason,
+        playerName: player1.username,
+        opponentName: player2.username,
+        playerRating: player1.rating || 1500,
+        opponentRating: player2.rating || 1500,
+        playerRatingChange: isWinner ? 10 : -10,
+        opponentRatingChange: isWinner ? -10 : 10
+      };
       
-      if (reconnectionTimerId) {
-        clearInterval(reconnectionTimerId);
-        setReconnectionTimerId(null);
-      }
+      // Set result data and show result screen
+      setGameResultData(resultData);
+      setShowResultScreen(true);
       
       // Stop both clocks
       setActivePlayer(null);
@@ -568,7 +577,6 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         setGameState(prevState => ({
           ...prevState,
           isGameOver: true,
-          gameResult: `Game Aborted: ${reason}`,
         }));
 
         // Stop both clocks when game is aborted
@@ -599,7 +607,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     });
 
     // Listen for game resigned event
-    safeSocket.on('gameResigned', ({ gameId: resignedGameId, reason, winner, loser, resigning }) => {
+    safeSocket.on('gameResigned', ({ gameId: resignedGameId, winner, loser, resigning }) => {
       console.log(`=========== RECEIVED GAME RESIGNED EVENT ===========`);
       console.log(`Game resigned event received with gameId: ${resignedGameId}, current gameId: ${gameRoomId}`);
       console.log(`Winner socketId: ${winner}, Loser socketId: ${loser}, My socketId: ${safeSocket.id}, Resigning: ${resigning}`);
@@ -611,7 +619,6 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         setGameState(prevState => ({
           ...prevState,
           isGameOver: true,
-          gameResult: `Game Resigned: ${reason}`,
         }));
 
         // Stop both clocks when game is resigned
@@ -722,46 +729,35 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       }
     });
 
-    // Add explicit listener for the game_end event from the server
-    safeSocket.on('game_end', (data) => {
-      console.log('========= RECEIVED GAME_END EVENT FROM SERVER =========', data);
-
-      // Determine if this is a resignation
-      if (data.reason === 'resignation' || data.endReason === 'resignation') {
-        console.log('Game ended due to resignation - showing result screen');
-        
-        // Determine winner/loser using multiple approaches for redundancy
-        const mySocketId = safeSocket.id;
-        const isWinner = mySocketId === data.winner || mySocketId === data.winnerId;
-        const isLoser = mySocketId === data.loser || mySocketId === data.loserId;
+    // Listen for game end events
+    safeSocket.on('game_end', ({ gameId: endedGameId, reason, winner, loser }) => {
+      console.log(`Game end event received for game ${endedGameId}, current game: ${gameRoomId}`);
+      
+      if (gameRoomId === endedGameId) {
+        // Determine result type
+        const isWinner = safeSocket.id === winner;
+        const isLoser = safeSocket.id === loser;
         const resultType: 'win' | 'loss' | 'draw' = isWinner ? 'win' : (isLoser ? 'loss' : 'draw');
         
-        console.log('Socket ID comparison for game_end event:', {
-          mySocketId,
-          winner: data.winner || data.winnerId,
-          loser: data.loser || data.loserId,
-          isWinner,
-          isLoser,
-          resultType
-        });
-        
-        // Set game result data
-        setGameResultData({
+        // Create game result data
+        const resultData = {
           result: resultType,
-          reason: 'resignation',
+          reason: reason as GameEndReason,
           playerName: player1.username,
           opponentName: player2.username,
           playerRating: player1.rating || 1500,
           opponentRating: player2.rating || 1500,
-          playerRatingChange: resultType === 'win' ? 10 : -10,
-          opponentRatingChange: resultType === 'win' ? -10 : 10
-        });
+          playerRatingChange: resultType === 'win' ? 10 : (resultType === 'loss' ? -10 : 0),
+          opponentRatingChange: resultType === 'win' ? -10 : (resultType === 'loss' ? 10 : 0)
+        };
+        
+        // Set game result data
+        setGameResultData(resultData);
         
         // Update game state
         setGameState(prev => ({
           ...prev,
           isGameOver: true,
-          gameResult: `Game Resigned: Player resigned`
         }));
         
         // Stop clocks
@@ -931,8 +927,39 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       isWhiteTurn: status.turn === 'white',
       hasWhiteMoved: true,
       isGameOver: status.isGameOver,
-      gameResult: getGameResult(status),
     }));
+    
+    // If the game is over due to checkmate, stalemate, etc., show the result screen
+    if (status.isGameOver) {
+      // Determine the result
+      let result: GameResultType = 'draw';
+      let reason: GameEndReason = 'stalemate';
+      
+      if (status.isCheckmate) {
+        // If it's checkmate, the current player (whose turn it is) lost
+        result = status.turn === playerColor ? 'loss' : 'win';
+        reason = 'checkmate';
+      } else if (status.isDraw) {
+        result = 'draw';
+        reason = 'stalemate';
+      }
+      
+      // Create result data
+      const resultData = {
+        result,
+        reason,
+        playerName: player1.username,
+        opponentName: player2.username,
+        playerRating: player1.rating || 1500,
+        opponentRating: player2.rating || 1500,
+        playerRatingChange: result === 'win' ? 10 : (result === 'loss' ? -10 : 0),
+        opponentRatingChange: result === 'win' ? -10 : (result === 'loss' ? 10 : 0)
+      };
+      
+      // Set result data and show the screen
+      setGameResultData(resultData);
+      setShowResultScreen(true);
+    }
     
     // Update active player for clocks
     if (status.isGameOver) {
@@ -953,20 +980,6 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       }]);
     }
   }, []);
-  
-  // Get a human-readable game result string
-  const getGameResult = (status: ReturnType<typeof getGameStatus>): string => {
-    if (status.isCheckmate) {
-      return `Checkmate! ${status.turn === 'white' ? 'Black' : 'White'} wins`;
-    } else if (status.isStalemate) {
-      return 'Draw by stalemate';
-    } else if (status.isDraw) {
-      return 'Draw';
-    } else if (status.isGameOver) {
-      return 'Game over';
-    }
-    return '';
-  };
   
   // Handle back button click
   const handleBackClick = useCallback(() => {
@@ -1017,8 +1030,23 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     setGameState(prev => ({
       ...prev,
       isGameOver: true,
-      gameResult: `Time out! ${player === 'white' ? 'Black' : 'White'} wins`,
     }));
+    
+    // Create game result data for timeout
+    const timeoutResultData = {
+      result: player === playerColor ? 'loss' : 'win' as GameResultType,
+      reason: 'timeout' as GameEndReason,
+      playerName: player1.username,
+      opponentName: player2.username,
+      playerRating: player1.rating || 1500,
+      opponentRating: player2.rating || 1500,
+      playerRatingChange: player === playerColor ? -10 : 10,
+      opponentRatingChange: player === playerColor ? 10 : -10
+    };
+    
+    // Set result data and show result screen
+    setGameResultData(timeoutResultData);
+    setShowResultScreen(true);
     
     // Play time out sound
     if (soundEnabled) {
@@ -1027,6 +1055,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   };
 
   // Handle draw offer responses
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleAcceptDraw = useCallback(() => {
     if (!socket) return;
     
@@ -1045,13 +1074,29 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     setGameState(prev => ({
       ...prev,
       isGameOver: true,
-      gameResult: 'Draw by agreement',
     }));
+    
+    // Create game result data for draw
+    const drawResultData = {
+      result: 'draw' as GameResultType,
+      reason: 'agreement' as GameEndReason,
+      playerName: player1.username,
+      opponentName: player2.username,
+      playerRating: player1.rating || 1500,
+      opponentRating: player2.rating || 1500,
+      playerRatingChange: 0,
+      opponentRatingChange: 0
+    };
+    
+    // Set result data and show result screen
+    setGameResultData(drawResultData);
+    setShowResultScreen(true);
     
     // Stop the clocks
     setActivePlayer(null);
   }, [socket, gameRoomId, drawOfferTimeout, soundEnabled]);
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleDeclineDraw = useCallback(() => {
     if (!socket) return;
     
@@ -1075,7 +1120,6 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     setGameState(prev => ({
       ...prev,
       isGameOver: true,
-      gameResult: `Game Resigned: You resigned`
     }));
     
     // Create explicit game result data for the resigning player
@@ -1116,6 +1160,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   };
 
   // Handle offering a draw
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleOfferDraw = useCallback(() => {
     if (!socket) return;
     
@@ -1295,30 +1340,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       });
       setShowResultScreen(true);
     }
-    
-    // If a resign event happened and we received result data, ensure the screen is shown
-    if (gameState.gameResult?.includes('Game Resigned') && !showResultScreen) {
-      console.log('RESIGNATION DETECTED: Game was resigned but result screen not showing');
-      
-      // If we somehow don't have gameResultData yet, create a default one
-      if (!gameResultData) {
-        console.log('Creating default gameResultData for resignation');
-        setGameResultData({
-          result: 'loss', // Default assumption - can be corrected by socket event
-          reason: 'resignation',
-          playerName: player1.username,
-          opponentName: player2.username,
-          playerRating: player1.rating || 1500,
-          opponentRating: player2.rating || 1500,
-          playerRatingChange: -10, // Default loss
-          opponentRatingChange: 10
-        });
-      }
-      
-      setShowResultScreen(true);
-      console.log('FORCIBLY showing result screen for resignation');
-    }
-  }, [gameState.isGameOver, gameState.gameResult, gameResultData, showResultScreen]);
+  }, [gameState.isGameOver, gameResultData, showResultScreen]);
 
   // Debug logging for move controls
   useEffect(() => {
@@ -1333,7 +1355,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   }, [gameState.hasWhiteMoved, moveHistory, gameState]);
 
   return (
-    <div className="flex flex-col w-full h-full rounded-t-xl rounded-b-none sm:rounded-t-xl sm:rounded-b-none overflow-hidden flex-shrink-0" style={{ backgroundColor: '#4A7C59' }}>
+    <div className="flex flex-col w-full h-full rounded-t-xl rounded-b-none sm:rounded-t-xl sm:rounded-b-none overflow-hidden flex-shrink-0 pb-[62px]" style={{ backgroundColor: '#4A7C59' }}>
       {/* Game Result Screen */}
       {showResultScreen && gameResultData && (
         <GameResultScreen
@@ -1358,28 +1380,21 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         timeRemaining={drawOfferTimeRemaining}
       /> */}
       
-      {/* Game Result Display */}
-      {gameState.isGameOver && !showResultScreen && (
-        <div className="p-4 my-2 bg-amber-100 rounded-md text-center font-bold">
-          {gameState.gameResult}
-        </div>
-      )}
-      
       {/* Determine which player is at top/bottom based on perspective */}
       {playerColor === 'black' ? (
         <>
           {/* Player 1 Info (Top) - White */}
-      <div className="flex justify-between items-center mb-2">
-        <PlayerInfo 
-          position="top"
-          username={player1.username}
-          rating={player1.rating}
-          clubAffiliation={player1.clubAffiliation}
-          isGuest={player1.isGuest}
+          <div className="flex justify-between items-center mb-4 sm:mb-2 mx-[21px]">
+            <PlayerInfo 
+              position="top"
+              username={player1.username}
+              rating={player1.rating}
+              clubAffiliation={player1.clubAffiliation}
+              isGuest={player1.isGuest}
               capturedPieces={capturedByWhite || whiteCapturedPieces}
             />
             {/* Top player timer (White) */}
-            <div className="mr-2">
+            <div>
               <GameClock 
                 timeInSeconds={gameTimeInSeconds}
                 isActive={activePlayer === 'white'}
@@ -1399,7 +1414,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
           />
       
           {/* Player 2 Info (Bottom) - Black */}
-          <div className="flex justify-between items-center mt-2">
+          <div className="flex justify-between items-center mt-4 sm:mt-2 mx-[21px]">
             <PlayerInfo 
               position="bottom"
               username={player2.username}
@@ -1409,11 +1424,11 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
               capturedPieces={capturedByBlack || blackCapturedPieces}
             />
             {/* Bottom player timer (Black) */}
-            <div className="mr-2">
+            <div>
               <GameClock 
                 timeInSeconds={gameTimeInSeconds}
                 isActive={activePlayer === 'black'}
-                isDarkTheme={false}
+                isDarkTheme={true}
                 onTimeOut={() => handleTimeOut('black')}
                 playLowTimeSound={() => playSound('TIME_LOW', soundEnabled)}
               />
@@ -1423,7 +1438,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       ) : (
         <>
           {/* Player 2 Info (Top) - Black */}
-          <div className="flex justify-between items-center mb-2">
+          <div className="flex justify-between items-center mb-4 sm:mb-2 mx-[21px]">
             <PlayerInfo 
               position="top"
               username={player2.username}
@@ -1431,48 +1446,48 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
               clubAffiliation={player2.clubAffiliation}
               isGuest={player2.isGuest}
               capturedPieces={capturedByBlack || blackCapturedPieces}
-        />
-        {/* Top player timer (Black) */}
-        <div className="mr-2">
-          <GameClock 
-            timeInSeconds={gameTimeInSeconds}
-            isActive={activePlayer === 'black'}
-            isDarkTheme={false}
-            onTimeOut={() => handleTimeOut('black')}
-            playLowTimeSound={() => playSound('TIME_LOW', soundEnabled)}
-          />
-        </div>
-      </div>
-      
-      {/* Chess Board */}
-      <ChessBoard 
+            />
+            {/* Top player timer (Black) */}
+            <div>
+              <GameClock 
+                timeInSeconds={gameTimeInSeconds}
+                isActive={activePlayer === 'black'}
+                isDarkTheme={false}
+                onTimeOut={() => handleTimeOut('black')}
+                playLowTimeSound={() => playSound('TIME_LOW', soundEnabled)}
+              />
+            </div>
+          </div>
+          
+          {/* Chess Board */}
+          <ChessBoard 
             perspective={playerColor || 'white'}
-        onMoveHistoryChange={handleMoveHistoryChange}
+            onMoveHistoryChange={handleMoveHistoryChange}
             playerColor={playerColor}
             gameId={gameRoomId}
-      />
-      
+          />
+          
           {/* Player 1 Info (Bottom) - White */}
-      <div className="flex justify-between items-center mt-2">
-        <PlayerInfo 
-          position="bottom"
+          <div className="flex justify-between items-center mt-4 sm:mt-2 mx-[21px]">
+            <PlayerInfo 
+              position="bottom"
               username={player1.username}
               rating={player1.rating}
               clubAffiliation={player1.clubAffiliation}
               isGuest={player1.isGuest}
               capturedPieces={capturedByWhite || whiteCapturedPieces}
-        />
-        {/* Bottom player timer (White) */}
-        <div className="mr-2">
-          <GameClock 
-            timeInSeconds={gameTimeInSeconds}
-            isActive={activePlayer === 'white'}
-                isDarkTheme={false}
-            onTimeOut={() => handleTimeOut('white')}
-            playLowTimeSound={() => playSound('TIME_LOW', soundEnabled)}
-          />
-        </div>
-      </div>
+            />
+            {/* Bottom player timer (White) */}
+            <div>
+              <GameClock 
+                timeInSeconds={gameTimeInSeconds}
+                isActive={activePlayer === 'white'}
+                isDarkTheme={true}
+                onTimeOut={() => handleTimeOut('white')}
+                playLowTimeSound={() => playSound('TIME_LOW', soundEnabled)}
+              />
+            </div>
+          </div>
         </>
       )}
       

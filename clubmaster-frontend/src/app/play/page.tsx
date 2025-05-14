@@ -136,7 +136,7 @@ const PlayPage: React.FC = () => {
           
           <div className="flex flex-col flex-1 px-[21px] pt-[21px] pb-[21px]">
             {/* Game mode selection and time buttons in a grid layout */}
-            <div className="grid grid-cols-3 gap-x-4 mb-[21px]">
+            <div className="grid grid-cols-3 gap-x-[16px] mb-[21px]">
               {/* Column 1: Bullet */}
               <div className="flex flex-col items-center gap-3">
                 <div 
@@ -272,7 +272,7 @@ const TimeButton: React.FC<TimeButtonProps> = ({
   return (
     <button
       onClick={onClick}
-      className={`w-[117px] h-[47px] rounded-[10px] transition-colors ${
+      className={`w-[110px] h-[49px] rounded-[10px] transition-colors ${
         isActive ? 'bg-[#4A7C59] hover:bg-[#3d6549]' : 'bg-[#4C5454] hover:bg-[#3d4343]'
       } text-[#FAF3DD] text-[16px] font-semibold font-poppins`}
     >
