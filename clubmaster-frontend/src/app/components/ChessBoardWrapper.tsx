@@ -452,9 +452,35 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       }, 1000); // Check every second for more responsiveness
     }
     
-    safeSocket.on('checkmate', () => {
+    safeSocket.on('checkmate', (data) => {
       // Update game tracker state
       gameStateTracker.activePlayer = null;
+      
+      // Get winner and loser from data
+      const isWinner = safeSocket.id === data.winnerSocketId;
+      const isLoser = safeSocket.id === data.loserSocketId;
+      
+      // Create result data 
+      const resultData = {
+        result: isWinner ? 'win' : 'loss' as 'win' | 'loss',
+        reason: 'checkmate' as GameEndReason,
+        playerName: player1.username,
+        opponentName: player2.username,
+        playerRating: player1.rating || 1500,
+        opponentRating: player2.rating || 1500,
+        playerRatingChange: isWinner ? 10 : -10,
+        opponentRatingChange: isWinner ? -10 : 10
+      };
+      
+      // Set game result data and show result screen
+      setGameResultData(resultData);
+      setShowResultScreen(true);
+      
+      // Update game state
+      setGameState(prev => ({
+        ...prev,
+        isGameOver: true
+      }));
       
       if (soundEnabled) {
         playSound('CHECKMATE', true);
@@ -726,6 +752,65 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     safeSocket.on('game_end', (data) => {
       console.log('========= RECEIVED GAME_END EVENT FROM SERVER =========', data);
 
+      // Determine if this is a checkmate
+      if (data.reason === 'checkmate') {
+        console.log('Game ended due to checkmate - showing result screen');
+        
+        // Use winnerColor and loserColor to determine if this player won or lost
+        console.log('Debugging playerColor value:', { playerColor });
+        const isWinner = playerColor === data.winnerColor;
+        const isLoser = playerColor === data.loserColor;
+        const resultType: 'win' | 'loss' | 'draw' = isWinner ? 'win' : (isLoser ? 'loss' : 'draw');
+        
+        console.log('Color comparison for checkmate game_end event:', {
+          playerColor,
+          winnerColor: data.winnerColor,
+          loserColor: data.loserColor,
+          isWinner,
+          isLoser,
+          resultType
+        });
+        
+        // Set game result data with explicit title and secondary text
+        const resultData = {
+          result: resultType,
+          reason: 'checkmate' as GameEndReason,
+          playerName: player1.username,
+          opponentName: player2.username,
+          playerRating: player1.rating || 1500,
+          opponentRating: player2.rating || 1500,
+          playerRatingChange: resultType === 'win' ? 10 : -10,
+          opponentRatingChange: resultType === 'win' ? -10 : 10
+        };
+        setGameResultData(resultData);
+        
+        console.log('Setting game result data for checkmate:', resultData);
+        
+        // Update game state with specific win/loss message
+        setGameState(prev => ({
+          ...prev,
+          isGameOver: true,
+          gameResult: resultType === 'win' ? 'You Won by Checkmate!' : 'You Lost by Checkmate'
+        }));
+        
+        // Stop clocks
+        setActivePlayer(null);
+        
+        // Show result screen
+        setShowResultScreen(true);
+        console.log('Result screen activated for checkmate game_end event');
+        
+        // Force immediate rendering of GameResultScreen with correct result
+        setTimeout(() => {
+          setShowResultScreen(false);
+          setTimeout(() => {
+            setShowResultScreen(true);
+            console.log('Forced re-render of result screen with result:', resultType);
+          }, 100);
+        }, 100);
+        return;
+      }
+
       // Determine if this is a resignation
       if (data.reason === 'resignation' || data.endReason === 'resignation') {
         console.log('Game ended due to resignation - showing result screen');
@@ -770,31 +855,6 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         // Show result screen
         setShowResultScreen(true);
         console.log('Result screen activated for game_end event');
-        
-        // Also dispatch a custom event for consistency
-        try {
-          window.dispatchEvent(new CustomEvent('game_ended', {
-            detail: {
-              reason: 'resignation',
-              result: resultType,
-              source: 'game_end-event',
-              timestamp: Date.now()
-            }
-          }));
-        } catch (error) {
-          console.error('Error dispatching game_ended event from game_end handler:', error);
-        }
-        
-        // Set backup timers to ensure the result screen appears
-        const showResultDelays = [500, 1500];
-        showResultDelays.forEach(delay => {
-          setTimeout(() => {
-            if (!showResultScreen) {
-              console.log(`FALLBACK ${delay}ms from game_end: Forcing result screen display`);
-              setShowResultScreen(true);
-            }
-          }, delay);
-        });
       }
     });
 
@@ -925,6 +985,47 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     // Check game status after every move
     const status = getGameStatus();
     
+    // Handle checkmate immediately
+    if (status.isCheckmate) {
+      // Determine the winner based on whose turn it is
+      // In chess, the player who can't move is in checkmate, so the other player wins
+      const isCurrentPlayerWinner = (status.turn === 'white' && playerColor === 'black') || 
+                                  (status.turn === 'black' && playerColor === 'white');
+      
+      // Create game result data for checkmate
+      const resultData = {
+        result: isCurrentPlayerWinner ? 'win' : 'loss' as 'win' | 'loss',
+        reason: 'checkmate' as GameEndReason,
+        playerName: player1.username,
+        opponentName: player2.username,
+        playerRating: player1.rating || 1500,
+        opponentRating: player2.rating || 1500,
+        playerRatingChange: isCurrentPlayerWinner ? 10 : -10,
+        opponentRatingChange: isCurrentPlayerWinner ? -10 : 10
+      };
+      
+      // Set the game result data and show result screen
+      setGameResultData(resultData);
+      setShowResultScreen(true);
+      
+      // Update game state
+      setGameState(prev => ({
+        ...prev,
+        isGameOver: true,
+        isWhiteTurn: status.turn === 'white'
+      }));
+      
+      // Stop both clocks
+      setActivePlayer(null);
+      
+      // Play checkmate sound
+      if (soundEnabled) {
+        playSound('CHECKMATE', true);
+      }
+      
+      return;
+    }
+    
     // Update game state based on chess.js status
     setGameState(prev => ({ 
       ...prev,
@@ -1010,6 +1111,15 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   const handleTimeOut = (player: 'white' | 'black') => {
     console.log(`${player} player ran out of time`);
     
+    // Emit timeout event to the server
+    if (socket) {
+      socket.emit('timeout_occurred', {
+        gameId: gameRoomId,
+        playerColor: player
+      });
+      console.log(`Emitted timeout_occurred event for ${player} in game ${gameRoomId}`);
+    }
+    
     // Use setState callback to avoid referencing current state directly
     setActivePlayer(() => null); // Stop both clocks
     
@@ -1024,6 +1134,22 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     if (soundEnabled) {
       playSound('GAME_END', true);
     }
+    
+    // Set game result data based on the player who timed out
+    const resultType = playerColor === player ? 'loss' : 'win';
+    setGameResultData({
+      result: resultType as GameResultType,
+      reason: 'timeout' as GameEndReason,
+      playerName: player1.username,
+      opponentName: player2.username,
+      playerRating: player1.rating || 1500,
+      opponentRating: player2.rating || 1500,
+      playerRatingChange: resultType === 'win' ? 10 : -10,
+      opponentRatingChange: resultType === 'win' ? -10 : 10
+    });
+    
+    // Show result screen
+    setShowResultScreen(true);
   };
 
   // Handle draw offer responses
@@ -1196,20 +1322,33 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   // Listen for the game_ended custom event
   useEffect(() => {
     const handleGameEnded = (event: CustomEvent) => {
-      const { reason, result, winnerSocketId, loserSocketId, source } = event.detail;
+      const { reason, result, winnerSocketId, loserSocketId, source, winnerColor, loserColor } = event.detail;
       console.log('Game ended event received:', { 
         reason, 
         result, 
         winnerSocketId, 
         loserSocketId,
         source, 
-        mySocketId: socket?.id
+        mySocketId: socket?.id,
+        winnerColor,
+        loserColor
       });
       
       let finalResult: GameResultType;
       
-      // Determine result type with multiple fallbacks
-      if (result === 'win' || result === 'loss' || result === 'draw') {
+      // First, prioritize winnerColor and loserColor if available and playerColor is defined
+      if (winnerColor && loserColor && playerColor) {
+        if (playerColor === winnerColor) {
+          finalResult = 'win';
+          console.log('Result determined from winnerColor match: win');
+        } else if (playerColor === loserColor) {
+          finalResult = 'loss';
+          console.log('Result determined from loserColor match: loss');
+        } else {
+          finalResult = 'draw';
+          console.log('No color match found, defaulting to draw');
+        }
+      } else if (result === 'win' || result === 'loss' || result === 'draw') {
         // Use the result directly if it's valid
         finalResult = result as GameResultType;
         console.log(`Using provided result: ${finalResult}`);
@@ -1222,8 +1361,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
           finalResult = 'loss';
           console.log('Result determined from loserSocketId match: loss');
         } else if (reason === 'resignation') {
-          // For resignation with no match, NEVER default to draw
-          // Always default to loss for resignation events if we can't determine otherwise
+          // For resignation with no match, default to loss
           finalResult = 'loss';
           console.log('Using fallback for resignation with no socket match: loss');
         } else {
@@ -1239,8 +1377,8 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
           console.log('Last resort fallback for resignation: loss');
         } else {
           // For other reasons, default to draw
-          finalResult = result as GameResultType || 'draw';
-          console.log(`Last resort fallback for ${reason}: ${finalResult}`);
+          finalResult = 'draw';
+          console.log(`Last resort fallback for ${reason}: draw`);
         }
       }
       
@@ -1268,10 +1406,13 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       // Stop both clocks
       setActivePlayer(null);
       
-      // Update game state
+      // Update game state with specific message based on result
       setGameState(prev => ({
         ...prev,
         isGameOver: true,
+        gameResult: reason === 'checkmate' ? (finalResult === 'win' ? 'YOU WON BY CHECKMATE' : 'YOU LOST BY CHECKMATE') : 
+                    reason === 'timeout' ? (finalResult === 'win' ? 'YOU WON BY TIMEOUT' : 'YOU LOST BY TIMEOUT') :
+                    reason === 'resignation' ? (finalResult === 'win' ? 'YOU WON BY RESIGNATION' : 'YOU LOST BY RESIGNATION') : 'Game Over'
       }));
     };
     
@@ -1282,7 +1423,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     return () => {
       window.removeEventListener('game_ended', handleGameEnded as EventListener);
     };
-  }, [socket]);
+  }, [socket, playerColor]);
 
   // Add dedicated result screen visibility effect to ensure it shows when needed
   useEffect(() => {
@@ -1357,13 +1498,6 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         opponentName={player2.username}
         timeRemaining={drawOfferTimeRemaining}
       /> */}
-      
-      {/* Game Result Display */}
-      {gameState.isGameOver && !showResultScreen && (
-        <div className="p-4 my-2 bg-amber-100 rounded-md text-center font-bold">
-          {gameState.gameResult}
-        </div>
-      )}
       
       {/* Determine which player is at top/bottom based on perspective */}
       {playerColor === 'black' ? (

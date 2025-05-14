@@ -7,6 +7,15 @@ import { CapturedPiece } from '../utils/types';
 // Define the types for a chess piece
 type PieceType = 'pawn' | 'rook' | 'knight' | 'bishop' | 'queen' | 'king';
 
+const pieceValues: { [key in PieceType]: number } = {
+  pawn: 1,
+  knight: 3,
+  bishop: 3,
+  rook: 5,
+  queen: 9,
+  king: 0, // Or a very high value if kings could be "captured" for sorting, typically 0 as they are not.
+};
+
 interface PlayerInfoProps {
   position: 'top' | 'bottom';
   username: string;
