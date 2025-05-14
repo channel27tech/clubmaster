@@ -884,7 +884,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       onSanMoveListChange(sanMoveList);
     }
   }, [sanMoveList, onSanMoveListChange]);
-
+  
   // Handle move history updates from the ChessBoard component
   const handleMoveHistoryChange = useCallback((history: MoveHistoryState) => {
     setMoveHistory(history);
@@ -1377,35 +1377,35 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
           clubAffiliation={player1.clubAffiliation}
           isGuest={player1.isGuest}
               capturedPieces={capturedByWhite || whiteCapturedPieces}
-            />
+        />
             {/* Top player timer (White) */}
-            <div className="mr-2">
-              <GameClock 
+        <div className="mr-2">
+          <GameClock 
                 timeInSeconds={gameTimeInSeconds}
                 isActive={activePlayer === 'white'}
-                isDarkTheme={false}
+            isDarkTheme={false}
                 onTimeOut={() => handleTimeOut('white')}
                 playLowTimeSound={() => playSound('TIME_LOW', soundEnabled)}
-              />
-            </div>
-          </div>
-          
-          {/* Chess Board */}
-          <ChessBoard 
+          />
+        </div>
+      </div>
+      
+      {/* Chess Board */}
+      <ChessBoard 
             perspective={playerColor || 'white'}
-            onMoveHistoryChange={handleMoveHistoryChange}
+        onMoveHistoryChange={handleMoveHistoryChange}
             playerColor={playerColor}
             gameId={gameRoomId}
-          />
+      />
       
           {/* Player 2 Info (Bottom) - Black */}
-          <div className="flex justify-between items-center mt-2">
-            <PlayerInfo 
-              position="bottom"
-              username={player2.username}
-              rating={player2.rating}
-              clubAffiliation={player2.clubAffiliation}
-              isGuest={player2.isGuest}
+      <div className="flex justify-between items-center mt-2">
+        <PlayerInfo 
+          position="bottom"
+          username={player2.username}
+          rating={player2.rating}
+          clubAffiliation={player2.clubAffiliation}
+          isGuest={player2.isGuest}
               capturedPieces={capturedByBlack || blackCapturedPieces}
             />
             {/* Bottom player timer (Black) */}
@@ -1479,7 +1479,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       {/* Debug logging moved to useEffect */}
       
       {/* Move Controls */}
-      <MoveControls 
+      <MoveControls
         onBack={handleBackClick}
         onForward={handleForwardClick}
         canGoBack={canGoBack}
