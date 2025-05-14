@@ -3,17 +3,19 @@
 import React from 'react';
 import ChessPiece from './ChessPiece';
 import { CapturedPiece } from '../utils/types';
+import Image from 'next/image';
 
-// Define the types for a chess piece
-type PieceType = 'pawn' | 'rook' | 'knight' | 'bishop' | 'queen' | 'king';
+// Define PieceType type
+type PieceType = 'pawn' | 'knight' | 'bishop' | 'rook' | 'queen' | 'king';
 
+// Piece values for sorting captured pieces
 const pieceValues: { [key in PieceType]: number } = {
   pawn: 1,
   knight: 3,
   bishop: 3,
   rook: 5,
   queen: 9,
-  king: 0, // Or a very high value if kings could be "captured" for sorting, typically 0 as they are not.
+  king: 0, // King is not typically captured
 };
 
 interface PlayerInfoProps {
@@ -30,27 +32,12 @@ const PlayerInfo: React.FC<PlayerInfoProps> = ({
   position,
   username,
   rating,
-  isGuest,
   capturedPieces,
   isActive = false // Default to inactive
 }) => {
   // Determine styles based on position (top/bottom)
   const isTop = position === 'top';
   
-  // Color scheme based on requirements
-  const colors = {
-    profile: {
-      bg: isTop ? '#E9CB6B' : '#333939',
-      pieceColor: isTop ? '#333939' : '#FAF3DD',
-    },
-    text: {
-      name: '#FAF3DD',
-    },
-    capturedPieces: {
-      bg: isTop ? '#C8D5B9' : '#333939'
-    }
-  };
-
   // Function to render captured pieces
   const renderCapturedPieces = () => {
     const sortedCapturedPieces = [...capturedPieces].sort((a, b) => {
@@ -64,7 +51,7 @@ const PlayerInfo: React.FC<PlayerInfoProps> = ({
     }
  
     return (
-      <div className="flex flex-wrap gap-2 justify-center">
+      <div className="flex flex-wrap gap-[1px]">
         {sortedCapturedPieces.map((piece) => (
           <div key={piece.id} className="w-6 h-6">
             <ChessPiece type={piece.type} color={piece.color} />
@@ -75,56 +62,42 @@ const PlayerInfo: React.FC<PlayerInfoProps> = ({
   };
 
   return (
-    <div className={`w-full ${isTop ? 'mb-3' : 'mt-3'} py-1 px-1 relative`}>
-      {/* Removed side bar indicator */}
-      
-      <div className="flex items-center justify-between">
+    <div className={`w-full ${isTop ? 'mt-[21px] mb-3' : 'mt-3 mb-[21px]'} py-1 relative`}>
+      <div className="flex items-start justify-between">
         {/* Left section with profile and info */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-start gap-3">
           {/* Profile Icon/Avatar with active indicator */}
           <div className="relative">
             {/* Green dot indicator above profile */}
             {isActive && (
               <div className="absolute -top-1.5 left-1/2 transform -translate-x-1/2 w-3 h-3 rounded-full bg-green-500 animate-pulse z-10"></div>
             )}
-            <div 
-              className="w-9 h-9 rounded-sm overflow-hidden relative"
-            >
-              <div 
-                className="w-full h-full flex items-center justify-center" 
-                style={{ backgroundColor: colors.profile.bg }}
-              >
-                <div className="w-7 h-7">
-                  <ChessPiece 
-                    type="knight" 
-                    color={isTop ? "black" : "white"} 
-                  />
-                </div>
-              </div>
+            <div className="w-[41px] h-[41px] flex items-center justify-center">
+              <Image 
+                src={isTop ? "/icons/avatar1.svg" : "/icons/avatar2.svg"}
+                alt="Player Avatar"
+                width={41}
+                height={41}
+                className="w-[41px] h-[41px] object-contain"
+              />
             </div>
           </div>
           
-          {/* Player Info */}
-          <div>
-            <div className="flex items-center gap-1">
-              <h3 className="font-bold text-sm ms-1 text-[#FAF3DD]">
-                {username}
-              </h3>
-              {rating && <span className="text-xs text-[#FAF3DD]">({rating})</span>}
-            </div>
-             {/* Captured Pieces */}
-            <div className="min-w-[200px] flex justify-start ms--3">
-              <div 
-                className="rounded-sm min-h-[30px] flex items-center justify-center"
-              >
-                {renderCapturedPieces()}
-              </div>
+          {/* Player Info - stacked vertically */}
+          <div className="flex flex-col">
+            {/* Player name */}
+            <h3 className="font-roboto font-[500] text-[16px] tracking-[0.25%] text-[#FAF3DD]">
+              {username}
+              {rating && <span className="ml-1">({rating})</span>}
+            </h3>
+            
+            {/* Captured Pieces - with 4px gap from name */}
+            <div className="mt-[4px]">
+              {renderCapturedPieces()}
             </div>
           </div>
         </div>
       </div>
-      
-      {/* Removed "Your turn" text indicator */}
     </div>
   );
 };
