@@ -32,9 +32,9 @@ export default function LoginPage() {
       <div className="w-full flex justify-center mt-8 mb-6">
         <Image src="/logos/clubmaster_logo_login_page.svg" alt="ClubMaster Logo" width={118} height={48} />
       </div>
-      {/* USP Cards */}
-      <div className="w-full flex justify-center mb-8">
-        <div className="flex gap-8 overflow-x-auto px-4 scrollbar-hide" style={{ maxWidth: 400 }}>
+     {/* USP Cards */}
+     <div className="w-full flex justify-center mb-8">
+        <div className="flex gap-8 overflow-x-auto px-4 scrollbar-hide hide-scrollbar" style={{ maxWidth: 400 }}>
           {USP_CARDS.map((card, idx) => (
             <div
               key={idx}
