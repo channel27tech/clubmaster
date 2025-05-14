@@ -5,14 +5,17 @@ import ChessPiece from './ChessPiece';
 import { CapturedPiece } from '../utils/types';
 import Image from 'next/image';
 
+// Define PieceType type
+type PieceType = 'pawn' | 'knight' | 'bishop' | 'rook' | 'queen' | 'king';
+
 // Piece values for sorting captured pieces
-const pieceValues = {
+const pieceValues: { [key in PieceType]: number } = {
   pawn: 1,
   knight: 3,
   bishop: 3,
   rook: 5,
   queen: 9,
-  king: 0 // King is not typically captured
+  king: 0, // King is not typically captured
 };
 
 interface PlayerInfoProps {
@@ -69,7 +72,7 @@ const PlayerInfo: React.FC<PlayerInfoProps> = ({
             {isActive && (
               <div className="absolute -top-1.5 left-1/2 transform -translate-x-1/2 w-3 h-3 rounded-full bg-green-500 animate-pulse z-10"></div>
             )}
-            <div className="w-[48px] h-[48px] flex items-center justify-center">
+            <div className="w-[41px] h-[41px] flex items-center justify-center">
               <Image 
                 src={isTop ? "/icons/avatar1.svg" : "/icons/avatar2.svg"}
                 alt="Player Avatar"
