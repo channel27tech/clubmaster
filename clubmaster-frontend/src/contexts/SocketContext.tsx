@@ -275,6 +275,40 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
           }
         }
         
+        // Add specific handling for checkmate
+        if (data.reason === 'checkmate') {
+          console.log('RECEIVED CHECKMATE event:', data);
+          
+          // Determine winner based on winnerColor/loserColor for player color matching
+          if (data.winnerColor && data.loserColor) {
+            // We'll need to get the player's color from the context - might require passing playerColor to the socket context
+            // For now, we'll continue using socketId comparison as fallback
+            console.log('CHECKMATE has winnerColor/loserColor data:', {
+              winnerColor: data.winnerColor,
+              loserColor: data.loserColor
+            });
+          }
+          
+          // Fallback to socket ID comparison if color approach isn't explicitly used by the component
+          const mySocketId = socketInstance.id;
+          const winnerSocketId = data.winnerSocketId || data.winnerId || data.winner;
+          const loserSocketId = data.loserSocketId || data.loserId || data.loser;
+          
+          console.log('SOCKET ID COMPARISON FOR CHECKMATE game_end:', {
+            mySocketId,
+            winnerSocketId,
+            loserSocketId
+          });
+          
+          // Determine winner based on socket IDs
+          if (winnerSocketId && loserSocketId) {
+            const winner = mySocketId === winnerSocketId ? 'you' : 
+                          mySocketId === loserSocketId ? 'opponent' : 'draw';
+            processGameEndEvent(data, 'checkmate', winner);
+            return;
+          }
+        }
+        
         // Fall back to generic handling for other cases
         const winner = data.winner === 'player' ? 'you' : 
                       data.winner === 'opponent' ? 'opponent' : 'draw';
