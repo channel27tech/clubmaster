@@ -81,6 +81,9 @@ export const SoundProvider: React.FC<SoundProviderProps> = ({ children, userId }
   const toggleSound = useCallback(async (enabled: boolean) => {
     if (!userId) return;
     
+    // Log the operation for debugging
+    console.log(`Sound toggle requested: ${enabled ? 'enabled' : 'disabled'}`);
+    
     // Update local state immediately without waiting
     setSoundEnabled(enabled);
     
@@ -89,26 +92,33 @@ export const SoundProvider: React.FC<SoundProviderProps> = ({ children, userId }
       localStorage.setItem('soundEnabled', enabled.toString());
     }
     
-    // Update server in the background
-    try {
-      setIsLoading(true);
-      
-      // Use a separate async operation that doesn't block
+    // Use a completely separate async process for server updates
+    // This ensures the sound toggle operation is completely isolated from game state
+    const updateServerInBackground = () => {
+      // Use setTimeout with zero delay to move this to the next event loop tick
+      // This completely decouples it from the current execution context
       setTimeout(async () => {
         try {
+          // Use a local variable to track loading state to avoid state updates during critical operations
+          let isUpdating = true;
+          
+          // Perform the server update
           await updateSoundSettings(userId, enabled);
+          
+          isUpdating = false;
+          console.log(`Sound settings updated on server: ${enabled ? 'enabled' : 'disabled'}`);
         } catch (err) {
-          console.error('Background sound settings sync failed:', err);
-          // No need to show error as local state is already updated
-        } finally {
-          setIsLoading(false);
+          console.error('Background sound settings update failed:', err);
+          // Don't update any state here - keep the error isolated
         }
-      }, 300);
-    } catch (err) {
-      console.error('Error toggling sound:', err);
-      // Don't need to set error state since local state is already updated
-      setIsLoading(false);
-    }
+      }, 0);
+    };
+    
+    // Fire and forget - completely decouple from the main execution flow
+    updateServerInBackground();
+    
+    // Return immediately to minimize any impact on the UI
+    return;
   }, [userId]);
 
   // Context value
