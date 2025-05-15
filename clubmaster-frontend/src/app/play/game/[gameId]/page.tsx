@@ -56,6 +56,11 @@ export default function GamePage() {
       // Only set valid values
       if (storedColor === 'white' || storedColor === 'black') {
         setPlayerColor(storedColor);
+        console.log(`🎮 Player color set to: ${storedColor} (White always starts first)`);
+      } else {
+        console.warn('No valid player color found in localStorage, defaulting to white');
+        // Default to white if no color is set (should not happen with side selection logic)
+        setPlayerColor('white');
       }
       
       // Get timeControl

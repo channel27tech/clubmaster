@@ -60,6 +60,15 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
   // Get socket for remote move updates
   const { socket } = useSocket();
   
+  // Add a stable reference to the current board state
+  const currentBoardStateRef = useRef<{
+    fen: string | null;
+    boardState: BoardState | null;
+  }>({
+    fen: null,
+    boardState: null
+  });
+  
   // Helper to find a piece on the board
   const findMovingPiece = useCallback((position: string, boardState: BoardState): { type: PieceType, color: PieceColor } | null => {
     for (const row of boardState.squares) {
@@ -111,11 +120,56 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
     setMoveHistory(initialHistory);
     setBoardState(initialHistory.initialBoardState);
     
+    // Store the initial state in our stable reference
+    currentBoardStateRef.current = {
+      fen: getFen(),
+      boardState: initialHistory.initialBoardState
+    };
+    
     // Notify parent component of initial state
     if (onMoveHistoryChange) {
       onMoveHistoryChange(initialHistory);
     }
   }, [onMoveHistoryChange]);
+  
+  // Add a preservation mechanism to ensure board state consistency
+  useEffect(() => {
+    // Update our stable reference whenever the board state changes
+    if (boardState) {
+      currentBoardStateRef.current = {
+        fen: getFen(),
+        boardState: boardState
+      };
+      console.log('ChessBoard: Updated stable board reference with FEN:', currentBoardStateRef.current.fen);
+    }
+  }, [boardState]);
+
+  // Add a recovery mechanism that runs periodically to ensure board state consistency
+  useEffect(() => {
+    const checkBoardConsistency = () => {
+      // Only check if we have a stored state
+      if (currentBoardStateRef.current.fen) {
+        const currentFen = getFen();
+        
+        // If the FEN has changed unexpectedly (not due to a move), restore it
+        if (currentFen !== currentBoardStateRef.current.fen && 
+            boardState === currentBoardStateRef.current.boardState) {
+          console.log('ChessBoard: Detected unexpected board state change. Restoring from reference.');
+          console.log('Current:', currentFen);
+          console.log('Expected:', currentBoardStateRef.current.fen);
+          
+          // Reset the chess engine with the stored FEN
+          setChessPosition(currentBoardStateRef.current.fen);
+        }
+      }
+    };
+    
+    // Check board consistency every 100ms
+    const intervalId = setInterval(checkBoardConsistency, 100);
+    
+    // Clean up interval on unmount
+    return () => clearInterval(intervalId);
+  }, [boardState]);
   
   // Listen for opponent moves via socket
   useEffect(() => {

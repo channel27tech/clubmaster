@@ -204,9 +204,31 @@ export const offGameTimeoutDueToDisconnection = (callback?: (data: any) => void)
  * Add a listener for when a match is found
  * @param callback Function to call when a match is found
  */
-export const onMatchFound = (callback: (gameData: any) => void): void => {
+export const onMatchFound = (callback: (gameData: {
+  gameId: string;
+  playerColor?: 'white' | 'black';
+  opponentPreferredSide?: 'white' | 'black' | 'random';
+  timeControl?: string;
+  isPlayer1?: boolean;
+  player1SocketId?: string;
+  player2SocketId?: string;
+  whitePlayer?: { socketId: string, rating: number };
+  blackPlayer?: { socketId: string, rating: number };
+  finalAssignedColors?: Record<string, 'white' | 'black'>;
+}) => void): void => {
   if (socket) {
-    socket.on('matchFound', callback);
+    socket.on('matchFound', (data) => {
+      console.log('Match found raw data:', data);
+      
+      // Ensure we have opponent's preferred side for client-side side selection
+      const gameData = {
+        ...data,
+        // If opponentPreferredSide is not provided, we'll use the fallback logic
+        opponentPreferredSide: data.opponentPreferredSide || undefined
+      };
+      
+      callback(gameData);
+    });
   }
 };
 
@@ -361,4 +383,15 @@ export const getTimerState = (gameId: string): void => {
   } else {
     console.error('⚠️ Cannot get timer state: Socket not connected');
   }
+};
+
+/**
+ * Get the socket ID
+ * @returns Socket ID string or null if socket is not connected
+ */
+export const getSocketId = (): string | null => {
+  if (socket && socket.connected) {
+    return socket.id;
+  }
+  return null;
 }; 
