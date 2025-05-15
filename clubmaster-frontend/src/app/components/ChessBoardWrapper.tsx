@@ -1642,24 +1642,24 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         <>
           {/* Player 1 Info (Top) - White */}
           <div className="flex justify-between items-center mb-4 sm:mb-2 mx-[21px]">
-            <PlayerInfo 
-              position="top"
-              username={player1.username}
-              rating={player1.rating}
-              clubAffiliation={player1.clubAffiliation}
-              isGuest={player1.isGuest}
+        <PlayerInfo 
+          position="top"
+          username={player1.username}
+          rating={player1.rating}
+          clubAffiliation={player1.clubAffiliation}
+          isGuest={player1.isGuest}
               capturedPieces={capturedByWhite || whiteCapturedPieces}
         />
             {/* Top player timer (White) */}
             <div>
-              <GameClock 
+          <GameClock 
                 timeInSeconds={gameTimeInSeconds}
                 isActive={activePlayer === 'white'}
-                isDarkTheme={false}
+            isDarkTheme={false}
                 onTimeOut={() => handleTimeOut('white')}
                 playLowTimeSound={() => playSound('TIME_LOW', soundEnabled)}
-              />
-            </div>
+          />
+        </div>
       </div>
       
       {/* Chess Board */}
@@ -1672,12 +1672,12 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       
           {/* Player 2 Info (Bottom) - Black */}
           <div className="flex justify-between items-center mt-4 sm:mt-2 mx-[21px]">
-            <PlayerInfo 
-              position="bottom"
-              username={player2.username}
-              rating={player2.rating}
-              clubAffiliation={player2.clubAffiliation}
-              isGuest={player2.isGuest}
+        <PlayerInfo 
+          position="bottom"
+          username={player2.username}
+          rating={player2.rating}
+          clubAffiliation={player2.clubAffiliation}
+          isGuest={player2.isGuest}
               capturedPieces={capturedByBlack || blackCapturedPieces}
             />
             {/* Bottom player timer (Black) */}
@@ -1733,18 +1733,18 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
               clubAffiliation={player1.clubAffiliation}
               isGuest={player1.isGuest}
               capturedPieces={capturedByWhite || whiteCapturedPieces}
-            />
-            {/* Bottom player timer (White) */}
+        />
+        {/* Bottom player timer (White) */}
             <div>
-              <GameClock 
+          <GameClock 
                 timeInSeconds={gameTimeInSeconds}
-                isActive={activePlayer === 'white'}
-                isDarkTheme={true}
+            isActive={activePlayer === 'white'}
+            isDarkTheme={true}
                 onTimeOut={() => handleTimeOut('white')}
                 playLowTimeSound={() => playSound('TIME_LOW', soundEnabled)}
-              />
-            </div>
-          </div>
+          />
+        </div>
+      </div>
         </>
       )}
       
