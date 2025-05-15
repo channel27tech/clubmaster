@@ -1,5 +1,5 @@
 'use client';
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import PlayerInfo from './PlayerInfo';
 import MoveControls from './MoveControls';
@@ -7,7 +7,7 @@ import GameClock from './GameClock';
 import GameResultScreen from './GameResultScreen';
 import { player1, player2 } from '../utils/mockData';
 import { MoveHistoryState } from '../utils/moveHistory';
-import { getGameStatus, getChessEngine } from '../utils/chessEngine';
+import { getGameStatus, getChessEngine, getFen, setChessPosition } from '../utils/chessEngine';
 import { useSound } from '../../contexts/SoundContext';
 import { useSocket } from '../../contexts/SocketContext';
 import { playSound, preloadSoundEffects } from '../utils/soundEffects';
@@ -909,21 +909,25 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     if (!socket || !moveQueue.length || !gameRoomId) return;
     
     const move = moveQueue[0];
+    const currentSocket = socket; // Capture current socket to avoid closure issues
     
     // Create a function to handle a single move
     const processMoveWithRetry = async () => {
       try {
-        console.log(`Processing move: ${move.from} to ${move.to}`);
+        console.log(`Processing move: ${move.from} to ${move.to} (Socket connected: ${currentSocket.connected})`);
         const currentPlayerColor = !gameState.isWhiteTurn ? 'white' : 'black'; // Invert since move is being made
         
         // Attempt to emit the move event
-        socket.emit('move_made', {
+        currentSocket.emit('move_made', {
           gameId: gameRoomId,
           from: move.from,
           to: move.to,
           player: currentPlayerColor,
           promotion: move.promotion
         });
+        
+        // Log successful move emission
+        console.log(`Move emitted successfully to server: ${move.from}-${move.to}`);
         
         // Remove this move from the queue
         setMoveQueue(prev => prev.slice(1));
@@ -1019,7 +1023,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       // Stop both clocks
       setActivePlayer(null);
       
-      // Play checkmate sound
+      // Play checkmate sound - only if sound is enabled
       if (soundEnabled) {
         playSound('CHECKMATE', true);
       }
@@ -1075,17 +1079,20 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     }
     
     // If a move is made, add it to the move queue
+    // This is critical for synchronizing moves between clients
     if (history.moves.length > 0 && history.currentMoveIndex === history.moves.length - 1) {
       const lastMove = history.moves[history.currentMoveIndex];
       
       // Add to move queue instead of directly emitting
+      // This ensures moves are processed even if sound settings change
+      console.log(`Adding move to queue: ${lastMove.from}-${lastMove.to}`);
       setMoveQueue(prev => [...prev, {
         from: lastMove.from,
         to: lastMove.to,
         promotion: lastMove.promotion
       }]);
     }
-  }, []);
+  }, [soundEnabled, playerColor, player1.username, player1.rating, player2.username, player2.rating]);
   
   // Handle back button click
   const handleBackClick = useCallback(() => {
@@ -1499,6 +1506,110 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       canAbortGame: !gameState.hasWhiteMoved && (!moveHistory || !moveHistory.moves || moveHistory.moves.length === 0)
     });
   }, [gameState.hasWhiteMoved, moveHistory, gameState]);
+
+  // Add a socket health monitoring system
+  useEffect(() => {
+    if (!socket) return;
+    
+    const safeSocket = socket;
+    let healthCheckInterval: NodeJS.Timeout | null = null;
+    
+    // Function to check socket health and reconnect if needed
+    const checkSocketHealth = () => {
+      console.log(`Socket health check - Connected: ${safeSocket.connected}, Has pending moves: ${moveQueue.length > 0}`);
+      
+      if (!safeSocket.connected && moveQueue.length > 0) {
+        console.warn('Socket disconnected with pending moves - attempting reconnection');
+        
+        // Try to reconnect
+        try {
+          safeSocket.connect();
+          
+          // After reconnection, verify connection
+          setTimeout(() => {
+            if (safeSocket.connected) {
+              console.log('Socket reconnected successfully');
+            } else {
+              console.error('Socket reconnection failed');
+            }
+          }, 1000);
+        } catch (error) {
+          console.error('Error reconnecting socket:', error);
+        }
+      }
+    };
+    
+    // Start health check interval
+    healthCheckInterval = setInterval(checkSocketHealth, 5000);
+    
+    // Clean up on unmount
+    return () => {
+      if (healthCheckInterval) {
+        clearInterval(healthCheckInterval);
+      }
+    };
+  }, [socket, moveQueue.length]);
+
+  // Add a stable reference to store the current board state
+  // This prevents the board from resetting when sound settings change
+  const stableBoardStateRef = useRef<{
+    fen: string | null;
+    moveHistory: MoveHistoryState | null;
+    lastSoundToggleTime: number;
+  }>({
+    fen: null,
+    moveHistory: null,
+    lastSoundToggleTime: 0
+  });
+  
+  // Update the stable reference whenever move history changes
+  useEffect(() => {
+    if (moveHistory) {
+      // Store the current state in our stable reference
+      stableBoardStateRef.current = {
+        ...stableBoardStateRef.current,
+        fen: getFen(),
+        moveHistory: JSON.parse(JSON.stringify(moveHistory))
+      };
+      
+      console.log('Updated stable board reference with current state:', stableBoardStateRef.current.fen);
+    }
+  }, [moveHistory]);
+  
+  // Track sound toggle operations
+  useEffect(() => {
+    // Record the time of the sound toggle
+    stableBoardStateRef.current.lastSoundToggleTime = Date.now();
+    console.log('Sound toggle detected, timestamp recorded:', stableBoardStateRef.current.lastSoundToggleTime);
+    
+    // If we have a stored board state, ensure it's preserved after the sound toggle
+    if (stableBoardStateRef.current.fen) {
+      // Use a small delay to ensure this runs after any potential board reset
+      const timeoutId = setTimeout(() => {
+        const currentFen = getFen();
+        
+        // If the current FEN is different from our stored reference (indicating a reset),
+        // restore the correct board state
+        if (currentFen !== stableBoardStateRef.current.fen) {
+          console.log('Board state mismatch detected after sound toggle. Restoring from reference.');
+          console.log('Current:', currentFen);
+          console.log('Expected:', stableBoardStateRef.current.fen);
+          
+          // Restore the correct position
+          if (stableBoardStateRef.current.fen) {
+            setChessPosition(stableBoardStateRef.current.fen, gameId || undefined);
+            
+            // If we have move history, ensure it's restored as well
+            if (stableBoardStateRef.current.moveHistory && moveHistory !== stableBoardStateRef.current.moveHistory) {
+              setMoveHistory(stableBoardStateRef.current.moveHistory);
+            }
+          }
+        }
+      }, 50);
+      
+      return () => clearTimeout(timeoutId);
+    }
+  }, [soundEnabled, gameId]);
 
   return (
     <div className="flex flex-col w-full h-full rounded-t-xl rounded-b-none sm:rounded-t-xl sm:rounded-b-none overflow-hidden flex-shrink-0 pb-[62px]" style={{ backgroundColor: '#4A7C59' }}>
