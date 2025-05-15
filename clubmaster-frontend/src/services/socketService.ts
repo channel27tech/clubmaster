@@ -206,28 +206,46 @@ export const offGameTimeoutDueToDisconnection = (callback?: (data: any) => void)
  */
 export const onMatchFound = (callback: (gameData: {
   gameId: string;
-  playerColor?: 'white' | 'black';
-  opponentPreferredSide?: 'white' | 'black' | 'random';
   timeControl?: string;
-  isPlayer1?: boolean;
-  player1SocketId?: string;
-  player2SocketId?: string;
-  whitePlayer?: { socketId: string, rating: number };
-  blackPlayer?: { socketId: string, rating: number };
-  finalAssignedColors?: Record<string, 'white' | 'black'>;
+  gameMode?: string;
+  rated?: boolean;
+  playerColor: 'white' | 'black';  // Server-assigned color for this player
+  opponentColor: 'white' | 'black'; // Server-assigned color for opponent
+  opponentPreferredSide?: 'white' | 'black' | 'random';
+  whitePlayer?: {
+    socketId: string;
+    rating: number;
+    username?: string;
+  };
+  blackPlayer?: {
+    socketId: string;
+    rating: number;
+    username?: string;
+  };
+  sideAssignment?: {
+    player1: {
+      socketId: string;
+      preferredSide: 'white' | 'black' | 'random';
+      assignedColor: 'white' | 'black';
+    };
+    player2: {
+      socketId: string;
+      preferredSide: 'white' | 'black' | 'random';
+      assignedColor: 'white' | 'black';
+    };
+  };
+  created?: Date;
 }) => void): void => {
   if (socket) {
     socket.on('matchFound', (data) => {
-      console.log('Match found raw data:', data);
+      console.log('Match found event received:', data);
       
-      // Ensure we have opponent's preferred side for client-side side selection
-      const gameData = {
-        ...data,
-        // If opponentPreferredSide is not provided, we'll use the fallback logic
-        opponentPreferredSide: data.opponentPreferredSide || undefined
-      };
+      // Validate essential data
+      if (!data || !data.gameId || !data.playerColor) {
+        console.error('Invalid match data received:', data);
+      }
       
-      callback(gameData);
+      callback(data);
     });
   }
 };
