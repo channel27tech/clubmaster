@@ -217,6 +217,7 @@ export class GameGateway
         gameMode: payload.gameMode || 'Blitz',
         timeControl: payload.timeControl || '5+0',
         rated: payload.rated !== undefined ? payload.rated : true,
+        preferredSide: payload.preferredSide || 'random', // Added preferredSide to pass player color preference
       });
       
       return {
