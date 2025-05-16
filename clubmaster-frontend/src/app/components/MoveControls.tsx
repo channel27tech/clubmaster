@@ -144,9 +144,43 @@ const MoveControls: React.FC<MoveControlsProps> = ({
 
   // Handle sound toggle using the SoundContext
   const handleSoundToggle = useCallback(async (enabled: boolean) => {
-    await toggleSound(enabled);
-    setIsOptionsDialogOpen(false);
-  }, [toggleSound]);
+    try {
+      // Log sound toggle for debugging
+      console.log(`MoveControls: Sound toggle requested: ${enabled ? 'enabled' : 'disabled'}`);
+      
+      // Close options dialog immediately to avoid UI interference
+      setIsOptionsDialogOpen(false);
+      
+      // Important: Capture the current socket state for debugging
+      const socketConnected = socket?.connected;
+      console.log(`Sound toggle - Socket state before toggle: ${socketConnected ? 'connected' : 'disconnected'}`);
+      
+      // Use requestAnimationFrame to ensure UI updates complete first
+      // This helps prevent any interference with the game state rendering
+      requestAnimationFrame(() => {
+        // Use a separate function to isolate the sound toggle operation
+        const performSoundToggle = async () => {
+          try {
+            // Toggle sound in a completely isolated way
+            await toggleSound(enabled);
+            console.log(`MoveControls: Sound ${enabled ? 'enabled' : 'disabled'} successfully`);
+            
+            // Check socket state after toggle for debugging
+            setTimeout(() => {
+              console.log(`Sound toggle - Socket state after toggle: ${socket?.connected ? 'connected' : 'disconnected'}`);
+            }, 100);
+          } catch (error) {
+            console.error('Error in sound toggle operation:', error);
+          }
+        };
+        
+        // Execute sound toggle in an isolated context
+        performSoundToggle();
+      });
+    } catch (error) {
+      console.error('Error in sound toggle handler:', error);
+    }
+  }, [toggleSound, socket]);
 
   // Disable controls if game is over
   const isDisabled = gameState.isGameOver;

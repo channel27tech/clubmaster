@@ -183,32 +183,125 @@ export class MatchmakingService {
   private createMatch(player1: Player, player2: Player): void {
     const gameId = `game_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     
-    // Determine which player plays white based on preferences
-    let isPlayer1White = Math.random() < 0.5; // Default random assignment
+    // Store side preferences for coordinated side assignment
+    const player1SidePreference = player1.preferredSide || 'random';
+    const player2SidePreference = player2.preferredSide || 'random';
     
-    // Check player preferences
-    if (player1.preferredSide === 'white' && player2.preferredSide === 'white') {
-      // Both want white, randomly choose
-      isPlayer1White = Math.random() < 0.5;
-    } else if (player1.preferredSide === 'black' && player2.preferredSide === 'black') {
-      // Both want black, randomly choose
-      isPlayer1White = Math.random() < 0.5;
-    } else if (player1.preferredSide === 'white' && player2.preferredSide !== 'white') {
-      // Player 1 wants white, player 2 doesn't specifically want white
-      isPlayer1White = true;
-    } else if (player1.preferredSide !== 'black' && player2.preferredSide === 'black') {
-      // Player 2 wants black, player 1 doesn't specifically want black
-      isPlayer1White = true;
-    } else if (player1.preferredSide === 'black' && player2.preferredSide !== 'black') {
-      // Player 1 wants black, player 2 doesn't specifically want black
-      isPlayer1White = false;
-    } else if (player1.preferredSide !== 'white' && player2.preferredSide === 'white') {
-      // Player 2 wants white, player 1 doesn't specifically want white
-      isPlayer1White = false;
+    // Determine color assignments at the server to ensure consistency
+    let player1Color: 'white' | 'black';
+    let player2Color: 'white' | 'black';
+    
+    // CASE 1: One chooses White, one chooses Black - assign each player their selected side
+    if (player1SidePreference === 'white' && player2SidePreference === 'black') {
+      player1Color = 'white';
+      player2Color = 'black';
+      this.logger.log(`Case 1: Player1 chose White, Player2 chose Black - assigned accordingly`);
+    }
+    else if (player1SidePreference === 'black' && player2SidePreference === 'white') {
+      player1Color = 'black';
+      player2Color = 'white';
+      this.logger.log(`Case 1: Player1 chose Black, Player2 chose White - assigned accordingly`);
+    }
+    // CASE 2: One chooses White/Black, other chooses Random
+    else if (player1SidePreference === 'white' && player2SidePreference === 'random') {
+      player1Color = 'white';
+      player2Color = 'black';
+      this.logger.log(`Case 2: Player1 chose White, Player2 chose Random - assigned accordingly`);
+    }
+    else if (player1SidePreference === 'black' && player2SidePreference === 'random') {
+      player1Color = 'black';
+      player2Color = 'white';
+      this.logger.log(`Case 2: Player1 chose Black, Player2 chose Random - assigned accordingly`);
+    }
+    else if (player1SidePreference === 'random' && player2SidePreference === 'white') {
+      player1Color = 'black';
+      player2Color = 'white';
+      this.logger.log(`Case 2: Player1 chose Random, Player2 chose White - assigned accordingly`);
+    }
+    else if (player1SidePreference === 'random' && player2SidePreference === 'black') {
+      player1Color = 'white';
+      player2Color = 'black';
+      this.logger.log(`Case 2: Player1 chose Random, Player2 chose Black - assigned accordingly`);
+    }
+    // CASE 3: Both choose Random - assign randomly but deterministically
+    else if (player1SidePreference === 'random' && player2SidePreference === 'random') {
+      // Use gameId for deterministic randomness
+      const deterministicRandom = (id: string): boolean => {
+        // Simple hash function
+        let hash = 0;
+        for (let i = 0; i < id.length; i++) {
+          hash = ((hash << 5) - hash) + id.charCodeAt(i);
+          hash |= 0; // Convert to 32bit integer
+        }
+        // Even hash means player1 gets white, odd hash means player1 gets black
+        return (Math.abs(hash) % 2) === 0;
+      };
+      
+      const player1GetsWhite = deterministicRandom(gameId);
+      player1Color = player1GetsWhite ? 'white' : 'black';
+      player2Color = player1GetsWhite ? 'black' : 'white';
+      this.logger.log(`Case 3: Both chose Random - Player1 gets ${player1Color}`);
+    }
+    // CASE 4: Both choose same side (White or Black) - randomly assign one to opposite side
+    else if (player1SidePreference === 'white' && player2SidePreference === 'white') {
+      const deterministicRandom = (id: string): boolean => {
+        let hash = 0;
+        for (let i = 0; i < id.length; i++) {
+          hash = ((hash << 5) - hash) + id.charCodeAt(i);
+          hash |= 0;
+        }
+        return (Math.abs(hash) % 2) === 0;
+      };
+      
+      const player1GetsWhite = deterministicRandom(gameId);
+      player1Color = player1GetsWhite ? 'white' : 'black';
+      player2Color = player1GetsWhite ? 'black' : 'white';
+      this.logger.log(`Case 4: Both chose White - Player1 gets ${player1Color}`);
+    }
+    else if (player1SidePreference === 'black' && player2SidePreference === 'black') {
+      const deterministicRandom = (id: string): boolean => {
+        let hash = 0;
+        for (let i = 0; i < id.length; i++) {
+          hash = ((hash << 5) - hash) + id.charCodeAt(i);
+          hash |= 0;
+        }
+        return (Math.abs(hash) % 2) === 0;
+      };
+      
+      const player1GetsBlack = deterministicRandom(gameId);
+      player1Color = player1GetsBlack ? 'black' : 'white';
+      player2Color = player1GetsBlack ? 'white' : 'black';
+      this.logger.log(`Case 4: Both chose Black - Player1 gets ${player1Color}`);
+    }
+    // Fallback
+    else {
+      const deterministicRandom = (id: string): boolean => {
+        let hash = 0;
+        for (let i = 0; i < id.length; i++) {
+          hash = ((hash << 5) - hash) + id.charCodeAt(i);
+          hash |= 0;
+        }
+        return (Math.abs(hash) % 2) === 0;
+      };
+      
+      const player1GetsWhite = deterministicRandom(gameId);
+      player1Color = player1GetsWhite ? 'white' : 'black';
+      player2Color = player1GetsWhite ? 'black' : 'white';
+      this.logger.log(`Fallback case - Player1 gets ${player1Color}`);
     }
     
-    const whitePlayer = isPlayer1White ? player1 : player2;
-    const blackPlayer = isPlayer1White ? player2 : player1;
+    // Verify we've assigned valid colors - safety check
+    if (!((player1Color === 'white' && player2Color === 'black') || 
+          (player1Color === 'black' && player2Color === 'white'))) {
+      this.logger.error(`INVALID COLOR ASSIGNMENT: Player1=${player1Color}, Player2=${player2Color}`);
+      // Force a valid assignment as fallback
+      player1Color = 'white';
+      player2Color = 'black';
+    }
+    
+    // Get the correct player objects based on assigned colors
+    const whitePlayer = player1Color === 'white' ? player1 : player2;
+    const blackPlayer = player1Color === 'white' ? player2 : player1;
     
     // Create player objects for GameManagerService
     const whiteGamePlayer = {
@@ -235,34 +328,60 @@ export class MatchmakingService {
     this.gameManagerService.createGame(
       gameId,
       whiteGamePlayer,
-      blackGamePlayer,
+      blackGamePlayer, 
       player1.gameMode,
       player1.timeControl,
       player1.rated
     );
     
+    // Create the game data object
     const gameData = {
       gameId,
       gameMode: player1.gameMode,
       timeControl: player1.timeControl,
       rated: player1.rated,
+      created: new Date(),
       whitePlayer: {
         socketId: whitePlayer.socketId,
         rating: whitePlayer.rating,
+        username: whitePlayer.username || `Player-${whitePlayer.socketId.substring(0, 5)}`
       },
       blackPlayer: {
         socketId: blackPlayer.socketId,
         rating: blackPlayer.rating,
+        username: blackPlayer.username || `Player-${blackPlayer.socketId.substring(0, 5)}`
       },
-      created: new Date(),
+      sideAssignment: {
+        player1: { 
+          socketId: player1.socketId, 
+          preferredSide: player1SidePreference,
+          assignedColor: player1Color
+        },
+        player2: { 
+          socketId: player2.socketId, 
+          preferredSide: player2SidePreference,
+          assignedColor: player2Color
+        }
+      }
     };
     
-    this.logger.log(`Match created: ${gameId} between ${player1.socketId} and ${player2.socketId}`);
-    this.logger.log(`Game registered: ${gameId}`);
+    this.logger.log(`Match created: ${gameId} between ${player1.socketId} (${player1Color}) and ${player2.socketId} (${player2Color})`);
     
-    // Notify both players that a match has been found
-    player1.socket.emit('matchFound', { ...gameData, playerColor: isPlayer1White ? 'white' : 'black' });
-    player2.socket.emit('matchFound', { ...gameData, playerColor: isPlayer1White ? 'black' : 'white' });
+    // Send match data to player1 with clear assigned color
+    player1.socket.emit('matchFound', { 
+      ...gameData,
+      playerColor: player1Color,
+      opponentColor: player2Color,
+      opponentPreferredSide: player2SidePreference
+    });
+    
+    // Send match data to player2 with clear assigned color
+    player2.socket.emit('matchFound', { 
+      ...gameData,
+      playerColor: player2Color,
+      opponentColor: player1Color,
+      opponentPreferredSide: player1SidePreference
+    });
     
     // Join both players to a game room for further communication
     player1.socket.join(gameId);

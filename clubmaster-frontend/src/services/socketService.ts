@@ -204,9 +204,49 @@ export const offGameTimeoutDueToDisconnection = (callback?: (data: any) => void)
  * Add a listener for when a match is found
  * @param callback Function to call when a match is found
  */
-export const onMatchFound = (callback: (gameData: any) => void): void => {
+export const onMatchFound = (callback: (gameData: {
+  gameId: string;
+  timeControl?: string;
+  gameMode?: string;
+  rated?: boolean;
+  playerColor: 'white' | 'black';  // Server-assigned color for this player
+  opponentColor: 'white' | 'black'; // Server-assigned color for opponent
+  opponentPreferredSide?: 'white' | 'black' | 'random';
+  whitePlayer?: {
+    socketId: string;
+    rating: number;
+    username?: string;
+  };
+  blackPlayer?: {
+    socketId: string;
+    rating: number;
+    username?: string;
+  };
+  sideAssignment?: {
+    player1: {
+      socketId: string;
+      preferredSide: 'white' | 'black' | 'random';
+      assignedColor: 'white' | 'black';
+    };
+    player2: {
+      socketId: string;
+      preferredSide: 'white' | 'black' | 'random';
+      assignedColor: 'white' | 'black';
+    };
+  };
+  created?: Date;
+}) => void): void => {
   if (socket) {
-    socket.on('matchFound', callback);
+    socket.on('matchFound', (data) => {
+      console.log('Match found event received:', data);
+      
+      // Validate essential data
+      if (!data || !data.gameId || !data.playerColor) {
+        console.error('Invalid match data received:', data);
+      }
+      
+      callback(data);
+    });
   }
 };
 
@@ -361,4 +401,15 @@ export const getTimerState = (gameId: string): void => {
   } else {
     console.error('⚠️ Cannot get timer state: Socket not connected');
   }
+};
+
+/**
+ * Get the socket ID
+ * @returns Socket ID string or null if socket is not connected
+ */
+export const getSocketId = (): string | null => {
+  if (socket && socket.connected) {
+    return socket.id;
+  }
+  return null;
 }; 

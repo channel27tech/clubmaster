@@ -1,6 +1,7 @@
 import React, { forwardRef, useImperativeHandle, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import * as socketService from '@/services/socketService';
+import { SidePreference, determinePlayerColor } from '@/utils/sideSelection';
 
 interface MatchmakingManagerProps {
   defaultGameMode?: string;
@@ -12,6 +13,15 @@ interface MatchmakingManagerProps {
 
 export interface MatchmakingManagerHandle {
   startMatchmaking: (mode: string, time: string, playSide: string) => void;
+}
+
+// Define the window interface to properly type the window extensions
+declare global {
+  interface Window {
+    startMatchmakingDebug?: () => void;
+    cancelMatchmakingDebug?: () => void;
+    testSideSelection?: (gameId?: string) => void;
+  }
 }
 
 /**
@@ -40,29 +50,39 @@ const MatchmakingManager = forwardRef<MatchmakingManagerHandle, MatchmakingManag
         console.log('Match found with gameData:', gameData);
         setIsMatchmaking(false);
         
-        // Store playerColor in localStorage for use on the game page
-        if (gameData && gameData.playerColor) {
-          // Make sure playerColor is a valid value
-          const color = gameData.playerColor.toLowerCase();
-          if (color === 'white' || color === 'black') {
-            localStorage.setItem('playerColor', color);
-            console.log('Stored player color in localStorage:', color);
-          } else {
-            console.error('Invalid player color received:', gameData.playerColor);
-          }
-        } else {
-          console.warn('No playerColor in gameData');
+        // Use the server-assigned player color
+        if (!gameData || !gameData.playerColor) {
+          console.error('Error: No player color assignment received from server');
+          setError('Unable to start game - invalid color assignment');
+          return;
         }
+        
+        // Get the server-assigned color
+        const assignedColor = gameData.playerColor.toLowerCase();
+        
+        // Validate the assigned color
+        if (assignedColor !== 'white' && assignedColor !== 'black') {
+          console.error(`Invalid color received: ${assignedColor}`);
+          setError('Invalid color assignment received');
+          return;
+        }
+        
+        console.log(`Server assigned player color: ${assignedColor}`);
+        
+        // Log details about the side assignment for debugging
+        if (gameData.sideAssignment) {
+          console.log('Side assignment details:', gameData.sideAssignment);
+        }
+        
+        // Store the calculated player color in localStorage
+        localStorage.setItem('playerColor', assignedColor);
         
         // Store timeControl in localStorage
         if (gameData && gameData.timeControl) {
           localStorage.setItem('timeControl', gameData.timeControl);
-          console.log('Stored time control in localStorage:', gameData.timeControl);
         } else {
-          console.warn('No timeControl in gameData');
           // Use the current timeControl as fallback
           localStorage.setItem('timeControl', `${timeControl}+0`);
-          console.log('Stored fallback time control in localStorage:', `${timeControl}+0`);
         }
         
         // Navigate to the game screen with the game ID
@@ -91,7 +111,7 @@ const MatchmakingManager = forwardRef<MatchmakingManagerHandle, MatchmakingManag
           socketService.cancelMatchmaking();
         }
       };
-    }, [router, isMatchmaking]);
+    }, [router, isMatchmaking, side]);
     
     const startMatchmaking = (mode: string, time: string, playSide: string) => {
       console.log('StartMatchmaking called with:', { mode, time, playSide });
@@ -201,6 +221,28 @@ const MatchmakingManager = forwardRef<MatchmakingManagerHandle, MatchmakingManag
       window.cancelMatchmakingDebug = () => {
         console.log('Cancel function called');
         cancelMatchmaking();
+      };
+
+      // Add a test function for side selection
+      window.testSideSelection = (gameId?: string) => {
+        if (!gameId) {
+          gameId = `game_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+          console.log(`No gameId provided, using generated ID: ${gameId}`);
+        }
+        
+        import('@/utils/sideSelection').then(module => {
+          // Run the comprehensive test of all combinations
+          console.log('Running side selection logic tests...');
+          module.testAllCombinations();
+          
+          // Add explanation about the server-side assignment
+          console.log('\n====== IMPORTANT NOTE ======');
+          console.log('Side selection is now handled by the server to ensure consistency.');
+          console.log('Both clients receive their final color assignment without needing to calculate it.');
+          console.log('============================');
+        }).catch(err => {
+          console.error('Failed to load sideSelection module:', err);
+        });
       };
     }
     

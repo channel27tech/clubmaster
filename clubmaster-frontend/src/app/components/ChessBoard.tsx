@@ -60,6 +60,15 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
   // Get socket for remote move updates
   const { socket } = useSocket();
   
+  // Add a stable reference to the current board state
+  const currentBoardStateRef = useRef<{
+    fen: string | null;
+    boardState: BoardState | null;
+  }>({
+    fen: null,
+    boardState: null
+  });
+  
   // Helper to find a piece on the board
   const findMovingPiece = useCallback((position: string, boardState: BoardState): { type: PieceType, color: PieceColor } | null => {
     for (const row of boardState.squares) {
@@ -111,11 +120,56 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
     setMoveHistory(initialHistory);
     setBoardState(initialHistory.initialBoardState);
     
+    // Store the initial state in our stable reference
+    currentBoardStateRef.current = {
+      fen: getFen(),
+      boardState: initialHistory.initialBoardState
+    };
+    
     // Notify parent component of initial state
     if (onMoveHistoryChange) {
       onMoveHistoryChange(initialHistory);
     }
   }, [onMoveHistoryChange]);
+  
+  // Add a preservation mechanism to ensure board state consistency
+  useEffect(() => {
+    // Update our stable reference whenever the board state changes
+    if (boardState) {
+      currentBoardStateRef.current = {
+        fen: getFen(),
+        boardState: boardState
+      };
+      console.log('ChessBoard: Updated stable board reference with FEN:', currentBoardStateRef.current.fen);
+    }
+  }, [boardState]);
+
+  // Add a recovery mechanism that runs periodically to ensure board state consistency
+  useEffect(() => {
+    const checkBoardConsistency = () => {
+      // Only check if we have a stored state
+      if (currentBoardStateRef.current.fen) {
+        const currentFen = getFen();
+        
+        // If the FEN has changed unexpectedly (not due to a move), restore it
+        if (currentFen !== currentBoardStateRef.current.fen && 
+            boardState === currentBoardStateRef.current.boardState) {
+          console.log('ChessBoard: Detected unexpected board state change. Restoring from reference.');
+          console.log('Current:', currentFen);
+          console.log('Expected:', currentBoardStateRef.current.fen);
+          
+          // Reset the chess engine with the stored FEN
+          setChessPosition(currentBoardStateRef.current.fen);
+        }
+      }
+    };
+    
+    // Check board consistency every 100ms
+    const intervalId = setInterval(checkBoardConsistency, 100);
+    
+    // Clean up interval on unmount
+    return () => clearInterval(intervalId);
+  }, [boardState]);
   
   // Listen for opponent moves via socket
   useEffect(() => {
@@ -184,14 +238,64 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
             const movingPiece = extractPieceInfoFromNotation(data.notation, data.player as PieceColor);
             
             if (movingPiece) {
-              // Add the move to history
-              const newHistory = addMove(moveHistory, {
+              // 🔄 FIX: When an opponent makes a move after rewinding, we need to:
+              // 1. Keep all moves up to the current pointer
+              // 2. Trim all future moves
+              // 3. Append the new move
+              
+              // First, determine if we're in a rewound state
+              const isRewound = moveHistory.currentMoveIndex < moveHistory.moves.length - 1;
+              
+              // Log detailed move history state for debugging
+              console.log(`🔍 BEFORE: Move history state when receiving opponent move after ${isRewound ? 'REWIND' : 'normal play'}:`, {
+                currentMoveIndex: moveHistory.currentMoveIndex,
+                totalMoves: moveHistory.moves.length,
+                firstFewMoves: moveHistory.moves.slice(0, 3).map(m => m.notation),
+                lastFewMoves: moveHistory.moves.slice(-3).map(m => m.notation)
+              });
+              
+              // Create a properly trimmed move history - keep moves up to current position
+              const updatedMoves = isRewound
+                ? moveHistory.moves.slice(0, moveHistory.currentMoveIndex + 1)
+                : [...moveHistory.moves];
+              
+              // Log the move history state for debugging
+              console.log('📊 Move History Debug:', {
+                currentPointerIndex: moveHistory.currentMoveIndex,
+                originalMoveListLength: moveHistory.moves.length,
+                isRewound,
+                trimmedMoveListLength: updatedMoves.length
+              });
+              
+              // Create the new move to append
+              const newMove = {
                 from: data.from,
                 to: data.to,
                 piece: movingPiece,
                 notation: data.notation,
-                promotion: data.promotion
-              }, newBoardState);
+                promotion: data.promotion,
+                boardState: newBoardState
+              };
+              
+              // Add the new move to the trimmed history
+              updatedMoves.push(newMove);
+              
+              // Create the new history object
+              const newHistory = {
+                ...moveHistory,
+                moves: updatedMoves,
+                currentMoveIndex: updatedMoves.length - 1
+              };
+              
+              // Log the final move list for debugging with much more detail
+              console.log('📊 AFTER: Move history after opponent move processing:', {
+                lengthBefore: moveHistory.moves.length,
+                lengthAfter: updatedMoves.length,
+                newCurrentIndex: newHistory.currentMoveIndex,
+                firstFewMoves: updatedMoves.slice(0, 3).map(m => m.notation),
+                lastFewMoves: updatedMoves.slice(-3).map(m => m.notation),
+                fullMoveList: updatedMoves.map(m => m.notation)
+              });
               
               // Update all the state
               setMoveHistory(newHistory);
@@ -245,14 +349,39 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
             // Update board state
             const newBoardState = getCurrentBoardState();
             
-            // Add to history
-            const newHistory = addMove(moveHistory, {
+            // 🔄 FIX: Apply the same fix for direct move method
+            // First, determine if we're in a rewound state
+            const isRewound = moveHistory.currentMoveIndex < moveHistory.moves.length - 1;
+            
+            // Create a properly trimmed move history
+            const updatedMoves = isRewound
+              ? moveHistory.moves.slice(0, moveHistory.currentMoveIndex + 1)
+              : [...moveHistory.moves];
+            
+            // Log the move history state for debugging
+            console.log('📊 Move History Debug (direct method):', {
+              currentPointerIndex: moveHistory.currentMoveIndex,
+              originalMoveListLength: moveHistory.moves.length,
+              isRewound,
+              trimmedMoveListLength: updatedMoves.length
+            });
+            
+            // Add the new move with its board state
+            updatedMoves.push({
               from: data.from,
               to: data.to,
               piece: movingPiece,
               notation: data.notation,
-              promotion: data.promotion
-            }, newBoardState);
+              promotion: data.promotion,
+              boardState: newBoardState
+            });
+            
+            // Create the new history object
+            const newHistory = {
+              ...moveHistory,
+              moves: updatedMoves,
+              currentMoveIndex: updatedMoves.length - 1
+            };
             
             // Update state
             setMoveHistory(newHistory);
@@ -282,14 +411,31 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
                 // Update board state
                 const newBoardState = getCurrentBoardState();
                 
-                // Add to history
-                const newHistory = addMove(moveHistory, {
+                // 🔄 FIX: Apply the same fix for reset fallback method
+                // First, determine if we're in a rewound state
+                const isRewound = moveHistory.currentMoveIndex < moveHistory.moves.length - 1;
+                
+                // Create a properly trimmed move history
+                const updatedMoves = isRewound
+                  ? moveHistory.moves.slice(0, moveHistory.currentMoveIndex + 1)
+                  : [...moveHistory.moves];
+                
+                // Add the new move with its board state
+                updatedMoves.push({
                   from: data.from,
                   to: data.to,
                   piece: movingPiece,
                   notation: data.notation,
-                  promotion: data.promotion
-                }, newBoardState);
+                  promotion: data.promotion,
+                  boardState: newBoardState
+                });
+                
+                // Create the new history object
+                const newHistory = {
+                  ...moveHistory,
+                  moves: updatedMoves,
+                  currentMoveIndex: updatedMoves.length - 1
+                };
                 
                 // Update state
                 setMoveHistory(newHistory);
@@ -454,17 +600,49 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
       // The 'piece' for generateNotation should be the pawn that moved.
       const notation = generateNotation(from, to, piece, isCapture, promotionPiece, gameStatus.isCheck, gameStatus.isCheckmate);
       
-      const newHistory = addMove(
-        moveHistory,
-        {
-          from,
-          to,
-          piece: { type: promotionPiece, color: piece.color },
-          notation,
-          promotion: promotionPiece,
-        },
-        newBoardState,
-      );
+      // 🔄 FIX: When a player promotes a pawn after rewinding, we need to:
+      // 1. Keep all moves up to the current pointer
+      // 2. Trim all future moves
+      // 3. Append the new move
+      
+      // First, determine if we're in a rewound state
+      const isRewound = moveHistory.currentMoveIndex < moveHistory.moves.length - 1;
+      
+      // Log the move history state for debugging
+      console.log('📊 Promotion Move History Debug:', {
+        currentPointerIndex: moveHistory.currentMoveIndex,
+        originalMoveListLength: moveHistory.moves.length,
+        isRewound,
+        action: 'Promoting pawn after' + (isRewound ? ' rewinding' : ' latest move')
+      });
+      
+      // Create a properly trimmed move history
+      const updatedMoves = isRewound
+        ? moveHistory.moves.slice(0, moveHistory.currentMoveIndex + 1)
+        : [...moveHistory.moves];
+      
+      // Add the new move with its board state
+      updatedMoves.push({
+        from,
+        to,
+        piece: { type: promotionPiece, color: piece.color },
+        notation,
+        promotion: promotionPiece,
+        boardState: newBoardState
+      });
+      
+      // Create the new history object
+      const newHistory = {
+        ...moveHistory,
+        moves: updatedMoves,
+        currentMoveIndex: updatedMoves.length - 1
+      };
+      
+      // Log the final move list for debugging
+      console.log('📊 New Promotion Move List:', {
+        length: updatedMoves.length,
+        currentIndex: newHistory.currentMoveIndex
+      });
 
       setMoveHistory(newHistory);
       setBoardState(newBoardState);
@@ -596,14 +774,51 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
             // Update board state based on chess.js
             const newBoardState = getCurrentBoardState();
             
-            // Add move to history
-              const notation = generateNotation(selectedSquare, position, movingPiece, isCapture);
-            const newHistory = addMove(moveHistory, {
+            // 🔄 FIX: When a player makes a move after rewinding, we need to:
+            // 1. Keep all moves up to the current pointer
+            // 2. Trim all future moves
+            // 3. Append the new move
+            
+            // First, determine if we're in a rewound state
+            const isRewound = moveHistory.currentMoveIndex < moveHistory.moves.length - 1;
+            
+            // Generate notation for the move
+            const notation = generateNotation(selectedSquare, position, movingPiece, isCapture);
+            
+            // Log the move history state for debugging
+            console.log('📊 Player Move History Debug:', {
+              currentPointerIndex: moveHistory.currentMoveIndex,
+              originalMoveListLength: moveHistory.moves.length,
+              isRewound,
+              action: 'Making new move after' + (isRewound ? ' rewinding' : ' latest move')
+            });
+            
+            // Create a properly trimmed move history
+            const updatedMoves = isRewound
+              ? moveHistory.moves.slice(0, moveHistory.currentMoveIndex + 1)
+              : [...moveHistory.moves];
+            
+            // Add the new move with its board state
+            updatedMoves.push({
               from: selectedSquare,
               to: position,
               piece: movingPiece,
-              notation
-            }, newBoardState);
+              notation,
+              boardState: newBoardState
+            });
+            
+            // Create the new history object
+            const newHistory = {
+              ...moveHistory,
+              moves: updatedMoves,
+              currentMoveIndex: updatedMoves.length - 1
+            };
+            
+            // Log the final move list for debugging
+            console.log('📊 New Player Move List:', {
+              length: updatedMoves.length,
+              currentIndex: newHistory.currentMoveIndex
+            });
             
             // Update state
             setMoveHistory(newHistory);
