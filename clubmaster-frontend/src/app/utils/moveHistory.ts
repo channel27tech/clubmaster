@@ -67,16 +67,21 @@ export const addMove = (
   move: Omit<ChessMove, 'boardState'>,
   newBoardState: BoardState
 ): MoveHistoryState => {
-  // If we're not at the latest move, truncate the future moves
-  const updatedMoves = history.currentMoveIndex < history.moves.length - 1
-    ? history.moves.slice(0, history.currentMoveIndex + 1)
-    : [...history.moves];
+  // Preserve the full move history instead of truncating
+  const updatedMoves = [...history.moves];
   
-  // Add the new move with board state
-  updatedMoves.push({
+  // Create the new move
+  const newMove = {
     ...move,
     boardState: newBoardState,
-  });
+  };
+  
+  // Check if this exact move already exists at the end of our history to avoid duplicates
+  const lastMove = updatedMoves.length > 0 ? updatedMoves[updatedMoves.length - 1] : null;
+  if (!lastMove || lastMove.notation !== move.notation) {
+    // Add the new move with its board state
+    updatedMoves.push(newMove);
+  }
   
   return {
     ...history,
