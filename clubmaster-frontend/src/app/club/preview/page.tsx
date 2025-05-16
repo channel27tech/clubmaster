@@ -1,12 +1,23 @@
 'use client';
 import React, { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import BottomNavigation from '../../components/BottomNavigation';
-import { ShareLinkModal } from '../share-link/page';
+import { useClub } from '../../context/ClubContext';
 
-// Sample players data
-const players = [
+// Define admin players with specific icons
+const adminPlayers = [
+  { rank: 1, name: 'Salih', avatar: '/images/salih icon.svg', icon: '/images/crown.svg', rating: 2100 },
+  { rank: 2, name: 'Abhinadh', avatar: '/images/abhi icon.svg', icon: null, rating: 1800 },
+  { rank: 3, name: 'Umershan', avatar: '/images/umer icon.svg', icon: null, rating: 1700 },
+  { rank: 4, name: 'Asif', avatar: '/images/asif icon.svg', icon: '/images/watch icon.svg', rating: 1500 },
+  { rank: 5, name: 'Junaidh', avatar: '/images/junaidh icon.svg', icon: '/images/watch icon.svg', rating: 2000 },
+  { rank: 6, name: 'Basith', avatar: '/images/basith icon.svg', icon: '/images/playing icon.svg', rating: 1500 },
+  { rank: 7, name: 'Akhil', avatar: '/images/dp 1.svg', icon: null, rating: 1400 }
+];
+
+// Sample regular players data
+const regularPlayers = [
   { rank: 1, name: 'Salih', avatar: '/images/dp 1.svg', icon: '/images/crown.svg', rating: 2100 },
   { rank: 2, name: 'Abhinadh', avatar: '/images/dp 2.svg', icon: null, rating: 1800 },
   { rank: 3, name: 'Umershan', avatar: '/images/dp 3.svg', icon: null, rating: 1700 },
@@ -18,10 +29,17 @@ const players = [
 
 export default function ClubDetailPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const { userType } = useClub();
   const [activeTab, setActiveTab] = useState('players');
   const [showMenu, setShowMenu] = useState(false);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
-  const [showShareModal, setShowShareModal] = useState(false);
+
+  // Check if admin mode is active
+  const isAdmin = userType === 'admin' || searchParams.get('admin') === '1';
+
+  // Select players based on admin status
+  const players = isAdmin ? adminPlayers : regularPlayers;
 
   // Add useEffect to control body scroll
   useEffect(() => {
@@ -40,10 +58,10 @@ export default function ClubDetailPage() {
     setShowMenu(false);
     switch (action) {
       case 'invite':
-        router.push('/club/friends');
+        // Handle invite action
         break;
       case 'share':
-        setShowShareModal(true);
+        // Handle share action
         break;
       case 'leave':
         setShowLeaveConfirm(true);
@@ -159,7 +177,7 @@ export default function ClubDetailPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-[#505454] mx-4 mb-2">
+      <div className="flex mx-4 mb-2">
         <button 
           className={`flex-1 text-center py-1 text-sm ${activeTab === 'players' ? 'text-[#FAF3DD] border-b-2 border-[#E9CB6B] font-medium' : 'text-[#D9D9D9]'}`}
           onClick={() => setActiveTab('players')}
@@ -188,8 +206,9 @@ export default function ClubDetailPage() {
         {/* Player List - only this section scrollable without visible scrollbar */}
         {activeTab === 'players' && (
           <div 
-            className="mx-4 mb-16 overflow-y-auto h-[calc(100vh-350px)]"
+            className="mx-4 mb-16 overflow-y-auto"
             style={{
+              height: 'calc(100vh - 430px)', // Adjusted height to account for tournament button
               msOverflowStyle: 'none',  /* IE and Edge */
               scrollbarWidth: 'none',   /* Firefox */
               WebkitOverflowScrolling: 'touch', /* Enable smooth scrolling on iOS */
@@ -200,7 +219,7 @@ export default function ClubDetailPage() {
                 display: none;  /* Chrome, Safari and Opera */
               }
             `}</style>
-            <div className="pb-10">
+            <div className="pb-10"> {/* Reduced bottom padding */}
               {players.map((player, index) => (
                 <div 
                   key={player.rank} 
@@ -261,31 +280,32 @@ export default function ClubDetailPage() {
 
       {/* Overlay to close menu when clicking outside */}
       {showMenu && (
-        <div 
-          className="fixed inset-0 z-40" 
-          onClick={() => setShowMenu(false)}
-        ></div>
-      )}
-
-      {/* Bottom Sheet Menu */}
-      {showMenu && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[388px] h-[179px] bg-[#1F2323] rounded-[10px] z-50 overflow-hidden">
-          <div className="flex flex-col h-full">
+        <div className="fixed left-0 right-0 bottom-0 z-50 px-4 pb-0">
+          <div className="mx-auto w-[370px] h-[240px] mb-8 bg-[#1A1E1D] rounded-[10px] pt-2 pb-2 flex flex-col shadow-lg">
             <button
+              className="w-full text-center px-6 py-4 text-[#D9D9D9] text-base font-medium focus:outline-none"
               onClick={() => handleMenuClick('invite')}
-              className="w-full text-center py-4 text-[#D9D9D9] text-base border-b border-[#3A393C]"
             >
               Invite
             </button>
+            <div className="h-px bg-[#3A393C] mx-6 opacity-70" />
             <button
+              className="w-full text-center px-6 py-4 text-[#D9D9D9] text-base font-medium focus:outline-none"
               onClick={() => handleMenuClick('share')}
-              className="w-full text-center py-4 text-[#D9D9D9] text-base border-b border-[#3A393C]"
             >
               Share Link
             </button>
+            <div className="h-px bg-[#3A393C] mx-6 opacity-70" />
             <button
+              className="w-full text-center px-6 py-4 text-[#D9D9D9] text-base font-medium focus:outline-none"
+              onClick={() => handleMenuClick('edit')}
+            >
+              Edit Club
+            </button>
+            <div className="h-px bg-[#3A393C] mx-6 opacity-70" />
+            <button
+              className="w-full text-center px-6 py-4 text-[#D9D9D9] text-base font-medium focus:outline-none"
               onClick={() => handleMenuClick('leave')}
-              className="w-full text-center py-4 text-[#D9D9D9] text-base"
             >
               Leave Club
             </button>
@@ -293,42 +313,31 @@ export default function ClubDetailPage() {
         </div>
       )}
 
-      {/* Leave Confirmation Dialog */}
-      {showLeaveConfirm && (
-        <>
-          <div 
-            className="fixed inset-0 bg-black/50 z-50"
-            onClick={() => setShowLeaveConfirm(false)}
-          />
-          <div className="fixed top-[350px] left-1/2 -translate-x-1/2 w-[331px] h-[123px] bg-[#333939] rounded-[10px] p-4 z-50">
-            <p className="text-center text-[#D9D9D9] text-base font-semibold" style={{ fontFamily: 'Poppins' }}>Do You want to Leave ?</p>
-            <div className="flex gap-4 mt-4">
-              <button
-                onClick={handleLeaveConfirm}
-                className="flex-1 py-2 bg-[#4A7C59] text-[#D9D9D9] rounded-[10px]"
-              >
-                Yes
-              </button>
-              <button
-                onClick={() => setShowLeaveConfirm(false)}
-                className="flex-1 py-2 bg-transparent text-[#D9D9D9] rounded-[10px] border border-[#4A7C59]"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* Share Link Modal */}
-      {showShareModal && (
-        <ShareLinkModal isOpen={showShareModal} onClose={() => setShowShareModal(false)} />
-      )}
+      {/* Join Button or Create Tournament Button - Fixed position above footer */}
+      <div className="fixed bottom-16 left-1/2 -translate-x-1/2 w-full max-w-[400px] px-4 py-3 z-20">
+        {isAdmin ? (
+          <button 
+            onClick={() => router.push('/club/tournament/create')} 
+            className="w-full py-3 rounded-[10px] bg-[#4A7C59] text-[#FAF3DD] font-medium border-2 border-[#E9CB6B]"
+          >
+            Create Tournament
+          </button>
+        ) : (
+          <button 
+            onClick={() => router.push('/club/detail')} 
+            className="w-full py-3 rounded-lg bg-[#4A7C59] text-[#FAF3DD] font-medium border border-[#E9CB6B]"
+          >
+            Join
+          </button>
+        )}
+      </div>
 
       {/* Bottom Navigation */}
-      <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[400px] z-10">
-        <BottomNavigation />
-      </div>
+      {!showMenu && (
+        <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[400px] z-10">
+          <BottomNavigation />
+        </div>
+      )}
     </div>
   );
 } 
