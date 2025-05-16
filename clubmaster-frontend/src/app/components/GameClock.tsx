@@ -124,29 +124,20 @@ const GameClock: React.FC<GameClockProps> = ({
   const isTimeRunningLow = remainingTime < 60;
 
   // Apply different styling based on theme (light/dark) and time status
-  const textColor = isDarkTheme ? '#D9D9D9' : '#1F2323';
-  const backgroundColor = isDarkTheme ? '#333939' : '#C8D5B9';
-  
-  // Add urgency indicator styles when time is low
-  const urgencyStyles = isTimeRunningLow ? {} : {};
+  const backgroundColor = !isDarkTheme ? '#C8D5B9' : '#333939';
+  const textColor = !isDarkTheme ? '#1F2323' : '#D9D9D9';
 
   return (
     <div 
-      className="font-mono flex items-center justify-center"
+      className="font-roboto font-[500] text-[16px] tracking-[.15em] flex items-center justify-center rounded-[4px]"
       style={{
         width: '81px',
         height: '36px',
         backgroundColor,
         color: isTimeRunningLow && isActive ? '#FF3333' : textColor,
-        fontSize: '16px',
-        fontWeight: isTimeRunningLow ? 'bold' : 'normal',
-        borderRadius: '4px',
-        ...urgencyStyles
       }}
     >
       {formatTime(remainingTime)}
-      
-      {/* Pulse animation removed since we're making timers static */}
     </div>
   );
 };

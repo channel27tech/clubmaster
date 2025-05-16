@@ -217,6 +217,7 @@ export class GameGateway
         gameMode: payload.gameMode || 'Blitz',
         timeControl: payload.timeControl || '5+0',
         rated: payload.rated !== undefined ? payload.rated : true,
+        preferredSide: payload.preferredSide || 'random', // Added preferredSide to pass player color preference
       });
       
       return {
@@ -336,6 +337,42 @@ export class GameGateway
           if (gameResult) {
             // Game has ended, the gameEnd event has already been emitted
             // from within the gameManagerService
+            
+            // For checkmate, we want to ensure a proper game_end event with clear winner/loser
+            if (gameResult.reason === 'checkmate') {
+              this.logger.log(`Checkmate detected in game ${payload.gameId}. Emitting game_end event.`);
+              
+              // The current chess.js turn indicates the player who is in checkmate (loser)
+              // The opponent (not in turn) is the winner
+              const winnerSocketId = game.whiteTurn ? game.blackPlayer.socketId : game.whitePlayer.socketId;
+              const loserSocketId = game.whiteTurn ? game.whitePlayer.socketId : game.blackPlayer.socketId;
+              const winnerColor = game.whiteTurn ? 'black' : 'white'; // the one who just moved
+              const loserColor = game.whiteTurn ? 'white' : 'black'; // the one who got checkmated
+              
+              // Emit game_end event to all clients in the game room
+              this.server.to(payload.gameId).emit('game_end', {
+                gameId: payload.gameId,
+                reason: 'checkmate',
+                result: game.whiteTurn ? 'black_wins' : 'white_wins',
+                winnerSocketId,
+                loserSocketId,
+                winnerColor,
+                loserColor,
+                finalFEN: game.chessInstance.fen(),
+                // Include player information for result screen
+                whitePlayer: {
+                  socketId: game.whitePlayer.socketId,
+                  username: game.whitePlayer.username,
+                  rating: game.whitePlayer.rating,
+                },
+                blackPlayer: {
+                  socketId: game.blackPlayer.socketId,
+                  username: game.blackPlayer.username,
+                  rating: game.blackPlayer.rating,
+                },
+              });
+            }
+            
             return {
               event: 'moveMade',
               data: {
@@ -876,19 +913,38 @@ export class GameGateway
         }
         const moveResult = game.chessInstance.move(moveOptions);
         
-        if (moveResult) {
-          // Update PGN
-          game.pgn = game.chessInstance.pgn();
+        if (!moveResult) {
+          this.logger.error(`Invalid move attempted: ${payload.from} -> ${payload.to}`);
+          return {
+            event: 'moveMadeResponse',
+            data: {
+              success: false,
+              message: 'Invalid move',
+            },
+          };
         }
+        
+        // Update PGN
+        game.pgn = game.chessInstance.pgn();
+        
+        // Update turn
+        game.whiteTurn = !game.whiteTurn;
       } catch (chessError) {
         this.logger.error(`Chess engine error: ${chessError.message}`);
+        return {
+          event: 'moveMadeResponse',
+          data: {
+            success: false,
+            message: 'Chess engine error',
+            error: chessError.message
+          },
+        };
       }
       
-      // Determine if the move is a capture by checking notation
-      const isCapture = payload.notation.includes('x');
-      
-      // Determine if the move is a check by checking notation
-      const isCheck = payload.notation.includes('+') || payload.notation.includes('#');
+      // Safely check notation for properties
+      const isCapture = payload.notation && typeof payload.notation === 'string' && payload.notation.includes('x');
+      const isCheck = payload.notation && typeof payload.notation === 'string' && 
+        (payload.notation.includes('+') || payload.notation.includes('#'));
       
       // Broadcast move to all clients in the game room
       this.server.to(payload.gameId).emit('move_made', {
@@ -897,6 +953,43 @@ export class GameGateway
         isCheck,
         fen: game.chessInstance.fen(),
       });
+      
+      // Check for game end conditions like checkmate
+      if (game.chessInstance.isCheckmate()) {
+        this.logger.log(`Checkmate detected in game ${payload.gameId}`);
+        const winnerColor = game.whiteTurn ? 'black' : 'white'; // The one who just moved
+        const loserColor = game.whiteTurn ? 'white' : 'black'; // The one who got checkmated
+        
+        // Emit game_end event with winner and loser information
+        this.server.to(payload.gameId).emit('game_end', {
+          result: 'checkmate',
+          reason: 'checkmate',
+          winnerColor: winnerColor,
+          loserColor: loserColor,
+          finalFEN: game.chessInstance.fen()
+        });
+        
+        // Mark game as ended
+        game.ended = true;
+        game.result = winnerColor === 'white' ? GameResult.WHITE_WINS : GameResult.BLACK_WINS;
+        game.endReason = GameEndReason.CHECKMATE;
+        game.endTime = new Date();
+      } else if (game.chessInstance.isDraw() || game.chessInstance.isStalemate() || game.chessInstance.isThreefoldRepetition() || game.chessInstance.isInsufficientMaterial()) {
+        this.logger.log(`Draw detected in game ${payload.gameId}`);
+        
+        // Emit game_end event for draw
+        this.server.to(payload.gameId).emit('game_end', {
+          result: 'draw',
+          reason: 'draw',
+          finalFEN: game.chessInstance.fen()
+        });
+        
+        // Mark game as ended
+        game.ended = true;
+        game.result = GameResult.DRAW;
+        game.endReason = GameEndReason.DRAW_AGREEMENT;
+        game.endTime = new Date();
+      }
       
       return {
         event: 'moveMadeResponse',

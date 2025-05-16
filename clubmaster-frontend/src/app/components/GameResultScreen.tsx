@@ -47,6 +47,12 @@ const GameResultScreen: React.FC<GameResultScreenProps> = ({
       return 'PLAYER RESIGNED';
     }
 
+    // Add specific handling for checkmate
+    if (reason === 'checkmate') {
+      if (result === 'win') return 'YOU WON BY CHECKMATE';
+      if (result === 'loss') return 'YOU LOST BY CHECKMATE';
+    }
+
     if (result === 'win') return 'YOU WON';
     if (result === 'loss') return 'YOU LOST';
     if (reason === 'abort') return 'NO RESULT';

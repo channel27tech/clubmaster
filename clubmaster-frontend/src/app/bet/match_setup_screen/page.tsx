@@ -3,9 +3,6 @@ import React, { useState, useMemo, useRef, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { GiPistolGun } from 'react-icons/gi';
-import { FaBolt } from 'react-icons/fa';
-import { BsStopwatch } from 'react-icons/bs';
 import BetMatchNotification from "../../components/BetMatchNotification";
 
 // Color codes
@@ -14,34 +11,12 @@ const ACTIVE_COLOR = "#8FC0A9";
 const INACTIVE_COLOR = "#E9CB6B";
 const BG_COLOR = "#363B3B";
 const CARD_COLOR = "#4C5454";
-const SEARCH_BG = "#404442";
-const BUTTON_ENABLED = "#4B8F6E";
-const BUTTON_BORDER = "#E9CB6B";
 const BUTTON_DISABLED = "#2B3A31";
 const BUTTON_TEXT_DISABLED = "#7A8B7A";
 const BUTTON_TEXT_ENABLED = "#FAF3DD";
 const LABEL_COLOR = "#FAF3DD";
-const INFO_BG = "#8FC0A9";
-const SELECTED_BG = "#2B3131";
-const SELECTED_BORDER = "#8FC0A9";
-const UNSELECTED_BG = CARD_COLOR;
-const UNSELECTED_BORDER = "#444846";
-const TIMER_SELECTED = "#3B6F4B";
-const TIMER_UNSELECTED = "#444846";
-const TIMER_LABEL_SELECTED = "#E9CB6B";
-const TIMER_LABEL_UNSELECTED = "#B0B0B0";
 
-const timerTypes = [
-  { label: "Bullet", icon: (
-    <GiPistolGun size={28} style={{ color: '#B08D2F', transform: 'rotate(-30deg)', verticalAlign: 'middle' }} />
-  ) },
-  { label: "Blitz", icon: (
-    <FaBolt size={28} style={{ color: '#FFD600', verticalAlign: 'middle' }} />
-  ) },
-  { label: "Rapid", icon: (
-    <BsStopwatch size={28} style={{ color: '#4A7C59', verticalAlign: 'middle' }} />
-  ) },
-];
+
 const timerOptions = ["3 min", "5 min", "10 min"];
 
 const playAsOptions = [
@@ -458,50 +433,104 @@ export default function MatchSetupScreen() {
       {/* Main Card */}
       <div className="w-full flex flex-col items-center flex-1" style={{ minHeight: 'calc(100vh - 60px)' }}>
         <div className="w-full max-w-[400px] px-3 sm:px-0 flex flex-col gap-5 mt-4 mb-0">
-          {/* Timer Type Row */}
-          <div className="flex justify-between items-center mt-5 w-full" style={{marginBottom: 8}}>
-            {timerTypes.map((type, idx) => (
-              <button
-                key={type.label}
-                onClick={() => setSelectedTimerType(idx)}
-                className="flex flex-row items-center justify-center bg-transparent border-none focus:outline-none"
-                style={{ cursor: "pointer", flex: 1 }}
+          {/* Timer Type and Time Selection - Redesigned */}
+          <div className="grid grid-cols-3 gap-x-4 ">
+            {/* Column 1: Bullet */}
+            <div className="flex flex-col items-center gap-3">
+              <div
+                className={`flex items-center gap-1 cursor-pointer ${selectedTimerType === 0 ? 'text-[#FAF3DD]' : 'text-gray-400'} hover:text-[#FAF3DD] transition-colors`}
+                onClick={() => { setSelectedTimerType(0); setSelectedTimer(0); }}
               >
-                <span style={{ marginBottom: 1 , marginRight: 6}}>{type.icon}</span>
-                <span style={{
-                  color: selectedTimerType === idx
-                    ? (idx === 0 ? '#4A7C59' : idx === 1 ? '#4A7C59' : '#4A7C59')
-                    : '#FAF3DD',
-                  fontWeight: "semibold",
-                  fontSize: 16,
-                  fontFamily:"poppins",
-                  marginTop: 1,
-                  letterSpacing: 0.5,
-                }}>{type.label}</span>
-              </button>
-            ))}
-          </div>
-          {/* Timer Buttons */}
-          <div className="flex justify-between gap-3 w-full">
-            {timerOptions.map((label, idx) => (
+                <Image
+                  src="/icons/time-modes/bullet.svg"
+                  alt="Bullet"
+                  width={16}
+                  height={16}
+                  className="w-[16px] h-[16px]"
+                />
+                <span className="font-semibold text-[16px] font-poppins tracking-[0.25%]">Bullet</span>
+              </div>
               <button
-                key={label}
-                onClick={() => { setSelectedTimerType(idx); setSelectedTimer(idx); }}
-                className="flex-1 py-2 rounded-lg font-semibold"
+                className="flex-1 py-2 rounded-[10px] font-semibold"
                 style={{
-                  background: selectedTimer === idx ? TIMER_ACTIVE : TIMER_INACTIVE,
+                  background: selectedTimer === 0 ? TIMER_ACTIVE : TIMER_INACTIVE,
                   color: '#FAF3DD',
                   border: 'none',
+                  height: "49px",
+                  width: "110px",
                   fontSize: 18,
                   transition: "all 0.2s",
                 }}
+                onClick={() => { setSelectedTimerType(0); setSelectedTimer(0); }}
               >
-                {label}
+                3 min
               </button>
-            ))}
+            </div>
+            {/* Column 2: Blitz */}
+            <div className="flex flex-col items-center gap-3">
+              <div
+                className={`flex items-center gap-1 cursor-pointer ${selectedTimerType === 1 ? 'text-[#FAF3DD]' : 'text-gray-400'} hover:text-[#FAF3DD] transition-colors`}
+                onClick={() => { setSelectedTimerType(1); setSelectedTimer(1); }}
+              >
+                <Image
+                  src="/icons/time-modes/blitz.svg"
+                  alt="Blitz"
+                  width={16}
+                  height={16}
+                  className="w-[16px] h-[16px]"
+                />
+                <span className="font-semibold text-[16px] font-poppins tracking-[0.25%]">Blitz</span>
+              </div>
+              <button
+                className="flex-1 py-2 rounded-[10px] font-semibold"
+                style={{
+                  background: selectedTimer === 1 ? TIMER_ACTIVE : TIMER_INACTIVE,
+                  color: '#FAF3DD',
+                  border: 'none',
+                  height: "49px",
+                  width: "110px",
+                  fontSize: 18,
+                  transition: "all 0.2s",
+                }}
+                onClick={() => { setSelectedTimerType(1); setSelectedTimer(1); }}
+              >
+                5 min
+              </button>
+            </div>
+            {/* Column 3: Rapid */}
+            <div className="flex flex-col items-center gap-3">
+              <div
+                className={`flex items-center gap-1 cursor-pointer ${selectedTimerType === 2 ? 'text-[#FAF3DD]' : 'text-gray-400'} hover:text-[#FAF3DD] transition-colors`}
+                onClick={() => { setSelectedTimerType(2); setSelectedTimer(2); }}
+              >
+                <Image
+                  src="/icons/time-modes/rapid.svg"
+                  alt="Rapid"
+                  width={16}
+                  height={16}
+                  className="w-[16px] h-[16px]"
+                />
+                <span className="font-semibold text-[16px] font-poppins tracking-[0.25%]">Rapid</span>
+              </div>
+              <button
+                className="flex-1 py-2 rounded-[10px] font-semibold"
+                style={{
+                  background: selectedTimer === 2 ? TIMER_ACTIVE : TIMER_INACTIVE,
+                  color: '#FAF3DD',
+                  border: 'none',
+                  height: "49px",
+                  width: "110px",
+                  fontSize: 18,
+                  transition: "all 0.2s",
+                }}
+                onClick={() => { setSelectedTimerType(2); setSelectedTimer(2); }}
+              >
+                10 min
+              </button>
+            </div>
           </div>
           {/* Select Opponent Card */}
-          <div className="rounded-xl  flex items-center px-3 py-3" style={{ background: CARD_COLOR }}>
+          <div className="rounded-[10px]  flex items-center px-3 py-3" style={{ background: CARD_COLOR }}>
             <Image
               src="/images/atm_profile_avatar-icon.png"
               alt="friend avatar"
@@ -515,8 +544,8 @@ export default function MatchSetupScreen() {
             </svg>
           </div>
           {/* I play as Card */}
-          <div className="rounded-xl mb-1 m flex items-center px-3 py-3" style={{ background: CARD_COLOR }}>
-            <span className="flex-1 text-[#B0B0B0]" style={{ fontSize: 15 }}>I play as</span>
+          <div className="rounded-[10px]  m flex items-center px-3 py-3" style={{ background: CARD_COLOR }}>
+            <span className="flex-1 text-[#B0B0B0]" style={{ fontSize: 16 }}>I play as</span>
             <div className="flex" style={{ gap: 12 }}>
               {playAsOptions.map((opt, idx) => (
                 <button
@@ -558,8 +587,8 @@ export default function MatchSetupScreen() {
                         display: "inline-flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        width: 24,
-                        height: 24,
+                        width:28,
+                        height: 28,
                         borderRadius: "50%",
                         background: "#4A7C59 ",
                         color: "#fff",
@@ -663,8 +692,8 @@ export default function MatchSetupScreen() {
                     className="ml-3"
                     onClick={() => setSelectedBetting(selectedBetting === idx ? null : idx)}
                     style={{
-                      width: 24,
-                      height: 24,
+                      width: 28,
+                      height: 28,
                       borderRadius: "50%",
                       borderWidth: 2,
                       borderStyle: 'solid',
