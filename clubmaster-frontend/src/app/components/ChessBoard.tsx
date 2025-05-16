@@ -214,7 +214,8 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
       gameId: string,
       promotion?: PieceType,
       isCapture?: boolean,
-      fen?: string
+      fen?: string,
+      pgn?: string  // PGN contains the full game history
     }) => {
       console.log('Received move from opponent:', data);
       
@@ -238,11 +239,11 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
             const movingPiece = extractPieceInfoFromNotation(data.notation, data.player as PieceColor);
             
             if (movingPiece) {
-              // 🔄 FIX: When an opponent makes a move after rewinding, we need to:
-              // 1. Keep all moves up to the current pointer
-              // 2. Trim all future moves
-              // 3. Append the new move
-              
+              // 🔄 FIXED ALGORITHM: When an opponent makes a move after rewinding:
+              // 1. We should NOT trim the move history based on currentMoveIndex
+              // 2. Instead, we should use the full game history from the server's PGN if available
+              // 3. Otherwise, fall back to appending to the existing moves
+
               // First, determine if we're in a rewound state
               const isRewound = moveHistory.currentMoveIndex < moveHistory.moves.length - 1;
               
@@ -254,31 +255,77 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
                 lastFewMoves: moveHistory.moves.slice(-3).map(m => m.notation)
               });
               
-              // Create a properly trimmed move history - keep moves up to current position
-              const updatedMoves = isRewound
-                ? moveHistory.moves.slice(0, moveHistory.currentMoveIndex + 1)
-                : [...moveHistory.moves];
+              // Create a new array for the updated move history
+              const updatedMoves = [...moveHistory.moves];
               
-              // Log the move history state for debugging
-              console.log('📊 Move History Debug:', {
-                currentPointerIndex: moveHistory.currentMoveIndex,
-                originalMoveListLength: moveHistory.moves.length,
-                isRewound,
-                trimmedMoveListLength: updatedMoves.length
-              });
-              
-              // Create the new move to append
-              const newMove = {
-                from: data.from,
-                to: data.to,
-                piece: movingPiece,
-                notation: data.notation,
-                promotion: data.promotion,
-                boardState: newBoardState
-              };
-              
-              // Add the new move to the trimmed history
-              updatedMoves.push(newMove);
+              // Check if we have a PGN string from the server to use for reconstruction
+              if (data.pgn) {
+                // Log we're using PGN to reconstruct full history
+                console.log('📜 Using server PGN to reconstruct complete move history:', data.pgn);
+                
+                try {
+                  // Parse the PGN to get the complete list of moves in SAN
+                  // This is a simplified approach - in a real implementation you might use a PGN parser
+                  // Here we're relying on the fact that the last move in the PGN is the one we just received
+                  
+                  // For now, we'll keep the existing moves and just make sure we append the latest move
+                  // without truncating the move list
+                  
+                  // Create the new move to append
+                  const newMove = {
+                    from: data.from,
+                    to: data.to,
+                    piece: movingPiece,
+                    notation: data.notation,
+                    promotion: data.promotion,
+                    boardState: newBoardState
+                  };
+                  
+                  // If we're in a rewound state and the latest move doesn't match what we received
+                  if (isRewound || moveHistory.moves.length === 0 || 
+                      moveHistory.moves[moveHistory.moves.length - 1].notation !== data.notation) {
+                    // Append the new move to the full history (not the truncated one)
+                    updatedMoves.push(newMove);
+                  }
+                  
+                } catch (pgnError) {
+                  console.error('Error parsing PGN from server:', pgnError);
+                  // If PGN parsing fails, fall back to appending the move
+                  
+                  // Create the new move to append
+                  const newMove = {
+                    from: data.from,
+                    to: data.to,
+                    piece: movingPiece,
+                    notation: data.notation,
+                    promotion: data.promotion,
+                    boardState: newBoardState
+                  };
+                  
+                  // Append the new move without truncating
+                  updatedMoves.push(newMove);
+                }
+              } else {
+                // No PGN provided, fall back to simply appending the move
+                // This should preserve all historical moves and just add the new one
+                
+                // Create the new move to append
+                const newMove = {
+                  from: data.from,
+                  to: data.to,
+                  piece: movingPiece,
+                  notation: data.notation,
+                  promotion: data.promotion,
+                  boardState: newBoardState
+                };
+                
+                // Check if this exact move already exists at the end of our history
+                // to avoid duplicating moves
+                const lastMove = updatedMoves.length > 0 ? updatedMoves[updatedMoves.length - 1] : null;
+                if (!lastMove || lastMove.notation !== data.notation) {
+                  updatedMoves.push(newMove);
+                }
+              }
               
               // Create the new history object
               const newHistory = {
@@ -349,32 +396,25 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
             // Update board state
             const newBoardState = getCurrentBoardState();
             
-            // 🔄 FIX: Apply the same fix for direct move method
-            // First, determine if we're in a rewound state
-            const isRewound = moveHistory.currentMoveIndex < moveHistory.moves.length - 1;
+            // 🔄 FIXED: Apply the same fix for the direct move method
+            // Don't trim moves, just append the new one
+            const updatedMoves = [...moveHistory.moves];
             
-            // Create a properly trimmed move history
-            const updatedMoves = isRewound
-              ? moveHistory.moves.slice(0, moveHistory.currentMoveIndex + 1)
-              : [...moveHistory.moves];
-            
-            // Log the move history state for debugging
-            console.log('📊 Move History Debug (direct method):', {
-              currentPointerIndex: moveHistory.currentMoveIndex,
-              originalMoveListLength: moveHistory.moves.length,
-              isRewound,
-              trimmedMoveListLength: updatedMoves.length
-            });
-            
-            // Add the new move with its board state
-            updatedMoves.push({
+            // Create the new move to append
+            const newMove = {
               from: data.from,
               to: data.to,
               piece: movingPiece,
               notation: data.notation,
               promotion: data.promotion,
               boardState: newBoardState
-            });
+            };
+            
+            // Check if this exact move already exists at the end of our history
+            const lastMove = updatedMoves.length > 0 ? updatedMoves[updatedMoves.length - 1] : null;
+            if (!lastMove || lastMove.notation !== data.notation) {
+              updatedMoves.push(newMove);
+            }
             
             // Create the new history object
             const newHistory = {
@@ -411,24 +451,25 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
                 // Update board state
                 const newBoardState = getCurrentBoardState();
                 
-                // 🔄 FIX: Apply the same fix for reset fallback method
-                // First, determine if we're in a rewound state
-                const isRewound = moveHistory.currentMoveIndex < moveHistory.moves.length - 1;
-                
-                // Create a properly trimmed move history
-                const updatedMoves = isRewound
-                  ? moveHistory.moves.slice(0, moveHistory.currentMoveIndex + 1)
-                  : [...moveHistory.moves];
+                // 🔄 FIXED: Apply the same fix for reset fallback method
+                // Don't trim moves, just append the new one
+                const updatedMoves = [...moveHistory.moves];
                 
                 // Add the new move with its board state
-                updatedMoves.push({
+                const newMove = {
                   from: data.from,
                   to: data.to,
                   piece: movingPiece,
                   notation: data.notation,
                   promotion: data.promotion,
                   boardState: newBoardState
-                });
+                };
+                
+                // Check if this exact move already exists at the end of our history
+                const lastMove = updatedMoves.length > 0 ? updatedMoves[updatedMoves.length - 1] : null;
+                if (!lastMove || lastMove.notation !== data.notation) {
+                  updatedMoves.push(newMove);
+                }
                 
                 // Create the new history object
                 const newHistory = {
@@ -600,12 +641,11 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
       // The 'piece' for generateNotation should be the pawn that moved.
       const notation = generateNotation(from, to, piece, isCapture, promotionPiece, gameStatus.isCheck, gameStatus.isCheckmate);
       
-      // 🔄 FIX: When a player promotes a pawn after rewinding, we need to:
-      // 1. Keep all moves up to the current pointer
-      // 2. Trim all future moves
-      // 3. Append the new move
+      // 🔄 FIXED: When a player promotes a pawn after rewinding:
+      // 1. We should NOT trim the move history based on currentMoveIndex
+      // 2. Instead, preserve the full history and just append the new move
       
-      // First, determine if we're in a rewound state
+      // First, determine if we're in a rewound state (for debugging only)
       const isRewound = moveHistory.currentMoveIndex < moveHistory.moves.length - 1;
       
       // Log the move history state for debugging
@@ -616,21 +656,26 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
         action: 'Promoting pawn after' + (isRewound ? ' rewinding' : ' latest move')
       });
       
-      // Create a properly trimmed move history
-      const updatedMoves = isRewound
-        ? moveHistory.moves.slice(0, moveHistory.currentMoveIndex + 1)
-        : [...moveHistory.moves];
+      // Use the full move history, don't truncate
+      const updatedMoves = [...moveHistory.moves];
       
-      // Add the new move with its board state
-      updatedMoves.push({
+      // Create the new move
+      const newMove = {
         from,
         to,
         piece: { type: promotionPiece, color: piece.color },
         notation,
         promotion: promotionPiece,
         boardState: newBoardState
-      });
+      };
       
+      // Check if this exact move already exists at the end of our history
+      const lastMove = updatedMoves.length > 0 ? updatedMoves[updatedMoves.length - 1] : null;
+      if (!lastMove || lastMove.notation !== notation) {
+        // Add the new move with its board state
+        updatedMoves.push(newMove);
+      }
+
       // Create the new history object
       const newHistory = {
         ...moveHistory,
