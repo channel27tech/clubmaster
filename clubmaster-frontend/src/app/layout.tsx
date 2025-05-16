@@ -1,7 +1,8 @@
-import type { Metadata } from "next";
 import { Geist, Geist_Mono, Poppins, Roboto } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
+import { ClubProvider } from './context/ClubContext';
+import { metadata } from './metadata';
 
 // Font setup
 const geistSans = Geist({
@@ -26,10 +27,7 @@ const roboto = Roboto({
   weight: ["300", "400", "500", "700"],
 });
 
-export const metadata: Metadata = {
-  title: "Clubmaster Chess",
-  description: "Play chess with players around the world in the Clubmaster app",
-};
+export { metadata };
 
 export default function RootLayout({
   children,
@@ -42,7 +40,11 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} ${poppins.variable} ${roboto.variable}`}
     >
       <body className="antialiased">
-        <Providers>{children}</Providers>
+        <Providers>
+          <ClubProvider>
+            {children}
+          </ClubProvider>
+        </Providers>
       </body>
     </html>
   );

@@ -67,7 +67,7 @@ const clubData = [
   }
 ];
 
-export default function ClubsView() {
+export default function MyClubsView() {
   const router = useRouter();
   const [showFilters, setShowFilters] = useState(false);
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
@@ -81,8 +81,6 @@ export default function ClubsView() {
   // Set active filter
   const handleFilterSelect = (filter: string) => {
     setActiveFilter(filter);
-    // Here you would add logic to actually filter the clubs
-    // For now, we'll just close the filter menu
     setShowFilters(false);
   };
 
@@ -93,21 +91,11 @@ export default function ClubsView() {
 
   // Filter clubs based on search query and active filter
   const filteredClubs = clubData.filter(club => {
-    // If no search query, return all clubs
     if (!searchQuery.trim()) return true;
-    
     const query = searchQuery.toLowerCase().trim();
-    
-    // Search by name
-    if (club.name.toLowerCase().includes(query)) return true;
-    
-    // Search by location
-    if (club.location.toLowerCase().includes(query)) return true;
-    
-    // Search by rank
-    if (club.rank.toLowerCase().includes(query)) return true;
-    
-    return false;
+    return club.name.toLowerCase().includes(query) ||
+           club.location.toLowerCase().includes(query) ||
+           club.rank.toLowerCase().includes(query);
   });
 
   return (
@@ -136,10 +124,10 @@ export default function ClubsView() {
           </h1>
         </div>
 
-        {/* Create Club Button - with updated styling */}
+        {/* Go to my club Button */}
         <div className="px-[21px] py-1 bg-[#333939]">
           <button 
-            onClick={() => router.push('/club/create')}
+            onClick={() => router.push('/club/detail')}
             className="w-full h-[57px] bg-[#4A7C59] text-[#FAF3DD] border-2 border-[#E9CB6B]"
             style={{ 
               borderRadius: '0.75rem',
@@ -148,11 +136,11 @@ export default function ClubsView() {
               fontSize: '18px'
             }}
           >
-            Create club
+            Go to my club
           </button>
         </div>
 
-        {/* Search Bar - with updated styling */}
+        {/* Search Bar */}
         <div className="px-[21px] pb-2 pt-1 flex gap-2 bg-[#333939]">
           <div 
             className="flex items-center bg-[#4C5454] px-3 py-2 flex-1 w-[329px] h-[43px]"
@@ -200,7 +188,7 @@ export default function ClubsView() {
           </button>
         </div>
 
-        {/* Filter Options - Only shown when filter button is clicked */}
+        {/* Filter Options */}
         {showFilters && (
           <div className="bg-[#1F2323] absolute right-[21px] mt-1 w-56 rounded-lg shadow-lg z-20 border border-[#505454] overflow-hidden">
             <div className="p-1">
@@ -233,7 +221,7 @@ export default function ClubsView() {
         )}
       </div>
 
-      {/* Scrollable Club List - adjusted top padding to match the new spacing */}
+      {/* Scrollable Club List */}
       <div className="flex-1 px-[21px] pb-16 pt-44 overflow-y-auto">
         {filteredClubs.length > 0 ? (
           filteredClubs.map((club, index) => (
@@ -241,10 +229,9 @@ export default function ClubsView() {
               key={club.id} 
               className="bg-[#4C5454] overflow-hidden p-3 flex items-center mb-3 mt-1 cursor-pointer" 
               style={{ borderRadius: '0.75rem' }}
-              onClick={() => router.push('/club/preview')}
+              onClick={() => router.push('/club/detail')}
             >
               <div className="w-[70px] h-[70px] rounded-full overflow-hidden bg-white flex-shrink-0 mr-4">
-                {/* Use the profile images in the specified order, rotating if needed */}
                 <Image 
                   src={profileImages[index % profileImages.length]}
                   alt={`${club.name} profile`}
@@ -304,7 +291,6 @@ export default function ClubsView() {
                 </div>
                 
                 <div className="flex mt-2 text-xs items-center">
-                  {/* Achievement rank icon and rank */}
                   <Image 
                     src="/images/rank icon.svg"
                     alt="Rank"
@@ -323,10 +309,8 @@ export default function ClubsView() {
                     {club.rank}
                   </span>
                   
-                  {/* Pointing finger instead of check mark */}
                   <span className="mx-3 text-amber-400">👉</span>
                   
-                  {/* Points with updated color */}
                   <span 
                     className="text-[#D9D9D9]"
                     style={{
@@ -362,7 +346,7 @@ export default function ClubsView() {
 
       {/* Fixed bottom navigation */}
       <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[400px] z-10">
-        <BottomNavigation />
+        <BottomNavigation onClubClick={() => router.push('/club/my-clubs')} />
       </div>
     </div>
   );
