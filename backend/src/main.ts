@@ -1,18 +1,43 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { Logger } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { IoAdapter } from '@nestjs/platform-socket.io';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
   const app = await NestFactory.create(AppModule);
   
+  // Enable validation
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      transform: true,
+      forbidNonWhitelisted: true,
+      transformOptions: {
+        enableImplicitConversion: true,
+      },
+    }),
+  );
+  
   // Enable CORS with expanded configuration
   app.enableCors({
-    origin: ['http://localhost:3000', 'http://127.0.0.1:3000'], // Allow frontend origins
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH', 'HEAD'], // Allow all necessary methods
+    origin: [
+      'http://localhost:3000',
+      'http://127.0.0.1:3000',
+      // Add any other frontend origins like production domains
+      // 'https://your-production-domain.com'
+    ],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH', 'HEAD'],
     credentials: true,
-    allowedHeaders: ['Content-Type', 'Accept', 'Authorization', 'Cache-Control', 'X-Requested-With', 'Range', 'Origin'],
+    allowedHeaders: [
+      'Content-Type',
+      'Accept',
+      'Authorization',
+      'Cache-Control',
+      'X-Requested-With',
+      'Range',
+      'Origin'
+    ],
     exposedHeaders: ['Content-Disposition', 'Content-Range', 'Accept-Ranges'],
     maxAge: 3600,
   });
