@@ -2,6 +2,8 @@
 import React, { useState, useMemo } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { ShareLinkModal } from '../share-link/page';
+import { useRouter } from 'next/navigation';
 
 // Color codes
 const TITLE_COLOR = "#FAF3DD";
@@ -45,23 +47,22 @@ function StatusDot({ active }: { active: boolean }) {
   );
 }
 
-function FriendListItem({ friend }: { friend: typeof friends[0] }) {
+function FriendListItem({ friend, onInvite }: { friend: typeof friends[0], onInvite: () => void }) {
   return (
     <div
       className="flex items-center gap-4 p-3 rounded-xl mb-3 relative"
       style={{ background: CARD_COLOR }}
     >
-      <div className="relative" style={{ width: 48, height: 48 }}>
+      <div className="relative flex items-center justify-center" style={{ width: 48, height: 48, background: '#D9D9D9', borderRadius: '50%' }}>
         <Image
-          src="/images/bg.png"
+          src="/images/frnds dp.svg"
           alt="profile"
-          width={48}
-          height={48}
-          className="rounded-full"
+          width={24}
+          height={28}
         />
         <StatusDot active={friend.active} />
       </div>
-      <div className="flex flex-col">
+      <div className="flex flex-col flex-1">
         <span className="text-[16px] front-roboto front-regular" style={{ color: TITLE_COLOR }}>{friend.name}</span>
         {friend.active ? (
           <span className="text-xs" style={{ color: ACTIVE_COLOR }}>Active now</span>
@@ -69,12 +70,19 @@ function FriendListItem({ friend }: { friend: typeof friends[0] }) {
           <span className="text-xs" style={{ color: INACTIVE_COLOR }}>{friend.lastActive}</span>
         )}
       </div>
+      <button
+        className="ml-auto px-4 py-2 rounded-md bg-[#4A7C59] text-[#FAF3DD] text-sm font-medium"
+        onClick={onInvite}
+      >
+        Invite
+      </button>
     </div>
   );
 }
 
 export default function BetFriendsListPage() {
   const [search, setSearch] = useState("");
+  const [showShareModal, setShowShareModal] = useState(false);
   const filtered = useMemo(
     () =>
       friends.filter((f) =>
@@ -82,17 +90,21 @@ export default function BetFriendsListPage() {
       ),
     [search]
   );
+  const router = useRouter();
  
   return (
     <div className="min-h-screen w-full" style={{ background: BG_COLOR }}>
       {/* Header */}
       <div className="sticky top-0 z-20" style={{ background: BG_COLOR }}>
         <div className="flex items-center ms-4 px-2 py-4 ">
-          <Link href="/" className="mr-2">
-            <svg width="28" height="28" fill="none" viewBox="0 0 24 24">
-              <path d="M15 19l-7-7 7-7" stroke="#D9D9D9" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+          <button 
+            onClick={() => router.back()} 
+            className="text-[#BFC0C0] mr-2"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-6 h-6">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
             </svg>
-          </Link>
+          </button>
           <h1 className="flex-1 text-center text-[26px] front-poppins front-semibold" style={{ color: TITLE_COLOR, letterSpacing: 1 }}>Friends</h1>
           <span className="w-8" /> {/* Spacer for symmetry */}
         </div>
@@ -115,17 +127,17 @@ export default function BetFriendsListPage() {
       </div>
       {/* Friends List */}
       <div className="px-4 pt-2 pb-8" style={{ maxWidth: 480, margin: "0 auto" }}>
-      <Link href="/bet/match_setup_screen" className="mr-2">
         {filtered.length === 0 ? (
           <div className="text-center text-[#B0B0B0] mt-8">No friends found.</div>
         ) : (
           filtered.map((friend, idx) => (
-            <FriendListItem friend={friend} key={friend.name + idx} />
+            <FriendListItem friend={friend} key={friend.name + idx} onInvite={() => setShowShareModal(true)} />
           ))
         )}
-        </Link>
       </div>
-      
+      {showShareModal && (
+        <ShareLinkModal isOpen={showShareModal} onClose={() => setShowShareModal(false)} />
+      )}
       <style jsx global>{`
         @media (max-width: 600px) {
           .min-h-screen { min-height: 100vh; }

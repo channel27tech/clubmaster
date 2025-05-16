@@ -1,11 +1,50 @@
 "use client";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import React, { useRef, useState } from "react";
+import React, { useRef, useState, useEffect } from "react";
+import { useAuth } from "../../../context/AuthContext";
+import { ConfirmationResult } from "firebase/auth";
 
 export default function LoginWithPhoneOtp() {
   const router = useRouter();
+  const { verifyOTP, error: authError } = useAuth();
   const [otp, setOtp] = useState(["", "", "", ""]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
+  const [phone, setPhone] = useState<string>("");
+
+  useEffect(() => {
+    // Get stored confirmation result and phone from previous step
+    if (typeof window !== 'undefined') {
+      const storedConfirmation = sessionStorage.getItem('confirmationResult');
+      const storedPhone = sessionStorage.getItem('phoneNumber');
+      
+      if (storedConfirmation && storedPhone) {
+        try {
+          // Note: This is just the reference - the actual Firebase object is maintained internally
+          setConfirmationResult(JSON.parse(storedConfirmation));
+          setPhone(storedPhone);
+        } catch (error) {
+          console.error("Failed to parse stored confirmation result:", error);
+          // Redirect back to phone input if we don't have valid data
+          router.push('/login/login_with_phone');
+        }
+      } else {
+        // If we don't have the confirmation result, go back
+        router.push('/login/login_with_phone');
+      }
+    }
+  }, [router]);
+
+  // Sync errors from auth context
+  useEffect(() => {
+    if (authError) {
+      setError(authError);
+      setLoading(false);
+    }
+  }, [authError]);
+
   const inputs: React.RefObject<HTMLInputElement | null>[] = [
     useRef<HTMLInputElement>(null),
     useRef<HTMLInputElement>(null),
@@ -13,7 +52,6 @@ export default function LoginWithPhoneOtp() {
     useRef<HTMLInputElement>(null),
   ];
   const isValid = otp.every((d) => d.length === 1);
-  const phone = "+911234567890"; // Replace with actual phone if needed
 
   const handleChange = (idx: number, val: string) => {
     if (!/^[0-9]?$/.test(val)) return;
@@ -29,6 +67,39 @@ export default function LoginWithPhoneOtp() {
     if (e.key === "Backspace" && !otp[idx] && idx > 0) {
       inputs[idx - 1].current?.focus();
     }
+  };
+
+  const handleSubmit = async () => {
+    if (!isValid || !confirmationResult) return;
+    
+    setLoading(true);
+    setError(null);
+    
+    try {
+      // Combine OTP digits
+      const otpCode = otp.join('');
+      
+      // Verify OTP
+      await verifyOTP(confirmationResult, otpCode);
+      
+      // Clear session storage
+      sessionStorage.removeItem('confirmationResult');
+      sessionStorage.removeItem('phoneNumber');
+      
+      // On successful login, navigate to home
+      router.push('/');
+    } catch (error) {
+      console.error("Failed to verify OTP:", error);
+      // Error will be displayed through the authError sync
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendCode = () => {
+    // Clear session storage and go back to phone input
+    sessionStorage.removeItem('confirmationResult');
+    router.push('/login/login_with_phone');
   };
 
   return (
@@ -50,6 +121,14 @@ export default function LoginWithPhoneOtp() {
           <span className="text-[#FAF3DD] text-[20px] font-semibold font-poppins text-center">Enter verification code</span>
           <span className="text-[#D9D9D9] text-[14px] font-roboto font-normal text-center mt-2">We sent a 4-digit code to {phone}</span>
         </div>
+        
+        {/* Error display */}
+        {error && (
+          <div className="w-full max-w-[366px] mb-4 bg-red-600 text-white px-4 py-2 rounded-md text-sm">
+            {error}
+          </div>
+        )}
+        
         {/* OTP Inputs */}
         <div className="flex gap-6 justify-center items-center mt-4 mb-4">
           {otp.map((digit, idx) => (
@@ -67,22 +146,28 @@ export default function LoginWithPhoneOtp() {
             />
           ))}
         </div>
-        <span className="text-[#D9D9D9] text-[12px] font-poppins font-medium text-center mt-20">Resend code by sms</span>
+        <button 
+          onClick={handleResendCode}
+          className="text-[#D9D9D9] text-[12px] font-poppins font-medium text-center mt-20 hover:underline cursor-pointer"
+        >
+          Resend code by sms
+        </button>
       </div>
       {/* Next Button Fixed Bottom */}
       <div className="w-full flex justify-center mb-8 px-[21px] fixed bottom-0 left-0 right-0 z-10" style={{ background: 'transparent' }}>
         <button
           className="w-[366px] max-w-full h-[57px] rounded-[8px] font-poppins font-semibold text-[18px] border-2"
           style={{
-            background: isValid ? '#4A7C59' : '#4C5454',
+            background: isValid && !loading ? '#4A7C59' : '#4C5454',
             color: '#FAF3DD',
             borderColor: '#E9CB6B',
-            opacity: isValid ? 1 : 0.6,
-            cursor: isValid ? 'pointer' : 'not-allowed',
+            opacity: isValid && !loading ? 1 : 0.6,
+            cursor: isValid && !loading ? 'pointer' : 'not-allowed',
           }}
-          disabled={!isValid}
+          disabled={!isValid || loading}
+          onClick={handleSubmit}
         >
-          Next
+          {loading ? "Verifying..." : "Next"}
         </button>
       </div>
     </div>

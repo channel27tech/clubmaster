@@ -12,6 +12,10 @@ export default function CreateClubPage() {
     description: '',
     ratingLimit: 100
   });
+  const [errors, setErrors] = useState({
+    name: false,
+    location: false
+  });
   const [showDropdown, setShowDropdown] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const linkRef = useRef<HTMLInputElement>(null);
@@ -19,6 +23,11 @@ export default function CreateClubPage() {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setClubData(prev => ({ ...prev, [name]: value }));
+    
+    // Clear error when user starts typing in a field
+    if (errors[name as keyof typeof errors]) {
+      setErrors(prev => ({ ...prev, [name]: false }));
+    }
   };
 
   const handleRatingChange = (value: number) => {
@@ -40,11 +49,28 @@ export default function CreateClubPage() {
     setShowDropdown(false);
   };
 
+  const validateForm = () => {
+    const newErrors = {
+      name: !clubData.name.trim(),
+      location: !clubData.location.trim()
+    };
+    
+    setErrors(newErrors);
+    return !Object.values(newErrors).some(error => error);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Validate the form
+    if (!validateForm()) {
+      // If validation fails, don't proceed
+      return;
+    }
+    
     // Here you would typically send the data to your backend
     console.log('Club data submitted:', clubData);
-    // Show success screen instead of navigating immediately
+    // Show success screen only if validation passes
     setShowSuccess(true);
   };
 
@@ -63,8 +89,8 @@ export default function CreateClubPage() {
   };
 
   const handleDone = () => {
-    // Navigate to club detail view instead of clubs view
-    router.push('/club/detail');
+    // Navigate to club created detail view
+    router.push('/club/created-detail');
   };
 
   return (
@@ -142,7 +168,9 @@ export default function CreateClubPage() {
             {/* Right Column - Name, Location, Type */}
             <div className="flex-1 flex mt-4.5 flex-col">
               <div className="mb-4">
-                <label htmlFor="clubName" className="block text-[#D9D9D9] mb-1 text-sm">Club name</label>
+                <label htmlFor="clubName" className="block text-[#D9D9D9] mb-1 text-sm">
+                  Club name <span className="text-red-500">*</span>
+                </label>
                 <input
                   id="clubName"
                   name="name"
@@ -150,12 +178,17 @@ export default function CreateClubPage() {
                   placeholder="Name"
                   value={clubData.name}
                   onChange={handleChange}
-                  className="w-full py-1 px-3 rounded bg-[#4C5454] text-[#D9D9D9] placeholder-[#D9D9D9] text-sm border-none outline-none"
+                  className={`w-full py-1 px-3 rounded ${errors.name ? 'bg-[#4C5454] border border-red-500' : 'bg-[#4C5454] border border-transparent'} text-[#D9D9D9] placeholder-[#D9D9D9] text-sm outline-none`}
                 />
+                {errors.name && (
+                  <p className="text-red-500 text-xs mt-1">Club name is required</p>
+                )}
               </div>
               
               <div className="mb-3">
-                <label htmlFor="location" className="block text-[#D9D9D9] mb-1 text-sm">Location</label>
+                <label htmlFor="location" className="block text-[#D9D9D9] mb-1 text-sm">
+                  Location <span className="text-red-500">*</span>
+                </label>
                 <input
                   id="location"
                   name="location"
@@ -163,8 +196,11 @@ export default function CreateClubPage() {
                   placeholder="India"
                   value={clubData.location}
                   onChange={handleChange}
-                  className="w-full py-1 px-3 rounded bg-[#4C5454] text-[#D9D9D9] placeholder-[#D9D9D9] text-sm border-none outline-none"
+                  className={`w-full py-1 px-3 rounded ${errors.location ? 'bg-[#4C5454] border border-red-500' : 'bg-[#4C5454] border border-transparent'} text-[#D9D9D9] placeholder-[#D9D9D9] text-sm outline-none`}
                 />
+                {errors.location && (
+                  <p className="text-red-500 text-xs mt-1">Location is required</p>
+                )}
               </div>
               
               <div className="mb-3 relative">
@@ -172,7 +208,7 @@ export default function CreateClubPage() {
                 <button 
                   type="button"
                   onClick={() => setShowDropdown(!showDropdown)}
-                  className="w-full py-1 px-3 rounded bg-[#4C5454] text-[#D9D9D9] text-sm text-left relative"
+                  className="w-full py-1 px-3 rounded bg-[#4C5454] text-[#D9D9D9] text-sm text-left relative border border-transparent"
                 >
                   {clubData.type}
                   <svg 

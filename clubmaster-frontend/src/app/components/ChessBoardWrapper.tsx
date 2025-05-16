@@ -952,16 +952,38 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   
   // Handle move history updates from the ChessBoard component
   const handleMoveHistoryChange = useCallback((history: MoveHistoryState) => {
+    // 🧠 IMPORTANT: This function is critical for maintaining a consistent move tracker display
+    // When a player rewinds moves (using Back button) and then a new move is made:
+    // 1. The ChessBoard component correctly maintains the move history state by trimming future moves 
+    //    and appending the new move (see fixes in ChessBoard.tsx)
+    // 2. We need to send ALL moves to the MoveTracker for display, not just the active ones
+    // 3. This ensures the move tracker shows the complete history even after rewinds & new moves
+    
     setMoveHistory(history);
     
     if (history && history.moves && history.moves.length > 0) {
-      const currentSanMoves = history.moves.map(move => move.notation);
-      // Ensure we are not causing an infinite loop if onSanMoveListChange itself causes a re-render
-      // that somehow feeds back into history. This check is a basic safeguard.
-      // A more robust solution might involve comparing previous and current sanMoveList.
+      // 🔄 FIX: When updating the move list for display, we need to:
+      // 1. Use ALL moves in the history, not just up to currentMoveIndex
+      // 2. Ensure we're sending the correct SAN notations to the MoveTracker
+
+      // Extract notations from ALL moves in history
+      // This ensures the move tracker always shows the complete game history
+      const allSanMoves = history.moves.map(move => move.notation);
+      
+      // Get the current index from history for debugging
+      const currentIndex = history.currentMoveIndex;
+      
+      // Log the state for debugging
+      console.log('📊 Move Tracker Update Debug:', {
+        totalMovesInHistory: history.moves.length,
+        currentMoveIndex: currentIndex,
+        movesBeingSentToTracker: allSanMoves.length
+      });
+      
+      // Update the sanMoveList state with ALL moves
       setSanMoveList(prevSanMoveList => {
-        if (JSON.stringify(prevSanMoveList) !== JSON.stringify(currentSanMoves)) {
-          return currentSanMoves;
+        if (JSON.stringify(prevSanMoveList) !== JSON.stringify(allSanMoves)) {
+          return allSanMoves;
         }
         return prevSanMoveList;
       });

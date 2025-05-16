@@ -10,10 +10,16 @@ import { SoundModule } from './game/sound/sound.module';
 import { ClubModule } from './club/club.module';
 import { ClubMemberModule } from './club-member/club-member.module';
 import { DataSource } from 'typeorm';
+import { DatabaseModule } from './database/database.module';
+import { UsersModule } from './users/users.module';
+import { FirebaseModule } from './firebase/firebase.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: '.env',
+    }),
     TypeOrmModule.forRootAsync({
       useFactory: async () => ({
         type: 'postgres',
@@ -33,6 +39,9 @@ import { DataSource } from 'typeorm';
         return dataSource;
       },
     }),
+    FirebaseModule,
+    DatabaseModule,
+    UsersModule,
     TimerModule,
     GameModule,
     WebsocketModule,

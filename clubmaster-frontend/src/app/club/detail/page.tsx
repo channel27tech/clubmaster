@@ -1,15 +1,64 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import BottomNavigation from '../../components/BottomNavigation';
+import { ShareLinkModal } from '../share-link/page';
+
+// Sample players data
+const players = [
+  { rank: 1, name: 'Salih', avatar: '/images/dp 1.svg', icon: '/images/crown.svg', rating: 2100 },
+  { rank: 2, name: 'Abhinadh', avatar: '/images/dp 2.svg', icon: null, rating: 1800 },
+  { rank: 3, name: 'Umershan', avatar: '/images/dp 3.svg', icon: null, rating: 1700 },
+  { rank: 4, name: 'Asif', avatar: '/images/dp 4.svg', icon: '/images/watch icon.svg', rating: 1500 },
+  { rank: 5, name: 'Junaidh', avatar: '/images/dp 5.svg', icon: '/images/watch icon.svg', rating: 2000 },
+  { rank: 6, name: 'Basith', avatar: '/images/dp 6.svg', icon: '/images/playing icon.svg', rating: 1500 },
+  { rank: 7, name: 'Akhil', avatar: '/images/dp 1.svg', icon: null, rating: 1400 }
+];
 
 export default function ClubDetailPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('players');
+  const [showMenu, setShowMenu] = useState(false);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
+
+  // Add useEffect to control body scroll
+  useEffect(() => {
+    if (showMenu || showLeaveConfirm) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'auto';
+    }
+    return () => {
+      document.body.style.overflow = 'auto';
+    };
+  }, [showMenu, showLeaveConfirm]);
+
+  // Function to handle menu item clicks
+  const handleMenuClick = (action: string) => {
+    setShowMenu(false);
+    switch (action) {
+      case 'invite':
+        router.push('/club/friends');
+        break;
+      case 'share':
+        setShowShareModal(true);
+        break;
+      case 'leave':
+        setShowLeaveConfirm(true);
+        break;
+    }
+  };
+
+  const handleLeaveConfirm = () => {
+    setShowLeaveConfirm(false);
+    // Handle leave club logic here
+    router.push('/club/clubs'); // Navigate back to clubs page after leaving
+  };
 
   return (
-    <div className="min-h-screen bg-[#333939] flex flex-col w-full max-w-[400px] mx-auto relative">
+    <div className={`min-h-screen bg-[#333939] flex flex-col w-full max-w-[400px] mx-auto relative ${showMenu || showLeaveConfirm ? 'overflow-hidden' : ''}`}>
       {/* Header */}
       <div className="bg-[#333939] p-4 flex items-center justify-between">
         <button 
@@ -29,7 +78,10 @@ export default function ClubDetailPage() {
             priority
           />
         </div>
-        <button className="text-[#BFC0C0]">
+        <button 
+          className="text-[#BFC0C0]"
+          onClick={() => setShowMenu(!showMenu)}
+        >
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z" />
           </svg>
@@ -122,7 +174,7 @@ export default function ClubDetailPage() {
         </button>
       </div>
 
-      {/* Table Header */}
+      {/* Table Header - Fixed position */}
       <div className="mx-4 my-1 mb-2">
         <div className="flex py-2 bg-[#4C5454] rounded-lg text-[#D9D9D9]">
           <div className="w-16 text-xs text-center">Rank</div>
@@ -131,50 +183,152 @@ export default function ClubDetailPage() {
         </div>
       </div>
 
-      {/* Player List */}
-      {activeTab === 'players' && (
-        <div className="flex-1 overflow-y-auto mt-1 mb-4">
-          <div className="flex items-center mx-4 py-1 border-b border-[#505454]">
-            <div className="w-16 text-[#D9D9D9] text-xs text-center">#1</div>
-            <div className="flex-1 flex items-center">
-              <div className="w-9 h-9 rounded-full bg-white overflow-hidden mr-3">
-                <Image 
-                  src="/images/dp 1.svg" 
-                  alt="Player Avatar"
-                  width={36}
-                  height={36}
-                />
-              </div>
-              <span className="text-[#D9D9D9] text-sm mr-2">Salih</span>
-              <Image 
-                src="/images/crown.svg"
-                alt="Crown Icon"
-                width={22}
-                height={17}
-              />
+      {/* Content area - explicitly non-scrollable container */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Player List - only this section scrollable without visible scrollbar */}
+        {activeTab === 'players' && (
+          <div 
+            className="mx-4 mb-16 overflow-y-auto h-[calc(100vh-350px)]"
+            style={{
+              msOverflowStyle: 'none',  /* IE and Edge */
+              scrollbarWidth: 'none',   /* Firefox */
+              WebkitOverflowScrolling: 'touch', /* Enable smooth scrolling on iOS */
+            }}
+          >
+            <style jsx>{`
+              div::-webkit-scrollbar {
+                display: none;  /* Chrome, Safari and Opera */
+              }
+            `}</style>
+            <div className="pb-10">
+              {players.map((player, index) => (
+                <div 
+                  key={player.rank} 
+                  className={`flex items-center py-2 ${index % 2 === 0 ? 'bg-[#333939]' : 'bg-[#3A4141]'}`}
+                >
+                  {/* Rank column */}
+                  <div className="w-16 text-[#D9D9D9] text-xs text-center">#{player.rank}</div>
+                  
+                  {/* Players column with fixed width for consistent layout */}
+                  <div className="flex-1 flex items-center">
+                    <div className="w-9 h-9 rounded-full bg-white overflow-hidden mr-3">
+                      <Image src={player.avatar} alt="Player Avatar" width={36} height={36} />
+                    </div>
+                    <span className="text-[#D9D9D9] text-sm">{player.name}</span>
+                  </div>
+                  
+                  {/* Icon and Rating columns */}
+                  <div className="flex items-center">
+                    {/* Icon with fixed width area */}
+                    <div className="w-30 flex justify-center">
+                      {player.icon && (
+                        <div className="relative group">
+                          <Image src={player.icon} alt="Player Icon" width={22} height={17} />
+                          {player.icon.includes('watch') && (
+                            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-1 px-2 py-1 bg-[#1F2323] text-[#D9D9D9] text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                              Watching a game
+                            </div>
+                          )}
+                          {player.icon.includes('playing') && (
+                            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-1 px-2 py-1 bg-[#1F2323] text-[#D9D9D9] text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                              Playing a game
+                            </div>
+                          )}
+                          {player.icon.includes('crown') && (
+                            <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-1 px-2 py-1 bg-[#1F2323] text-[#D9D9D9] text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
+                              Club master
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    {/* Rating column */}
+                    <div className="w-16 text-right text-[#D9D9D9] pr-4 text-sm">{player.rating}</div>
+                  </div>
+                </div>
+              ))}
             </div>
-            <div className="w-24 text-right text-[#D9D9D9] pr-4 text-sm">2100</div>
           </div>
-          {/* Additional players would be listed here */}
-        </div>
-      )}
+        )}
 
-      {/* Tournament Tab Content */}
-      {activeTab === 'tournaments' && (
-        <div className="flex-1 mx-4 flex items-center justify-center text-[#D9D9D9] mb-4">
-          <p>No tournaments available</p>
-        </div>
-      )}
-
-      {/* Create Tournament Button */}
-      <div className="fixed bottom-22 left-0 right-0 mx-auto max-w-[400px] flex justify-center px-4">
-        <button className="w-full py-3 rounded-lg bg-[#4A7C59] text-[#FAF3DD] font-medium border border-[#E9CB6B]">
-          Create Tournament
-        </button>
+        {/* Tournament Tab Content */}
+        {activeTab === 'tournaments' && (
+          <div className="mx-4 flex items-center justify-center text-[#D9D9D9] h-[200px]">
+            <p>No tournaments available</p>
+          </div>
+        )}
       </div>
 
+      {/* Overlay to close menu when clicking outside */}
+      {showMenu && (
+        <div 
+          className="fixed inset-0 z-40" 
+          onClick={() => setShowMenu(false)}
+        ></div>
+      )}
+
+      {/* Bottom Sheet Menu */}
+      {showMenu && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[388px] h-[179px] bg-[#1F2323] rounded-[10px] z-50 overflow-hidden">
+          <div className="flex flex-col h-full">
+            <button
+              onClick={() => handleMenuClick('invite')}
+              className="w-full text-center py-4 text-[#D9D9D9] text-base border-b border-[#3A393C]"
+            >
+              Invite
+            </button>
+            <button
+              onClick={() => handleMenuClick('share')}
+              className="w-full text-center py-4 text-[#D9D9D9] text-base border-b border-[#3A393C]"
+            >
+              Share Link
+            </button>
+            <button
+              onClick={() => handleMenuClick('leave')}
+              className="w-full text-center py-4 text-[#D9D9D9] text-base"
+            >
+              Leave Club
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Leave Confirmation Dialog */}
+      {showLeaveConfirm && (
+        <>
+          <div 
+            className="fixed inset-0 bg-black/50 z-50"
+            onClick={() => setShowLeaveConfirm(false)}
+          />
+          <div className="fixed top-[350px] left-1/2 -translate-x-1/2 w-[331px] h-[123px] bg-[#333939] rounded-[10px] p-4 z-50">
+            <p className="text-center text-[#D9D9D9] text-base font-semibold" style={{ fontFamily: 'Poppins' }}>Do You want to Leave ?</p>
+            <div className="flex gap-4 mt-4">
+              <button
+                onClick={handleLeaveConfirm}
+                className="flex-1 py-2 bg-[#4A7C59] text-[#D9D9D9] rounded-[10px]"
+              >
+                Yes
+              </button>
+              <button
+                onClick={() => setShowLeaveConfirm(false)}
+                className="flex-1 py-2 bg-transparent text-[#D9D9D9] rounded-[10px] border border-[#4A7C59]"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Share Link Modal */}
+      {showShareModal && (
+        <ShareLinkModal isOpen={showShareModal} onClose={() => setShowShareModal(false)} />
+      )}
+
       {/* Bottom Navigation */}
-      <BottomNavigation />
+      <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[400px] z-10">
+        <BottomNavigation />
+      </div>
     </div>
   );
 } 
