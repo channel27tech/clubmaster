@@ -1,3 +1,7 @@
+// Add crypto module polyfill globally
+import * as crypto from 'crypto';
+global.crypto = crypto as any;
+
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { Logger, ValidationPipe } from '@nestjs/common';
