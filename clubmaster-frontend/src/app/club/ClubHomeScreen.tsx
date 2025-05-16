@@ -5,10 +5,12 @@ import Link from 'next/link';
 import BottomNavigation from '../components/BottomNavigation';
 import { useClub, UserType } from '../context/ClubContext';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '../../context/AuthContext';
 
 export default function ClubHomeScreen() {
   const { hasClub, setHasClub, userType, setUserType } = useClub();
   const router = useRouter();
+  const { user } = useAuth();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   
@@ -49,6 +51,16 @@ export default function ClubHomeScreen() {
     }
   };
 
+  // Handle navigation to play screen
+  const handlePlayClick = () => {
+    router.push('/play');
+  };
+
+  // Handle navigation to profile page
+  const handleProfileClick = () => {
+    router.push('/user_profile');
+  };
+
   return (
     <div className="min-h-screen bg-[#333939] flex flex-col items-center w-full max-w-[430px] mx-auto relative">
       {/* Fixed header with Figma specs */}
@@ -56,7 +68,10 @@ export default function ClubHomeScreen() {
         <div className="flex justify-between items-center h-full py-2 px-[21px]">
           {/* Profile Icon */}
           <div className="flex items-center">
-            <div className="w-8 h-8 flex items-center justify-center">
+            <div 
+              className="w-8 h-8 flex items-center justify-center cursor-pointer"
+              onClick={handleProfileClick}
+            >
               <Image 
                 src="/images/home pageprofile icon.svg" 
                 alt="Profile" 
@@ -212,11 +227,15 @@ export default function ClubHomeScreen() {
         {/* Main actions - Button section */}
         <div className="w-full mx-auto bg-[#4C5454] rounded-[10px] flex flex-col items-center justify-evenly py-6 px-4 my-4">
           {/* Start Game Button */}
-          <button className="w-[302px] h-[57px] rounded-[10px] bg-[#4A7C59] text-[#FAF3DD] border-[3px] border-[#E9CB6B] mb-4" style={{
-            fontFamily: 'Roboto, sans-serif',
-            fontSize: '18px',
-            fontWeight: '500'
-          }}>
+          <button 
+            className="w-[302px] h-[57px] rounded-[10px] bg-[#4A7C59] text-[#FAF3DD] border-[3px] border-[#E9CB6B] mb-4" 
+            style={{
+              fontFamily: 'Roboto, sans-serif',
+              fontSize: '18px',
+              fontWeight: '500'
+            }}
+            onClick={handlePlayClick}
+          >
             Start Game
           </button>
           

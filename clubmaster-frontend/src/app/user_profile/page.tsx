@@ -1,8 +1,29 @@
 "use client";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import React from "react";
+import React, { useEffect, useState } from "react";
+import { useAuth } from "../../context/AuthContext";
 
+// Import formatJoinDate utility, with a fallback implementation
+let formatJoinDate: (date?: Date | null) => string;
+try {
+  // Try to import from utils
+  const utils = require("../../utils/date-utils");
+  formatJoinDate = utils.formatJoinDate;
+} catch (error) {
+  // Fallback implementation if import fails
+  formatJoinDate = (date?: Date | null): string => {
+    if (!date) return "Joined recently";
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric'
+    });
+    return `Joined ${formatter.format(date)}`;
+  };
+}
+
+// We'll keep the static data for recent games and friends for now
 const RECENT_GAMES = [
   {
     name: "junaid1414 (143)",
@@ -42,6 +63,59 @@ const FRIENDS = [
 
 export default function UserProfile() {
   const router = useRouter();
+  const { user } = useAuth();
+  const [userData, setUserData] = useState({
+    displayName: '',
+    email: '',
+    photoURL: '',
+    joinDate: new Date(),
+    rating: 800
+  });
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Fetch user profile data when component mounts
+  useEffect(() => {
+    if (user) {
+      // Get user data from Firebase auth
+      setUserData({
+        displayName: user.displayName || 'Chess Player',
+        email: user.email || '',
+        photoURL: user.photoURL || '/images/dp 1.svg',
+        joinDate: user.metadata?.creationTime ? new Date(user.metadata.creationTime) : new Date(),
+        rating: 800 // This should be fetched from your backend
+      });
+      
+      // Fetch additional user data from backend if needed
+      fetchUserRating();
+    }
+    setIsLoading(false);
+  }, [user]);
+
+  // Fetch user rating from backend
+  const fetchUserRating = async () => {
+    if (!user?.uid) return;
+    
+    try {
+      // This is a placeholder for actually fetching user rating
+      // Implement actual backend call when available
+      console.log('Would fetch rating for user:', user.uid);
+      
+      // For now we just use the static rating of 800
+      // setUserData(prev => ({ ...prev, rating: rating }));
+    } catch (error) {
+      console.error('Error fetching user rating:', error);
+    }
+  };
+
+  // Show loading state
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: "#333939" }}>
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-[#E9CB6B]"></div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen w-full flex flex-col items-center" style={{ background: "#333939" }}>
       {/* Green Curved SVG Background */}
@@ -68,13 +142,23 @@ export default function UserProfile() {
       <div className="flex flex-col items-center w-full mt-12 relative z-10" style={{ maxWidth: 430 }}>
         <div className="relative w-full flex flex-col items-center mb-4 ">
           <div className="w-[100px] h-[100px] rounded-full overflow-hidden border-4 border-[#8FC0A9] bg-[#333939] -mt-8">
-            <Image src="/images/dp 1.svg" alt="Profile" width={100} height={100} />
+            <Image 
+              src={userData.photoURL || "/images/dp 1.svg"} 
+              alt="Profile" 
+              width={100} 
+              height={100} 
+              className="object-cover w-full h-full"
+            />
           </div>
-          <span className="mt-4 text-[#FAF3DD] text-[20px] font-medium font-poppins">DarkKing_27</span>
-          <span className="text-[#8FC0A9] text-[12px] font-medium font-roboto mt-2">Joined 10 Sep 2027</span>
+          <span className="mt-4 text-[#FAF3DD] text-[20px] font-medium font-poppins">
+            {userData.displayName || "Chess Player"}
+          </span>
+          <span className="text-[#8FC0A9] text-[12px] font-medium font-roboto mt-2">
+            {formatJoinDate(userData.joinDate)}
+          </span>
           <div className="flex items-center gap-2 mt-2">
             <span className="text-[#E9CB6B] text-[15px] font-medium font-roboto">Rating</span>
-            <span className="text-[#FAF3DD] text-[20px] font-semibold font-roboto">800</span>
+            <span className="text-[#FAF3DD] text-[20px] font-semibold font-roboto">{userData.rating}</span>
           </div>
         </div>
       </div>

@@ -1,22 +1,44 @@
 'use client';
-import Link from 'next/link';
+
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '../context/AuthContext';
+import ClubHomeScreen from './club/ClubHomeScreen';
 
 export default function Home() {
-  return (
-    <main className="flex flex-col min-h-screen bg-[#4A7C59] items-center justify-center">
-      <div className="text-center p-8 max-w-md bg-[#333939] rounded-xl shadow-lg">
-        <h1 className="text-3xl font-bold text-white mb-6">Clubmaster Chess</h1>
-        <p className="text-gray-300 mb-8">
-          Welcome to Clubmaster Chess! This is a placeholder for the future landing page.
-        </p>
-        
-        <Link 
-          href="/play" 
-          className="inline-block py-3 px-8 bg-[#E9CB6B] hover:bg-[#d9bb5b] text-[#333939] font-medium rounded-lg transition-colors"
-        >
-          Play Chess
-        </Link>
+  const { user, isLoading, isGuest } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    // Only run this effect after authentication state is loaded
+    if (!isLoading) {
+      if (!user) {
+        // Case 1: Fresh visitor (no user at all) - redirect to login
+        console.log('Fresh visitor detected, redirecting to login page');
+        router.push('/login');
+      } else if (isGuest) {
+        // Case 2: Guest user (anonymous) - redirect directly to play
+        console.log('Guest user detected, redirecting to play page');
+        router.push('/play');
+      }
+      // Case 3: Registered user - show home page (default return below)
+    }
+  }, [user, isLoading, isGuest, router]);
+
+  // Show loading state while checking authentication
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: "#333939" }}>
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-[#E9CB6B]"></div>
       </div>
-    </main>
-  );
+    );
+  }
+
+  // Don't render anything while redirecting
+  if (!user || isGuest) {
+    return null;
+  }
+
+  // If user is authenticated (and not guest), show the ClubHomeScreen component
+  return <ClubHomeScreen />;
 }
