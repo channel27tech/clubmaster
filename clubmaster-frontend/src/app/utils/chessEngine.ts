@@ -59,19 +59,29 @@ export const getChessEngine = (gameId?: string): Chess => {
       // Only use stored FEN if the game IDs match or no gameId was specified
       if (storedFen && (!gameId || gameId === storedGameId)) {
         // Validate FEN first before trying to use it
-        const tempChess = new Chess();
         try {
+          const tempChess = new Chess();
           const isValid = tempChess.load(storedFen);
           
           if (isValid) {
             console.log('Restoring chess engine from stored state:', storedFen);
             chessInstance = tempChess; // Use the already loaded instance
           } else {
-            console.error('Invalid stored FEN format, using default position');
+            // Clear invalid FEN from localStorage
+            if (typeof window !== 'undefined') {
+              localStorage.removeItem(CHESS_STATE_KEY);
+              console.warn('Invalid stored FEN format cleared from localStorage');
+            }
+            console.warn('Invalid stored FEN format, using default position');
             chessInstance = new Chess(); // Fallback to default
           }
         } catch (error) {
-          console.error('Failed to load stored FEN, using default position');
+          // Clear invalid FEN from localStorage
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem(CHESS_STATE_KEY);
+            console.warn('Failed to load stored FEN, cleared from localStorage');
+          }
+          console.warn('Failed to load stored FEN, using default position:', error);
           chessInstance = new Chess(); // Fallback to default
         }
       } else {
