@@ -1,7 +1,15 @@
+// Add crypto module polyfill globally if needed
+import * as crypto from 'crypto';
+// Remove the problematic line that tries to override global.crypto
+// global.crypto = crypto as any;
+
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { IoAdapter } from '@nestjs/platform-socket.io';
+
+// If your application needs crypto functionality, create a utility instead
+// Example: create a cryptoUtils file or use the crypto module directly where needed
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
