@@ -5,6 +5,15 @@ import Image from 'next/image';
 import BottomNavigation from '../../components/BottomNavigation';
 import { useClub } from '../../context/ClubContext';
 
+// Define Player type
+type Player = {
+  rank: number;
+  name: string;
+  avatar: string;
+  icon: string | null;
+  rating: number;
+};
+
 // Define admin players with specific icons
 const adminPlayers = [
   { rank: 1, name: 'Salih', avatar: '/images/salih icon.svg', icon: '/images/crown.svg', rating: 2100 },
@@ -34,6 +43,12 @@ export default function ClubDetailPage() {
   const [activeTab, setActiveTab] = useState('players');
   const [showMenu, setShowMenu] = useState(false);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
+  const [showPlayerModal, setShowPlayerModal] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
+  
+  // Share link
+  const shareLink = 'https://t.me/Free_Educational_Resources/525/526';
 
   // Check if admin mode is active
   const isAdmin = userType === 'admin' || searchParams.get('admin') === '1';
@@ -43,7 +58,7 @@ export default function ClubDetailPage() {
 
   // Add useEffect to control body scroll
   useEffect(() => {
-    if (showMenu || showLeaveConfirm) {
+    if (showMenu || showLeaveConfirm || showShareModal) {
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = 'auto';
@@ -51,21 +66,35 @@ export default function ClubDetailPage() {
     return () => {
       document.body.style.overflow = 'auto';
     };
-  }, [showMenu, showLeaveConfirm]);
+  }, [showMenu, showLeaveConfirm, showShareModal]);
 
   // Function to handle menu item clicks
   const handleMenuClick = (action: string) => {
     setShowMenu(false);
     switch (action) {
       case 'invite':
-        // Handle invite action
+        router.push('/club/friends');
         break;
       case 'share':
-        // Handle share action
+        setShowShareModal(true);
+        break;
+      case 'edit':
+        router.push('/club/edit');
         break;
       case 'leave':
         setShowLeaveConfirm(true);
         break;
+    }
+  };
+
+  // Function to copy link to clipboard
+  const copyToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(shareLink);
+      // Show some feedback
+      console.log('Link copied to clipboard!');
+    } catch (err) {
+      console.error('Failed to copy: ', err);
     }
   };
 
@@ -75,8 +104,14 @@ export default function ClubDetailPage() {
     router.push('/club/clubs'); // Navigate back to clubs page after leaving
   };
 
+  // Helper for country flag (mocked for now)
+  const getCountryFlag = (player: Player) => {
+    // You can enhance this with real country data if available
+    return '🇮🇳';
+  };
+
   return (
-    <div className={`min-h-screen bg-[#333939] flex flex-col w-full max-w-[400px] mx-auto relative ${showMenu || showLeaveConfirm ? 'overflow-hidden' : ''}`}>
+    <div className={`min-h-screen bg-[#333939] flex flex-col w-full max-w-[400px] mx-auto relative ${showMenu || showLeaveConfirm || showShareModal ? 'overflow-hidden' : ''}`}>
       {/* Header */}
       <div className="bg-[#333939] p-4 flex items-center justify-between">
         <button 
@@ -208,22 +243,26 @@ export default function ClubDetailPage() {
           <div 
             className="mx-4 mb-16 overflow-y-auto"
             style={{
-              height: 'calc(100vh - 430px)', // Adjusted height to account for tournament button
-              msOverflowStyle: 'none',  /* IE and Edge */
-              scrollbarWidth: 'none',   /* Firefox */
-              WebkitOverflowScrolling: 'touch', /* Enable smooth scrolling on iOS */
+              height: 'calc(100vh - 430px)',
+              msOverflowStyle: 'none',
+              scrollbarWidth: 'none',
+              WebkitOverflowScrolling: 'touch',
             }}
           >
             <style jsx>{`
               div::-webkit-scrollbar {
-                display: none;  /* Chrome, Safari and Opera */
+                display: none;
               }
             `}</style>
-            <div className="pb-10"> {/* Reduced bottom padding */}
+            <div className="pb-10">
               {players.map((player, index) => (
                 <div 
                   key={player.rank} 
-                  className={`flex items-center py-2 ${index % 2 === 0 ? 'bg-[#333939]' : 'bg-[#3A4141]'}`}
+                  className={`flex items-center py-2 ${index % 2 === 0 ? 'bg-[#333939]' : 'bg-[#3A4141]'} cursor-pointer`}
+                  onClick={() => {
+                    setSelectedPlayer(player);
+                    setShowPlayerModal(true);
+                  }}
                 >
                   {/* Rank column */}
                   <div className="w-16 text-[#D9D9D9] text-xs text-center">#{player.rank}</div>
@@ -288,21 +327,21 @@ export default function ClubDetailPage() {
             >
               Invite
             </button>
-            <div className="h-px bg-[#3A393C] mx-6 opacity-70" />
+            <div className="h-[1px] bg-[#3A393C] mx-6" />
             <button
               className="w-full text-center px-6 py-4 text-[#D9D9D9] text-base font-medium focus:outline-none"
               onClick={() => handleMenuClick('share')}
             >
               Share Link
             </button>
-            <div className="h-px bg-[#3A393C] mx-6 opacity-70" />
+            <div className="h-[1px] bg-[#3A393C] mx-6" />
             <button
               className="w-full text-center px-6 py-4 text-[#D9D9D9] text-base font-medium focus:outline-none"
               onClick={() => handleMenuClick('edit')}
             >
               Edit Club
             </button>
-            <div className="h-px bg-[#3A393C] mx-6 opacity-70" />
+            <div className="h-[1px] bg-[#3A393C] mx-6" />
             <button
               className="w-full text-center px-6 py-4 text-[#D9D9D9] text-base font-medium focus:outline-none"
               onClick={() => handleMenuClick('leave')}
@@ -337,6 +376,89 @@ export default function ClubDetailPage() {
         <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[400px] z-10">
           <BottomNavigation />
         </div>
+      )}
+
+      {/* Player Modal */}
+      {showPlayerModal && selectedPlayer && (
+        <>
+          {/* Blurred background */}
+          <div className="fixed inset-0 z-40 backdrop-blur-[1px]" onClick={() => setShowPlayerModal(false)}></div>
+          {/* Centered modal card */}
+          <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <div className="bg-[#4C5454] rounded-[16px] w-[320px] max-w-[90vw] px-6 py-7 flex flex-col items-center shadow-2xl relative">
+              <div className="w-20 h-20 rounded-full bg-white overflow-hidden mb-4 flex items-center justify-center">
+                <Image src={selectedPlayer.avatar} alt="Player Avatar" width={70} height={70} />
+              </div>
+              <div className="text-[#D9D9D9] text-lg font-semibold mb-1 text-center">{selectedPlayer.name}</div>
+              <div className="text-[#D9D9D9] text-sm mb-4 text-center">
+                ({selectedPlayer.rating || 308}) &nbsp; {getCountryFlag(selectedPlayer)}
+              </div>
+              <button className="w-full py-3 rounded-[10px] bg-[#4A7C59] text-[#FAF3DD] font-medium text-base mb-3">
+                View Profile
+              </button>
+              <button className="w-full py-3 rounded-[10px] bg-[#4A7C59] text-[#FAF3DD] font-medium text-base" style={{border: '2px solid #4A7C59'}}>
+                Remove From Club
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Share Modal */}
+      {showShareModal && (
+        <>
+          <div 
+            className="fixed inset-0 flex items-center justify-center z-50"
+            style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)' }}
+            onClick={() => setShowShareModal(false)}
+          >
+            <div 
+              className="bg-[#333939] p-4 rounded-lg shadow-xl flex flex-col items-center justify-around"
+              style={{ width: '373px', height: '146px' }}
+              onClick={e => e.stopPropagation()}
+            >
+              <h3 className="text-lg font-semibold mb-1" style={{ color: '#FAF3DD' }}>Share</h3>
+              <div className="mb-3 flex items-center bg-[#333939] rounded-full border border-dashed border-[#E9CB6B] overflow-hidden"
+                style={{ width: '341px', height: '42px' }}
+              >
+                <input 
+                  type="text" 
+                  readOnly 
+                  value={shareLink} 
+                  className="flex-1 bg-transparent text-[#FAF3DD] text-xs py-2 px-4 border-none outline-none truncate"
+                  style={{ color: '#FAF3DD' }}
+                />
+                <button 
+                  className="p-2 flex items-center justify-center bg-[#333939] rounded-full border-none outline-none"
+                  onClick={copyToClipboard}
+                  title="Copy link"
+                  style={{ minWidth: '36px', minHeight: '36px' }}
+                >
+                  <Image src="/images/copy icon.svg" alt="Copy" width={18} height={18} />
+                </button>
+              </div>
+              <button 
+                className=""
+                title="Share via other apps"
+                onClick={() => {
+                  if (navigator.share) {
+                    navigator.share({
+                      title: 'Club Master Club Link',
+                      text: 'Check out this club on Club Master!',
+                      url: shareLink,
+                    })
+                    .then(() => console.log('Successful share'))
+                    .catch((error) => console.log('Error sharing', error));
+                  } else {
+                    copyToClipboard();
+                  }
+                }}
+              >
+                <Image src="/images/share icon.svg" alt="Share" width={22} height={22} />
+              </button>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
