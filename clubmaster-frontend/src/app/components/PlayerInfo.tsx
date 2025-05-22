@@ -26,6 +26,7 @@ interface PlayerInfoProps {
   isGuest: boolean;
   capturedPieces: CapturedPiece[];
   isActive?: boolean; // New prop to indicate if it's this player's turn
+  photoURL?: string | null; // Real player photo URL from database
 }
 
 const PlayerInfo: React.FC<PlayerInfoProps> = ({
@@ -33,7 +34,8 @@ const PlayerInfo: React.FC<PlayerInfoProps> = ({
   username,
   rating,
   capturedPieces,
-  isActive = false // Default to inactive
+  isActive = false, // Default to inactive
+  photoURL = null // Player's photo URL from the database
 }) => {
   // Determine styles based on position (top/bottom)
   const isTop = position === 'top';
@@ -74,11 +76,11 @@ const PlayerInfo: React.FC<PlayerInfoProps> = ({
             )}
             <div className="w-[41px] h-[41px] flex items-center justify-center">
               <Image 
-                src={isTop ? "/icons/avatar1.svg" : "/icons/avatar2.svg"}
-                alt="Player Avatar"
+                src={photoURL ? photoURL : (isTop ? "/icons/avatar1.svg" : "/icons/avatar2.svg")}
+                alt={`${username}'s Avatar`}
                 width={41}
                 height={41}
-                className="w-[41px] h-[41px] object-contain"
+                className="w-[41px] h-[41px] object-cover rounded-full"
               />
             </div>
           </div>

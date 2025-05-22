@@ -61,17 +61,12 @@ export const getChessEngine = (gameId?: string): Chess => {
         // Validate FEN first before trying to use it
         const tempChess = new Chess();
         try {
-          const isValid = tempChess.load(storedFen);
-          
-          if (isValid) {
-            console.log('Restoring chess engine from stored state:', storedFen);
-            chessInstance = tempChess; // Use the already loaded instance
-          } else {
-            console.error('Invalid stored FEN format, using default position');
-            chessInstance = new Chess(); // Fallback to default
-          }
+          tempChess.load(storedFen);
+          // If no exception was thrown, the FEN is valid
+          console.log('Restoring chess engine from stored state:', storedFen);
+          chessInstance = tempChess; // Use the already loaded instance
         } catch (error) {
-          console.error('Failed to load stored FEN, using default position');
+          console.error('Invalid stored FEN format, using default position');
           chessInstance = new Chess(); // Fallback to default
         }
       } else {
@@ -149,6 +144,9 @@ export const isLegalMove = (from: string, to: string, promotion?: PieceType): bo
   const chess = getChessEngine();
   
   try {
+    // Convert string coordinates to chess.js Square type
+    const fromSquare = from as any;
+    const toSquare = to as any;
     // Get the piece at the 'from' position to check if it's a pawn that might need promotion
     const piece = chess.get(from);
     
@@ -163,27 +161,20 @@ export const isLegalMove = (from: string, to: string, promotion?: PieceType): bo
       console.log(`Potential pawn promotion detected: ${from} -> ${to}`);
     }
     
-    // chess.js will throw an error for illegal moves
-    const moveOptions: { from: string; to: string; promotion?: string } = { from, to };
+    // Check if move is legal
+    const move = {
+      from: fromSquare,
+      to: toSquare,
+      promotion: promotion ? pieceTypeMapping[promotion] : undefined
+    };
     
-    // Add promotion if specified
-    if (promotion) {
-      moveOptions.promotion = pieceTypeMapping[promotion];
+    // Try the move and undo it to check if it's legal
+    const result = chess.move(move);
+    if (result) {
+      chess.undo(); // Undo the move to keep the board state unchanged
+      return true;
     }
-    
-    // If this is a pawn promotion move but no promotion piece specified, 
-    // we'll check legality assuming queen promotion
-    if (isPawnPromotionMove && !promotion) {
-      moveOptions.promotion = 'q'; // Default to queen for legality check
-    }
-    
-    const result = chess.move(moveOptions);
-    
-    // Undo the move to maintain the board state
-    chess.undo();
-    
-    // If result is null, the move is illegal
-    return result !== null;
+    return false;
   } catch (error) {
     console.error('Error checking move legality:', error);
     return false;
@@ -195,6 +186,9 @@ export const makeMove = (from: string, to: string, promotion?: PieceType): boole
   const chess = getChessEngine();
   
   try {
+    // Convert string coordinates to chess.js Square type
+    const fromSquare = from as any;
+    const toSquare = to as any;
     // Get the piece at the 'from' position to check if it's a pawn that might need promotion
     const piece = chess.get(from);
     
@@ -209,23 +203,22 @@ export const makeMove = (from: string, to: string, promotion?: PieceType): boole
       return false;
     }
     
-    const moveOptions: { from: string; to: string; promotion?: string } = { from, to };
+    // Make the move
+    const move = {
+      from: fromSquare,
+      to: toSquare,
+      promotion: promotion ? pieceTypeMapping[promotion] : undefined
+    };
     
-    // Add promotion if specified
-    if (promotion) {
-      moveOptions.promotion = pieceTypeMapping[promotion];
-      console.log(`Making promotion move: ${from} -> ${to}, promoting to ${promotion}`);
-    }
+    const result = chess.move(move);
     
-    const result = chess.move(moveOptions);
-    
-    // If move was successful, store the new state
+    // If move was successful, store the new position
     if (result) {
       console.log(`Move made: ${result.san}`);
       // Store the new FEN state after a successful move
       storeFen(chess.fen(), currentGameId || undefined);
     } else {
-      console.error('Error making direct move:', new Error(`Invalid move: ${JSON.stringify(moveOptions)}`));
+      console.error('Error making direct move:', new Error(`Invalid move: ${JSON.stringify(move)}`));
     }
     
     return result !== null;
@@ -319,18 +312,32 @@ export const getGameStatus = () => {
   };
 };
 
-// Load a PGN
-export const loadPgn = (pgn: string): boolean => {
+// Check if the position is a threefold repetition
+export const isThreefoldRepetition = (): boolean => {
   try {
     const chess = getChessEngine();
-    const result = chess.loadPgn(pgn);
+    // The chess.js isThreefoldRepetition() returns a boolean indicating if the current position has occurred three or more times
+    const result = chess.isThreefoldRepetition();
+    console.log(`Threefold repetition check result: ${result}`);
+    return result === true;
+  } catch (error) {
+    console.error('Error checking for threefold repetition:', error);
+    return false; // Return false on error to avoid false positives
+  }
+};
+
+// Load a PGN
+export const loadPgn = (pgn: string): boolean => {
+  const chess = getChessEngine();
+  
+  try {
+    // Load the PGN
+    chess.loadPgn(pgn);
     
-    if (result) {
-      // Store the new state after loading PGN
-      storeFen(chess.fen(), currentGameId || undefined);
-    }
+    // Store the new position
+    storeFen(chess.fen());
     
-    return result;
+    return true;
   } catch (error) {
     console.error('Error loading PGN:', error);
     return false;

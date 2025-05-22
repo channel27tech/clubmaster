@@ -27,7 +27,7 @@ export default function Home() {
 
   // Show loading state while checking authentication
   if (isLoading) {
-    return (
+  return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: "#333939" }}>
         <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-[#E9CB6B]"></div>
       </div>

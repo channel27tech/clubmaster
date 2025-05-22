@@ -69,7 +69,7 @@ export default function UserProfile() {
     email: '',
     photoURL: '',
     joinDate: new Date(),
-    rating: 800
+    rating: 1500 // Default to 1500 instead of 800
   });
   const [isLoading, setIsLoading] = useState(true);
 
@@ -82,7 +82,7 @@ export default function UserProfile() {
         email: user.email || '',
         photoURL: user.photoURL || '/images/dp 1.svg',
         joinDate: user.metadata?.creationTime ? new Date(user.metadata.creationTime) : new Date(),
-        rating: 800 // This should be fetched from your backend
+        rating: 1500 // Default to 1500 instead of 800
       });
       
       // Fetch additional user data from backend if needed
@@ -96,12 +96,23 @@ export default function UserProfile() {
     if (!user?.uid) return;
     
     try {
-      // This is a placeholder for actually fetching user rating
-      // Implement actual backend call when available
-      console.log('Would fetch rating for user:', user.uid);
+      // Actually fetch user rating from backend
+      const response = await fetch(`/api/users/profile/${user.uid}`);
       
-      // For now we just use the static rating of 800
-      // setUserData(prev => ({ ...prev, rating: rating }));
+      if (response.ok) {
+        const data = await response.json();
+        if (data && data.rating) {
+          setUserData(prev => ({ 
+            ...prev, 
+            rating: data.rating,
+            // Update other fields if they're available
+            displayName: data.displayName || prev.displayName,
+            photoURL: data.photoURL || prev.photoURL
+          }));
+        }
+      } else {
+        console.error('Failed to fetch user profile:', response.statusText);
+      }
     } catch (error) {
       console.error('Error fetching user rating:', error);
     }

@@ -8,6 +8,8 @@ import {
   GameResult
 } from './game-end/game-end.service';
 import { RatingService, RatingChange, RatingResult as RatingServiceResult } from './rating/rating.service';
+import { GameRepositoryService } from './game-repository.service';
+import { UsersService } from '../users/users.service';
 
 // Player type for active games
 export interface GamePlayer {
@@ -19,11 +21,13 @@ export interface GamePlayer {
   gamesPlayed?: number;
   connected: boolean; // Track connection status
   connectionLostTime?: Date; // When the player disconnected
+  photoURL?: string; // Player's profile photo URL
 }
 
-// Game state type
+// Game state for active games
 export interface GameState {
   gameId: string;
+  dbGameId?: string; // Database UUID for persistence
   whitePlayer: GamePlayer;
   blackPlayer: GamePlayer;
   chessInstance: Chess;
@@ -44,7 +48,7 @@ export interface GameState {
   isFirstMove: boolean; // Is this the first move of the game?
 }
 
-// Result of a completed game
+// Game result data used for return values
 export interface GameResultData {
   gameId: string;
   result: GameResult;
@@ -77,18 +81,20 @@ export interface GameResultData {
 export class GameManagerService {
   private readonly logger = new Logger(GameManagerService.name);
   
-  // Map to store active games
+  // Map of active games by gameId
   private activeGames: Map<string, GameState> = new Map();
   
-  // Map to store player's active game ID
+  // Map of players to their active games
   private playerGameMap: Map<string, string> = new Map();
   
-  // Reconnection grace period (in ms) - 2 minutes
+  // Grace period for reconnections: 2 minutes
   private readonly RECONNECTION_GRACE_PERIOD = 2 * 60 * 1000;
 
   constructor(
     private readonly gameEndService: GameEndService,
     private readonly ratingService: RatingService,
+    private readonly gameRepositoryService: GameRepositoryService,
+    private readonly usersService: UsersService,
   ) {}
 
   /**
@@ -200,6 +206,14 @@ export class GameManagerService {
       // If this was the first move of the game, mark it
       if (game.isFirstMove) {
         game.isFirstMove = false;
+        
+        // If this is a registered game with a database record, update the database
+        if (game.dbGameId) {
+          // Attempt to update move in database asynchronously - no need to await
+          this.updateMoveInDatabase(game).catch(error => {
+            this.logger.error(`Error updating move in database: ${error.message}`, error.stack);
+          });
+        }
       }
       
       return true;
@@ -210,9 +224,43 @@ export class GameManagerService {
   }
 
   /**
+   * Update move history in database
+   */
+  private async updateMoveInDatabase(game: GameState): Promise<void> {
+    if (!game.dbGameId) return;
+    
+    try {
+      // Get move history
+      const moveHistory = game.chessInstance.history({ verbose: true });
+      
+      // Format moves for JSONB storage
+      const formattedMoves = moveHistory.map(move => ({
+        from: move.from,
+        to: move.to,
+        piece: move.piece,
+        san: move.san,
+        color: move.color,
+        flags: move.flags,
+        ...(move.promotion && { promotion: move.promotion })
+      }));
+      
+      // Update the game record with the latest moves
+      await this.gameRepositoryService.update(game.dbGameId, {
+        pgn: game.pgn,
+        moves: formattedMoves,
+        totalMoves: moveHistory.length
+      });
+      
+      this.logger.log(`Updated move history in database for game ${game.dbGameId}`);
+    } catch (error) {
+      this.logger.error(`Error updating move history in database: ${error.message}`, error.stack);
+    }
+  }
+
+  /**
    * Check if a game has ended due to chess rules
    */
-  checkGameEnd(gameId: string, server: Server): GameResultData | null {
+  checkGameEnd(gameId: string, server: Server): Promise<GameResultData> | null {
     const game = this.activeGames.get(gameId);
     if (!game || game.ended) return null;
     
@@ -242,9 +290,12 @@ export class GameManagerService {
     gameId: string,
     color: 'w' | 'b',
     server: Server,
-  ): GameResultData | null {
+  ): Promise<GameResultData> | null {
     const game = this.activeGames.get(gameId);
     if (!game || game.ended) return null;
+    
+    // Log timeout detection at entry point
+    this.logger.log(`[TIMEOUT] Processing timeout for ${color === 'w' ? 'white' : 'black'} player in game ${gameId}`);
     
     // Check game end based on timeout
     const gameEndDetails = this.gameEndService.checkGameEnd(
@@ -259,6 +310,11 @@ export class GameManagerService {
     );
     
     if (gameEndDetails) {
+      // Log timeout detection with detailed info
+      this.logger.log(`[TIMEOUT] Timeout confirmed for ${color === 'w' ? 'white' : 'black'} player in game ${gameId}`);
+      this.logger.log(`[TIMEOUT] Game end details: result=${gameEndDetails.result}, reason=${gameEndDetails.reason}`);
+      this.logger.log(`[TIMEOUT] Database ID: ${game.dbGameId || 'not available'}`);
+      
       return this.handleGameEnd(gameId, gameEndDetails, server);
     }
     
@@ -272,7 +328,7 @@ export class GameManagerService {
     gameId: string,
     socketId: string,
     server: Server,
-  ): GameResultData | null {
+  ): Promise<GameResultData> | null {
     const game = this.activeGames.get(gameId);
     if (!game || game.ended) return null;
     
@@ -416,20 +472,31 @@ export class GameManagerService {
         ? Math.min(this.RECONNECTION_GRACE_PERIOD, game.whiteTimeRemaining)
         : Math.min(this.RECONNECTION_GRACE_PERIOD, game.blackTimeRemaining);
       
+      // Get the remaining time for the disconnected player
+      const remainingTime = disconnectedColor === 'w' ? game.whiteTimeRemaining : game.blackTimeRemaining;
+      
       if (disconnectDuration >= effectiveGracePeriod) {
-        // Grace period expired, treat as abandonment
+        // Check if this was a timeout (remaining time reached zero) or just a disconnection
+        const isTimeout = remainingTime <= 0;
+        
+        // Log the detection for debugging
+        this.logger.log(`[TIMEOUT CHECK] Player ${disconnectedColor} disconnect grace period expired. isTimeout: ${isTimeout}, remainingTime: ${remainingTime}ms`);
+        
+        // Grace period expired, determine if this is a timeout or abandonment
         const gameEndDetails = this.gameEndService.checkGameEnd(
           game.chessInstance,
           game.whitePlayer.socketId,
           game.blackPlayer.socketId,
-          undefined, // No timeout
+          isTimeout ? disconnectedColor : undefined, // Pass color as timeout if time is zero
           undefined, // No resignation
           false, // No draw agreement
-          disconnectedColor, // Disconnected player's color
+          isTimeout ? undefined : disconnectedColor, // Only pass as disconnection if not a timeout
           game.isFirstMove,
         );
         
         if (gameEndDetails) {
+          // Log the reason for clarity
+          this.logger.log(`[TIMEOUT CHECK] Game end reason determined: ${gameEndDetails.reason}`);
           this.handleGameEnd(gameId, gameEndDetails, server);
         }
       }
@@ -439,11 +506,11 @@ export class GameManagerService {
   /**
    * Handle game end logic
    */
-  private handleGameEnd(
+  private async handleGameEnd(
     gameId: string,
     gameEndDetails: GameEndDetails,
     server: Server,
-  ): GameResultData {
+  ): Promise<GameResultData> {
     const game = this.activeGames.get(gameId);
     if (!game) {
       this.logger.error(`Game not found in handleGameEnd: ${gameId}`);
@@ -491,8 +558,15 @@ export class GameManagerService {
     let whiteRatingChange: RatingChange | undefined;
     let blackRatingChange: RatingChange | undefined;
 
+    // Only calculate rating changes if:
+    // 1. Game is rated
+    // 2. Game is not aborted
+    // 3. Both players are registered (not guests)
     if (game.rated && gameEndDetails.reason !== GameEndReason.ABORT) {
       if (!game.whitePlayer.isGuest && !game.blackPlayer.isGuest) {
+        this.logger.log(`Processing rating changes for rated game ${gameId}`);
+        
+        // Map game result to rating result
         let whiteResultForRating: RatingServiceResult;
 
         if (gameEndDetails.result === GameResult.WHITE_WINS) {
@@ -507,18 +581,62 @@ export class GameManagerService {
         }
         
         if (whiteResultForRating !== undefined) { 
+            // Get current ratings
+            const whiteRating = game.whitePlayer.rating || this.ratingService.DEFAULT_RATING;
+            const blackRating = game.blackPlayer.rating || this.ratingService.DEFAULT_RATING;
+            
+            // Calculate rating changes using the ELO formula
             const ratingChanges = this.ratingService.calculateGameRatingChanges(
-                game.whitePlayer.rating || (this.ratingService as any).DEFAULT_RATING, 
-                game.blackPlayer.rating || (this.ratingService as any).DEFAULT_RATING,
-                whiteResultForRating,
-                game.whitePlayer.gamesPlayed || 0,
-                game.blackPlayer.gamesPlayed || 0,
+                whiteRating, 
+                blackRating,
+                whiteResultForRating
             );
             
             if (ratingChanges) {
                 whiteRatingChange = ratingChanges.white;
                 blackRatingChange = ratingChanges.black;
-                this.logger.log(`Ratings updated for game ${gameId}: White ${whiteRatingChange?.newRating}, Black ${blackRatingChange?.newRating}`);
+                
+                this.logger.log(`Ratings calculated for game ${gameId}:`);
+                this.logger.log(`White: ${whiteRating} → ${whiteRatingChange.newRating} (${whiteRatingChange.ratingChange > 0 ? '+' : ''}${whiteRatingChange.ratingChange})`);
+                this.logger.log(`Black: ${blackRating} → ${blackRatingChange.newRating} (${blackRatingChange.ratingChange > 0 ? '+' : ''}${blackRatingChange.ratingChange})`);
+                
+                // Update player ratings in the database if they have user IDs
+                if (game.whitePlayer.userId && game.blackPlayer.userId) {
+                    try {
+                        // Update white player's rating
+                        await this.usersService.updateRating(game.whitePlayer.userId, whiteRatingChange.newRating);
+                        
+                        // Update black player's rating
+                        await this.usersService.updateRating(game.blackPlayer.userId, blackRatingChange.newRating);
+                        
+                        // Update game statistics based on result
+                        if (gameEndDetails.result === GameResult.WHITE_WINS) {
+                            await this.usersService.incrementGameStats(game.whitePlayer.userId, 'win');
+                            await this.usersService.incrementGameStats(game.blackPlayer.userId, 'loss');
+                        } else if (gameEndDetails.result === GameResult.BLACK_WINS) {
+                            await this.usersService.incrementGameStats(game.whitePlayer.userId, 'loss');
+                            await this.usersService.incrementGameStats(game.blackPlayer.userId, 'win');
+                        } else if (gameEndDetails.result === GameResult.DRAW) {
+                            await this.usersService.incrementGameStats(game.whitePlayer.userId, 'draw');
+                            await this.usersService.incrementGameStats(game.blackPlayer.userId, 'draw');
+                        }
+                        
+                        // Store ratings in the game record
+                        const dbGame = await this.gameRepositoryService.findOne(gameId);
+                        if (dbGame) {
+                            // Update game with both before and after ratings
+                            await this.gameRepositoryService.update(gameId, {
+                                whitePlayerRating: whiteRating,
+                                blackPlayerRating: blackRating,
+                                whitePlayerRatingAfter: whiteRatingChange.newRating,
+                                blackPlayerRatingAfter: blackRatingChange.newRating
+                            });
+                            this.logger.log(`Game ${gameId} updated with rating information in database`);
+                        }
+                    } catch (error) {
+                        this.logger.error(`Error updating ratings in database: ${error.message}`, error.stack);
+                    }
+                }
             }
         } else {
              this.logger.log(`Game ${gameId} result (${gameEndDetails.result}) not suitable for standard win/loss/draw rating. Skipping.`);
@@ -566,6 +684,116 @@ export class GameManagerService {
 
     this.logger.log(`Emitting 'game_ended' for ${gameId} with data:`, JSON.stringify(finalResultData, null, 2));
     server.to(gameId).emit('game_ended', finalResultData);
+
+    // Persist final game state to database
+    try {
+      const status = game.result === GameResult.WHITE_WINS ? 'white_win' : 
+                     game.result === GameResult.BLACK_WINS ? 'black_win' : 
+                     game.result === GameResult.DRAW ? 'draw' : 'aborted';
+                     
+      // Extract verbose move history for saving to database
+      const moveHistory = game.chessInstance.history({ verbose: true });
+      
+      // Format moves for JSONB storage
+      const formattedMoves = moveHistory.map(move => ({
+        from: move.from,
+        to: move.to,
+        piece: move.piece,
+        san: move.san,
+        color: move.color,
+        flags: move.flags,
+        ...(move.promotion && { promotion: move.promotion })
+      }));
+      
+      // Get total number of moves
+      const totalMoves = moveHistory.length;
+                     
+      // Map the GameEndReason enum to database-friendly string values
+      // This ensures reasons like 'timeout' are properly stored in the database
+      // CRITICAL FIX for timeouts being recorded as "abandon"
+      let dbEndReason: string = game.endReason as string;
+      if (game.endReason === GameEndReason.TIMEOUT) {
+        dbEndReason = 'timeout';
+        this.logger.log(`Explicitly mapping timeout game end reason for game ${gameId}`);
+      } else if (game.endReason === GameEndReason.ABANDON) {
+        dbEndReason = 'abandon';
+      } else if (game.endReason === GameEndReason.RESIGNATION) {
+        dbEndReason = 'resignation';
+      } else if (game.endReason === GameEndReason.CHECKMATE) {
+        dbEndReason = 'checkmate';
+      } else if (game.endReason === GameEndReason.DRAW_AGREEMENT) {
+        dbEndReason = 'draw_agreement';
+      } else if (game.endReason === GameEndReason.THREEFOLD_REPETITION) {
+        dbEndReason = 'threefold_repetition';
+      } else if (game.endReason === GameEndReason.STALEMATE) {
+        dbEndReason = 'stalemate';
+      } else if (game.endReason === GameEndReason.INSUFFICIENT_MATERIAL) {
+        dbEndReason = 'insufficient_material';
+      } else if (game.endReason === GameEndReason.FIFTY_MOVE_RULE) {
+        dbEndReason = 'fifty_move_rule';
+      } else if (game.endReason === GameEndReason.ABORT) {
+        dbEndReason = 'abort';
+      }
+
+      this.logger.log(`Saving game end to database with reason: ${dbEndReason} (from enum: ${game.endReason})`);
+                     
+      // Use the database UUID if available, otherwise try the in-memory ID
+      const dbId = game.dbGameId || gameId;
+      
+      // Try to update the existing game record
+      const updatedGame = await this.gameRepositoryService.endGame(
+        dbId, 
+        status, 
+        dbEndReason, 
+        game.pgn,
+        formattedMoves,
+        totalMoves
+      );
+      
+      if (updatedGame) {
+        this.logger.log(`Game ${dbId} result persisted to database`);
+      } else {
+        this.logger.warn(`Game ${dbId} not found in database during endGame - may need to be created first`);
+        
+        // Attempt to create a record if it doesn't exist and both players are registered
+        if (game.whitePlayer.userId && game.blackPlayer.userId && !game.whitePlayer.isGuest && !game.blackPlayer.isGuest) {
+          // Get ratings information based on game result
+          const whiteInitialRating = game.whitePlayer.rating || 1500;
+          const blackInitialRating = game.blackPlayer.rating || 1500;
+          
+          // Determine the winner ID in the correct format for database
+          let winnerId: string | undefined = undefined;
+          if (status === 'white_win') {
+            winnerId = game.whitePlayer.userId;
+          } else if (status === 'black_win') {
+            winnerId = game.blackPlayer.userId;
+          }
+          
+          const gameData = {
+            id: dbId,
+            whitePlayerId: game.whitePlayer.userId,
+            blackPlayerId: game.blackPlayer.userId,
+            winnerId: winnerId,
+            status: status as 'ongoing' | 'white_win' | 'black_win' | 'draw' | 'aborted',
+            endReason: dbEndReason,
+            pgn: game.pgn,
+            moves: formattedMoves,
+            totalMoves: totalMoves,
+            rated: game.rated,
+            whitePlayerRating: whiteInitialRating,
+            blackPlayerRating: blackInitialRating,
+            whitePlayerRatingAfter: whiteRatingChange?.newRating,
+            blackPlayerRatingAfter: blackRatingChange?.newRating,
+            timeControl: game.timeControl
+          };
+          
+          await this.gameRepositoryService.create(gameData);
+          this.logger.log(`Game ${dbId} created with final state in database`);
+        }
+      }
+    } catch (error) {
+      this.logger.error(`Error persisting game result to database: ${error.message}`, error.stack);
+    }
 
     this.cleanupGame(gameId);
 

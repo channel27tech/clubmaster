@@ -57,7 +57,7 @@ export default function RouteGuard({ children }: RouteGuardProps) {
         setCheckingAuth(false);
         return;
       }
-      
+
       // CASE 2: Registered user is logged in (not guest) - allow access to any path
       if (user && !isGuest) {
         console.log("Registered user authenticated, allowing access");
@@ -73,7 +73,7 @@ export default function RouteGuard({ children }: RouteGuardProps) {
         setCheckingAuth(false);
         return;
       }
-      
+
       // CASE 4: Guest user accessing non-guest allowed path - redirect to /play
       if (user && isGuest) {
         console.log("Guest user attempting to access protected route, redirecting to play");

@@ -17,14 +17,11 @@ export interface RatingChange {
 export class RatingService {
   private readonly logger = new Logger(RatingService.name);
   
-  // K-factor determines the maximum possible adjustment per game
-  // For established players, K=20 is common; for newer players, K=40 is used
-  private readonly K_FACTOR_DEFAULT = 20;
-  private readonly K_FACTOR_NEW_PLAYER = 40;
-  private readonly NEW_PLAYER_GAMES_THRESHOLD = 30;
+  // K-factor as per specified requirements
+  private readonly K_FACTOR = 32;
   
   // Default rating for new players
-  private readonly DEFAULT_RATING = 1500;
+  public readonly DEFAULT_RATING = 1500;
 
   /**
    * Calculate rating changes for a player
@@ -33,14 +30,12 @@ export class RatingService {
    * @param playerRating Current rating of the player
    * @param opponentRating Rating of the opponent
    * @param result Outcome of the game (win, loss, draw)
-   * @param playerGamesCount Number of games played by the player
    * @returns New rating and rating change for the player
    */
   calculateRatingChange(
     playerRating: number,
     opponentRating: number,
     result: RatingResult,
-    playerGamesCount = 0,
   ): RatingChange {
     // If this is a new player or guest, use default rating
     if (!playerRating) {
@@ -50,14 +45,11 @@ export class RatingService {
     // Calculate expected score based on ELO formula
     const expectedScore = this.calculateExpectedScore(playerRating, opponentRating);
     
-    // Determine K-factor based on player's experience
-    const kFactor = playerGamesCount < this.NEW_PLAYER_GAMES_THRESHOLD
-      ? this.K_FACTOR_NEW_PLAYER
-      : this.K_FACTOR_DEFAULT;
+    // Calculate new rating using the ELO formula with fixed K-factor of 32
+    const ratingChange = Math.round(this.K_FACTOR * (result - expectedScore));
     
-    // Calculate new rating using the ELO formula
-    const ratingChange = Math.round(kFactor * (result - expectedScore));
-    const newRating = playerRating + ratingChange;
+    // Prevent negative rating as per requirements
+    const newRating = Math.max(0, playerRating + ratingChange);
     
     this.logger.debug(
       `Rating calculation: ${playerRating} -> ${newRating} (${ratingChange > 0 ? '+' : ''}${ratingChange})`,
@@ -87,23 +79,18 @@ export class RatingService {
    * @param whiteRating Rating of the white player
    * @param blackRating Rating of the black player
    * @param whiteResult Result for the white player (WIN, DRAW, LOSS)
-   * @param whiteGamesCount Number of games played by white player
-   * @param blackGamesCount Number of games played by black player
    * @returns Rating changes for both players
    */
   calculateGameRatingChanges(
     whiteRating: number,
     blackRating: number,
     whiteResult: RatingResult,
-    whiteGamesCount = 0,
-    blackGamesCount = 0,
   ): { white: RatingChange; black: RatingChange } {
     // Calculate white's rating change
     const whiteChange = this.calculateRatingChange(
       whiteRating,
       blackRating,
       whiteResult,
-      whiteGamesCount,
     );
     
     // Black's result is the opposite of white's
@@ -118,12 +105,63 @@ export class RatingService {
       blackRating,
       whiteRating,
       blackResult,
-      blackGamesCount,
     );
     
     return {
       white: whiteChange,
       black: blackChange,
+    };
+  }
+
+  /**
+   * Calculate ELO rating (public method for use by other services)
+   */
+  calculateEloRating(playerRating: number, opponentRating: number, result: RatingResult): number {
+    const ratingChange = this.calculateRatingChange(playerRating, opponentRating, result);
+    return ratingChange.newRating;
+  }
+
+  /**
+   * Calculate new ratings for both players based on result
+   * 
+   * @param whiteRating White player's current rating
+   * @param blackRating Black player's current rating
+   * @param result The game result ('white_wins', 'black_wins', or 'draw')
+   * @returns New ratings for both players
+   */
+  calculateNewRatings(
+    whiteRating: number,
+    blackRating: number,
+    result: 'white_wins' | 'black_wins' | 'draw'
+  ): { whiteNewRating: number, blackNewRating: number } {
+    // Map the string result to RatingResult enum
+    let whiteResult: RatingResult;
+    
+    switch (result) {
+      case 'white_wins':
+        whiteResult = RatingResult.WIN;
+        break;
+      case 'black_wins':
+        whiteResult = RatingResult.LOSS;
+        break;
+      case 'draw':
+        whiteResult = RatingResult.DRAW;
+        break;
+      default:
+        // This shouldn't happen with strict typing, but handle it anyway
+        whiteResult = RatingResult.DRAW;
+    }
+    
+    // Calculate rating changes using existing method
+    const ratingChanges = this.calculateGameRatingChanges(
+      whiteRating,
+      blackRating,
+      whiteResult
+    );
+    
+    return {
+      whiteNewRating: ratingChanges.white.newRating,
+      blackNewRating: ratingChanges.black.newRating
     };
   }
 } 

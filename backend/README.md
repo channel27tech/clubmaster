@@ -96,3 +96,87 @@ Nest is an MIT-licensed open source project. It can grow thanks to the sponsors 
 ## License
 
 Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+
+# Clubmaster Backend
+
+This is the backend for the Clubmaster chess application.
+
+## Installation
+
+```bash
+$ npm install
+```
+
+## Running the app
+
+```bash
+# development
+$ npm run start
+
+# watch mode
+$ npm run start:dev
+
+# production mode
+$ npm run start:prod
+```
+
+## Database Migrations
+
+```bash
+# run migrations
+$ npm run migration:run
+
+# create a new migration
+$ npm run migration:create
+
+# generate a migration based on entity changes
+$ npm run migration:generate
+
+# revert the last migration
+$ npm run migration:revert
+```
+
+## ELO Rating System
+
+The Clubmaster application implements a standard ELO rating system for chess games with the following characteristics:
+
+### Rating Calculation
+
+- Uses the standard ELO formula with K-factor = 32
+- Expected score formula: `1 / (1 + 10^((opponent - player) / 400))`
+- Actual score: `1` (win), `0.5` (draw), `0` (loss)
+- New rating = `old + K × (actual − expected)`
+- Rating cannot go below 0
+
+### When Ratings Are Updated
+
+Ratings are only updated for games that meet ALL of the following criteria:
+- The game is marked as rated (rated = true)
+- Both players are registered users (not guests)
+- The game was not aborted
+
+### Rating Data Storage
+
+- User ratings are stored in the users table
+- Game ratings are stored with both before and after values:
+  - `whitePlayerRating`: White player's rating before the game
+  - `blackPlayerRating`: Black player's rating before the game
+  - `whitePlayerRatingAfter`: White player's rating after the game
+  - `blackPlayerRatingAfter`: Black player's rating after the game
+
+### Integration
+
+The rating system is integrated with the existing game end logic and will not interfere with the existing mechanisms for game results (resign, draw, timeout, abort).
+
+## Test
+
+```bash
+# unit tests
+$ npm run test
+
+# e2e tests
+$ npm run test:e2e
+
+# test coverage
+$ npm run test:cov
+```

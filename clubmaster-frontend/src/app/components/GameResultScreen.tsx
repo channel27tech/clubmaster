@@ -1,24 +1,151 @@
 'use client';
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { GameResultType, GameEndReason, GameResult } from '../utils/types';
+import { fetchGameResult, GameResultResponse } from '../api/gameApi';
 
 interface GameResultScreenProps extends Omit<GameResult, 'result' | 'reason'> {
   result: GameResultType;
   reason: GameEndReason;
+  gameId: string;
+  playerPhotoURL?: string | null;
+  opponentPhotoURL?: string | null;
   onClose: () => void;
 }
 
 const GameResultScreen: React.FC<GameResultScreenProps> = ({
   result,
   reason,
-  playerName,
-  opponentName,
-  playerRating,
-  opponentRating,
-  playerRatingChange,
-  opponentRatingChange,
+  gameId,
+  playerName: initialPlayerName = 'You',
+  opponentName: initialOpponentName = 'Opponent',
+  playerRating: initialPlayerRating = 1500,
+  opponentRating: initialOpponentRating = 1500,
+  playerRatingChange: initialPlayerRatingChange = 0,
+  opponentRatingChange: initialOpponentRatingChange = 0,
+  playerPhotoURL: initialPlayerPhotoURL = null,
+  opponentPhotoURL: initialOpponentPhotoURL = null,
   onClose
 }) => {
+  // State for player data that will be fetched from API
+  const [playerName, setPlayerName] = useState<string>(initialPlayerName);
+  const [opponentName, setOpponentName] = useState<string>(initialOpponentName);
+  const [playerRating, setPlayerRating] = useState<number>(initialPlayerRating);
+  const [opponentRating, setOpponentRating] = useState<number>(initialOpponentRating);
+  const [playerRatingChange, setPlayerRatingChange] = useState<number>(initialPlayerRatingChange);
+  const [opponentRatingChange, setOpponentRatingChange] = useState<number>(initialOpponentRatingChange);
+  const [playerPhotoURL, setPlayerPhotoURL] = useState<string | null>(initialPlayerPhotoURL);
+  const [opponentPhotoURL, setOpponentPhotoURL] = useState<string | null>(initialOpponentPhotoURL);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  
+  // Fetch game result data when component mounts
+  useEffect(() => {
+    let isMounted = true;
+    
+    const fetchData = async () => {
+      if (!gameId) {
+        console.warn('No gameId provided to GameResultScreen');
+        setIsLoading(false);
+        return;
+      }
+      
+      try {
+        console.log('Fetching game result data for gameId:', gameId);
+        setIsLoading(true);
+        
+        const gameResultData = await fetchGameResult(gameId);
+        
+        // Only update state if component is still mounted
+        if (isMounted) {
+          // Determine which player is "you" based on the result
+          if (result === 'win' && gameResultData.resultType === 'white_win') {
+            // You are white and won
+            setPlayerName(gameResultData.whitePlayer.username);
+            setOpponentName(gameResultData.blackPlayer.username);
+            setPlayerRating(gameResultData.whitePlayer.rating);
+            setOpponentRating(gameResultData.blackPlayer.rating);
+            setPlayerRatingChange(gameResultData.whitePlayer.ratingChange);
+            setOpponentRatingChange(gameResultData.blackPlayer.ratingChange);
+            setPlayerPhotoURL(gameResultData.whitePlayer.photoURL);
+            setOpponentPhotoURL(gameResultData.blackPlayer.photoURL);
+          } else if (result === 'win' && gameResultData.resultType === 'black_win') {
+            // You are black and won
+            setPlayerName(gameResultData.blackPlayer.username);
+            setOpponentName(gameResultData.whitePlayer.username);
+            setPlayerRating(gameResultData.blackPlayer.rating);
+            setOpponentRating(gameResultData.whitePlayer.rating);
+            setPlayerRatingChange(gameResultData.blackPlayer.ratingChange);
+            setOpponentRatingChange(gameResultData.whitePlayer.ratingChange);
+            setPlayerPhotoURL(gameResultData.blackPlayer.photoURL);
+            setOpponentPhotoURL(gameResultData.whitePlayer.photoURL);
+          } else if (result === 'loss' && gameResultData.resultType === 'white_win') {
+            // You are black and lost
+            setPlayerName(gameResultData.blackPlayer.username);
+            setOpponentName(gameResultData.whitePlayer.username);
+            setPlayerRating(gameResultData.blackPlayer.rating);
+            setOpponentRating(gameResultData.whitePlayer.rating);
+            setPlayerRatingChange(gameResultData.blackPlayer.ratingChange);
+            setOpponentRatingChange(gameResultData.whitePlayer.ratingChange);
+            setPlayerPhotoURL(gameResultData.blackPlayer.photoURL);
+            setOpponentPhotoURL(gameResultData.whitePlayer.photoURL);
+          } else if (result === 'loss' && gameResultData.resultType === 'black_win') {
+            // You are white and lost
+            setPlayerName(gameResultData.whitePlayer.username);
+            setOpponentName(gameResultData.blackPlayer.username);
+            setPlayerRating(gameResultData.whitePlayer.rating);
+            setOpponentRating(gameResultData.blackPlayer.rating);
+            setPlayerRatingChange(gameResultData.whitePlayer.ratingChange);
+            setOpponentRatingChange(gameResultData.blackPlayer.ratingChange);
+            setPlayerPhotoURL(gameResultData.whitePlayer.photoURL);
+            setOpponentPhotoURL(gameResultData.blackPlayer.photoURL);
+          } else {
+            // Draw or other result - use default mapping
+            setPlayerName(gameResultData.whitePlayer.username);
+            setOpponentName(gameResultData.blackPlayer.username);
+            setPlayerRating(gameResultData.whitePlayer.rating);
+            setOpponentRating(gameResultData.blackPlayer.rating);
+            setPlayerRatingChange(gameResultData.whitePlayer.ratingChange);
+            setOpponentRatingChange(gameResultData.blackPlayer.ratingChange);
+            setPlayerPhotoURL(gameResultData.whitePlayer.photoURL);
+            setOpponentPhotoURL(gameResultData.blackPlayer.photoURL);
+          }
+          
+          setIsLoading(false);
+          setError(null);
+        }
+      } catch (err) {
+        console.error('Error fetching game result data:', err);
+        if (isMounted) {
+          setError('Failed to load player data');
+          setIsLoading(false);
+        }
+      }
+    };
+    
+    fetchData();
+    
+    // Cleanup function
+    return () => {
+      isMounted = false;
+    };
+  }, [gameId, result]);
+  
+  // Log current state
+  console.log('GameResultScreen state:', {
+    result,
+    reason,
+    gameId,
+    playerName,
+    opponentName,
+    playerRating,
+    opponentRating,
+    playerRatingChange,
+    opponentRatingChange,
+    playerPhotoURL,
+    opponentPhotoURL,
+    isLoading,
+    error
+  });
   // Get title text based on result
   const getTitleText = (): string => {
     // Add safety check for resignations
@@ -82,7 +209,9 @@ const GameResultScreen: React.FC<GameResultScreenProps> = ({
 
   // Get score display for the result banner
   const getScoreDisplay = (): string => {
-    if (reason === 'abort') return 'Aborted';
+    // Specific handling for aborted games - show score as 0-0 instead of 'Aborted'
+    // This ensures consistent layout with other game end conditions
+    if (reason === 'abort') return '0 - 0';
     
     // Specific handling for resignations to ensure correct score display
     if (reason === 'resignation') {
@@ -131,40 +260,96 @@ const GameResultScreen: React.FC<GameResultScreenProps> = ({
 
         {/* Players information - adjusted for spacing after header */}
         <div className="p-4 pt-10">
-          {/* Game result with player profiles */}
-          <div className="flex justify-between items-center mb-4">
-            {/* Player (You) */}
-            <div className="flex flex-col items-center">
-              <div className="w-14 h-14 flex items-center justify-center bg-[#4A7C59] rounded-lg text-white text-lg font-bold mb-2 border-2 border-[#F9F3DD]">
-                {playerName.charAt(0).toUpperCase()}
+          {isLoading ? (
+            <div className="flex flex-col items-center justify-center py-4">
+              <div className="w-8 h-8 border-4 border-[#4A7C59] border-t-transparent rounded-full animate-spin mb-2"></div>
+              <p className="text-[#F9F3DD] text-sm">Loading player data...</p>
+            </div>
+          ) : error ? (
+            <div className="flex flex-col items-center justify-center py-4">
+              <p className="text-red-400 text-sm mb-2">{error}</p>
+              <p className="text-[#F9F3DD] text-xs">Using fallback data</p>
+            </div>
+          ) : (
+            <>
+              {/* Game result with player profiles */}
+              <div className="flex justify-between items-center mb-4">
+                {/* Player (You) */}
+                <div className="flex flex-col items-center">
+                  {playerPhotoURL ? (
+                    <div className="w-14 h-14 rounded-lg overflow-hidden mb-2 border-2 border-[#F9F3DD]">
+                      <img 
+                        src={playerPhotoURL} 
+                        alt={`${playerName}'s avatar`} 
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          // If image fails to load, replace with fallback
+                          e.currentTarget.style.display = 'none';
+                          e.currentTarget.parentElement!.innerHTML = `
+                            <div class="w-full h-full flex items-center justify-center bg-[#4A7C59] text-white text-lg font-bold">
+                              ${playerName.charAt(0).toUpperCase()}
+                            </div>
+                          `;
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-14 h-14 flex items-center justify-center bg-[#4A7C59] rounded-lg text-white text-lg font-bold mb-2 border-2 border-[#F9F3DD]">
+                      {playerName ? playerName.charAt(0).toUpperCase() : 'P'}
+                    </div>
+                  )}
+                  <p className="text-[#F9F3DD] text-sm font-semibold">
+                    {playerName || 'Player'}
+                  </p>
+                </div>
+
+                {/* Score */}
+                <div className="text-2xl font-bold text-[#F9F3DD] mx-3">
+                  {getScoreDisplay()}
+                </div>
+
+                {/* Opponent */}
+                <div className="flex flex-col items-center">
+                  {opponentPhotoURL ? (
+                    <div className="w-14 h-14 rounded-lg overflow-hidden mb-2 border-2 border-[#F9F3DD]">
+                      <img 
+                        src={opponentPhotoURL} 
+                        alt={`${opponentName}'s avatar`} 
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          // If image fails to load, replace with fallback
+                          e.currentTarget.style.display = 'none';
+                          e.currentTarget.parentElement!.innerHTML = `
+                            <div class="w-full h-full flex items-center justify-center bg-[#333939] text-white text-lg font-bold">
+                              ${opponentName.charAt(0).toUpperCase()}
+                            </div>
+                          `;
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-14 h-14 flex items-center justify-center bg-[#333939] rounded-lg text-white text-lg font-bold mb-2 border-2 border-[#F9F3DD]">
+                      {opponentName ? opponentName.charAt(0).toUpperCase() : 'O'}
+                    </div>
+                  )}
+                  <p className="text-[#F9F3DD] text-sm font-semibold">
+                    {opponentName || 'Opponent'}
+                  </p>
+                </div>
               </div>
-              <p className="text-[#F9F3DD] text-sm font-semibold">{playerName}</p>
-            </div>
 
-            {/* Score */}
-            <div className="text-2xl font-bold text-[#F9F3DD] mx-3">
-              {getScoreDisplay()}
-            </div>
-
-            {/* Opponent */}
-            <div className="flex flex-col items-center">
-              <div className="w-14 h-14 flex items-center justify-center bg-[#333939] rounded-lg text-white text-lg font-bold mb-2 border-2 border-[#F9F3DD]">
-                {opponentName.charAt(0).toUpperCase()}
+              {/* Rating information - showing the player's rating + change */}
+              <div className="flex justify-center items-center mb-4">
+                <span className="text-[#F9F3DD] text-sm mr-2">RATING:</span>
+                <span className="text-[#F9F3DD] text-sm font-semibold">
+                  {ratingInfo.rating}
+                </span>
+                <span className={`text-sm ${ratingInfo.change >= 0 ? 'text-green-500' : 'text-red-500'} font-bold ml-1`}>
+                  {ratingInfo.change >= 0 ? `+${ratingInfo.change}` : ratingInfo.change}
+                </span>
               </div>
-              <p className="text-[#F9F3DD] text-sm font-semibold">{opponentName}</p>
-            </div>
-          </div>
-
-          {/* Rating information - only showing the player's rating + change for winner */}
-          <div className="flex justify-center items-center mb-4">
-            <span className="text-[#F9F3DD] text-sm mr-2">RATING:</span>
-            <span className="text-[#F9F3DD] text-sm font-semibold">
-              {ratingInfo.rating}
-            </span>
-            <span className={`text-sm ${ratingInfo.change >= 0 ? 'text-green-500' : 'text-red-500'} font-bold ml-1`}>
-              {ratingInfo.change >= 0 ? `+${ratingInfo.change}` : ratingInfo.change}
-            </span>
-          </div>
+            </>
+          )}
         </div>
 
         {/* Action buttons */}

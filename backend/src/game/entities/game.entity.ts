@@ -6,6 +6,9 @@ export class Game {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  @Column({ nullable: true })
+  customId: string;
+
   @Column()
   whitePlayerId: string;
 
@@ -20,8 +23,12 @@ export class Game {
   @JoinColumn({ name: 'blackPlayerId' })
   blackPlayer: User;
 
-  @Column({ nullable: true })
+  @Column({ type: 'uuid', nullable: true })
   winnerId: string;
+
+  @ManyToOne(() => User, { nullable: true })
+  @JoinColumn({ name: 'winnerId' })
+  winner: User;
 
   @Column({ default: 'ongoing' })
   status: 'ongoing' | 'white_win' | 'black_win' | 'draw' | 'aborted';
@@ -34,6 +41,12 @@ export class Game {
 
   @Column({ default: 1500 })
   blackPlayerRating: number;
+
+  @Column({ nullable: true })
+  whitePlayerRatingAfter: number;
+
+  @Column({ nullable: true })
+  blackPlayerRatingAfter: number;
 
   @Column({ nullable: true })
   endReason: string;
@@ -49,6 +62,9 @@ export class Game {
 
   @Column({ type: 'int', default: 0 })
   totalMoves: number;
+  
+  @Column({ type: 'varchar', nullable: true })
+  fen: string;
 
   @CreateDateColumn()
   createdAt: Date;

@@ -90,31 +90,68 @@ export const startMatchmaking = (matchmakingOptions: {
   rated?: boolean;
   preferredSide?: string;
 }): void => {
-  console.log('🔍 StartMatchmaking called with options:', matchmakingOptions);
-  
-  // Validate and format time control
-  if (matchmakingOptions.timeControl) {
-    // Ensure time control is in the correct format
-    const timeControlStr = matchmakingOptions.timeControl;
-    console.log('Processing time control:', timeControlStr);
+  if (!socket) {
+    console.error('⚠️ Cannot start matchmaking: Socket not initialized');
+    return;
+  }
+
+  // Get Firebase UID directly from Firebase Auth if available
+  import('firebase/auth').then(({ getAuth }) => {
+    const auth = getAuth();
+    const currentUser = auth.currentUser;
     
-    // Store the validated time control
-    localStorage.setItem('timeControl', timeControlStr);
-    console.log('📝 Stored time control in localStorage:', timeControlStr);
+    let firebaseUid = currentUser ? currentUser.uid : 'guest';
+    let username = currentUser?.displayName || null;
+    
+    console.log('🔑 Firebase UID:', firebaseUid !== 'guest' ? 'Found' : 'Not found (guest)');
+    if (firebaseUid !== 'guest') {
+      console.log('👤 Authenticated user:', username || 'Unknown');
+    }
+
+    // Add time control to localStorage for consistency across app
+    const timeControlStr = matchmakingOptions.timeControl || '10+0';
+    // Validate time control format before storing
+    if (/^\d+\+\d+$/.test(timeControlStr)) {
+      // Store the validated time control
+      localStorage.setItem('timeControl', timeControlStr);
+      console.log('📝 Stored time control in localStorage:', timeControlStr);
+    } else {
+      console.warn('⚠️ Invalid time control format:', timeControlStr);
+    }
     
     // Store the game mode for consistency
     if (matchmakingOptions.gameMode) {
       localStorage.setItem('gameMode', matchmakingOptions.gameMode);
       console.log('📝 Stored game mode in localStorage:', matchmakingOptions.gameMode);
     }
-  }
-  
-  if (socket?.connected) {
-    console.log('🚀 Emitting startMatchmaking event with:', matchmakingOptions);
-    socket.emit('startMatchmaking', matchmakingOptions);
-  } else {
-    console.error('⚠️ Cannot start matchmaking: Socket not connected');
-  }
+
+    // Add Firebase UID and username to matchmaking options
+    const updatedMatchmakingOptions = {
+      ...matchmakingOptions,
+      firebaseUid,
+      username
+    };
+
+    if (socket?.connected) {
+      console.log('🚀 Emitting startMatchmaking event with:', updatedMatchmakingOptions);
+      socket.emit('startMatchmaking', updatedMatchmakingOptions);
+    } else {
+      console.error('⚠️ Cannot start matchmaking: Socket not connected');
+    }
+  }).catch(error => {
+    console.error('⚠️ Error importing Firebase Auth:', error);
+    
+    // Fallback to guest mode
+    const updatedMatchmakingOptions = {
+      ...matchmakingOptions,
+      firebaseUid: 'guest'
+    };
+    
+    if (socket?.connected) {
+      console.log('🚀 Emitting startMatchmaking event with (guest fallback):', updatedMatchmakingOptions);
+      socket.emit('startMatchmaking', updatedMatchmakingOptions);
+    }
+  });
 };
 
 /**

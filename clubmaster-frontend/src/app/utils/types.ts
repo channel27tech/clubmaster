@@ -49,6 +49,8 @@ export interface GameResult {
   opponentName: string;
   playerRating: number;
   opponentRating: number;
+  playerPhotoURL?: string | null;
+  opponentPhotoURL?: string | null;
   playerRatingChange: number;
   opponentRatingChange: number;
 } 

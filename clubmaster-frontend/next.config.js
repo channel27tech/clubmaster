@@ -3,10 +3,7 @@ const nextConfig = {
   reactStrictMode: true,
   transpilePackages: ['firebase'],
   images: {
-    domains: [
-      'lh3.googleusercontent.com', // Google user profile images
-      'firebasestorage.googleapis.com', // Firebase Storage images
-    ],
+    domains: ['lh3.googleusercontent.com'],
   },
   webpack: (config) => {
     // This is required for Firebase to work properly

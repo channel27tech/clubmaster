@@ -230,9 +230,9 @@ export default function ClubHomeScreen() {
           <button 
             className="w-[302px] h-[57px] rounded-[10px] bg-[#4A7C59] text-[#FAF3DD] border-[3px] border-[#E9CB6B] mb-4" 
             style={{
-              fontFamily: 'Roboto, sans-serif',
-              fontSize: '18px',
-              fontWeight: '500'
+            fontFamily: 'Roboto, sans-serif',
+            fontSize: '18px',
+            fontWeight: '500'
             }}
             onClick={handlePlayClick}
           >

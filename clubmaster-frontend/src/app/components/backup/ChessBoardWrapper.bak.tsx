@@ -1,19 +1,18 @@
 'use client';
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import dynamic from 'next/dynamic';
-import { useRouter } from 'next/navigation';
 import PlayerInfo from './PlayerInfo';
 import MoveControls from './MoveControls';
 import GameClock from './GameClock';
 import GameResultScreen from './GameResultScreen';
+import { player1, player2 } from '../utils/mockData';
 import { MoveHistoryState } from '../utils/moveHistory';
-import { getChessEngine, makeMove, resetChessEngine, setChessPosition, getGameStatus, getCurrentBoardState, isThreefoldRepetition, getFen } from '../utils/chessEngine';
+import { getGameStatus, getChessEngine, getFen, setChessPosition } from '../utils/chessEngine';
 import { useSound } from '../../contexts/SoundContext';
 import { useSocket } from '../../contexts/SocketContext';
 import { playSound, preloadSoundEffects } from '../utils/soundEffects';
-import { CapturedPiece, GameResultType, GameEndReason, GameResult } from '../utils/types';
+import { CapturedPiece, GameResultType, GameEndReason } from '../utils/types';
 import DisconnectionNotification from './DisconnectionNotification';
-import { fetchGamePlayers } from '../api/gameApi';
 
 // Use dynamic import in a client component
 const ChessBoard = dynamic(() => import('./ChessBoard'), {
@@ -65,23 +64,12 @@ interface ChessBoardWrapperProps {
   onSanMoveListChange?: (sanMoves: string[]) => void;
 }
 
-// Player data type definition
-interface PlayerData {
-  username: string;
-  rating: number;
-  capturedPieces?: CapturedPiece[];
-  isGuest?: boolean;
-  clubAffiliation?: string;
-  photoURL?: string | null;
-}
-
 export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', gameId = '', onSanMoveListChange }: ChessBoardWrapperProps) {
   // Get game ID from props or use derived from URL if available
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [gameRoomId, setGameRoomId] = useState<string>(gameId);
   
-  // Router for navigation
-  const router = useRouter();
+
   
   // Socket context for real-time communication
   const { socket } = useSocket();
@@ -99,43 +87,12 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   // Active player for timers
   const [activePlayer, setActivePlayer] = useState<'white' | 'black' | null>('white');
   
-  // Player data state
-  const [whitePlayer, setWhitePlayer] = useState<PlayerData>({
-    username: "Loading...",
-    rating: 0,
-    capturedPieces: [],
-    isGuest: false,
-    photoURL: null
-  });
-  
-  const [blackPlayer, setBlackPlayer] = useState<PlayerData>({
-    username: "Loading...",
-    rating: 0,
-    capturedPieces: [],
-    isGuest: false,
-    photoURL: null
-  });
-  
-  // Debug player data changes
-  useEffect(() => {
-    console.log('White player data updated:', whitePlayer);
-  }, [whitePlayer]);
-  
-  useEffect(() => {
-    console.log('Black player data updated:', blackPlayer);
-  }, [blackPlayer]);
-  
-  // Loading state for player data
-  const [loadingPlayers, setLoadingPlayers] = useState<boolean>(true);
-  const [playerDataError, setPlayerDataError] = useState<string | null>(null);
-  
   // Game state
   const [gameState, setGameState] = useState({
     hasStarted: true,
     isWhiteTurn: true,
     hasWhiteMoved: false,
     isGameOver: false,
-    gameOverReason: null as string | null, // Add gameOverReason property
     timeControl: timeControl || '5+0', // Use passed timeControl or default
     gameMode: getGameModeFromTimeControl(timeControl || '5+0') // Derive game mode from time control
   });
@@ -144,118 +101,6 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   useEffect(() => {
     console.log('ChessBoardWrapper initial gameState with hasWhiteMoved=false:', gameState);
   }, []);
-  
-  // Fetch real player data for the game
-  useEffect(() => {
-    if (!gameRoomId) {
-      console.log('No gameRoomId provided, skipping player data fetch');
-      return;
-    }
-    
-    // Function to fetch player data with retries
-    const fetchPlayersWithRetries = async (retries = 3, delay = 2000) => {
-      let lastError = null;
-      
-      // Set initial loading state
-      setLoadingPlayers(true);
-      setPlayerDataError(null);
-      
-      for (let attempt = 0; attempt < retries; attempt++) {
-        try {
-          console.log(`Fetching player data for game ID: ${gameRoomId} (Attempt ${attempt + 1}/${retries})`);
-          const data = await fetchGamePlayers(gameRoomId);
-          
-          // Validate that we have real player data
-          if (!data || !data.whitePlayer || !data.blackPlayer) {
-            console.warn('Invalid player data format received:', data);
-            throw new Error('Invalid player data format received');
-          }
-          
-          const hasValidWhitePlayer = data.whitePlayer.username && data.whitePlayer.username !== 'Loading...';
-          const hasValidBlackPlayer = data.blackPlayer.username && data.blackPlayer.username !== 'Loading...';
-          
-          if (!hasValidWhitePlayer || !hasValidBlackPlayer) {
-            console.warn('Incomplete player data received, retrying...', { 
-              whiteUsername: data.whitePlayer.username, 
-              blackUsername: data.blackPlayer.username 
-            });
-            throw new Error('Incomplete player data received');
-          }
-          
-          console.log('Player data fetched successfully:', {
-            white: `${data.whitePlayer.username} (${data.whitePlayer.rating})`,
-            black: `${data.blackPlayer.username} (${data.blackPlayer.rating})`
-          });
-          
-          // Update player states with real data
-          setWhitePlayer({
-            username: data.whitePlayer.username,
-            rating: typeof data.whitePlayer.rating === 'number' ? data.whitePlayer.rating : 1500,
-            capturedPieces: capturedByWhite,
-            isGuest: false,
-            photoURL: data.whitePlayer.photoURL
-          });
-          
-          setBlackPlayer({
-            username: data.blackPlayer.username,
-            rating: typeof data.blackPlayer.rating === 'number' ? data.blackPlayer.rating : 1500,
-            capturedPieces: capturedByBlack,
-            isGuest: false,
-            photoURL: data.blackPlayer.photoURL
-          });
-          
-          setLoadingPlayers(false);
-          return; // Success, exit the retry loop
-        } catch (error: any) {
-          lastError = error;
-          const errorMessage = error?.message || 'Unknown error';
-          console.error(`Error fetching player data (Attempt ${attempt + 1}/${retries}): ${errorMessage}`, error);
-          
-          // If we have more retries, wait before trying again
-          if (attempt < retries - 1) {
-            console.log(`Waiting ${delay}ms before retry ${attempt + 2}...`);
-            await new Promise(resolve => setTimeout(resolve, delay));
-          }
-        }
-      }
-      
-      // If we get here, all retries failed
-      console.error(`All ${retries} attempts to fetch player data failed. Last error:`, lastError);
-      setPlayerDataError(`Failed to load player data after ${retries} attempts`);
-      setLoadingPlayers(false);
-      
-      // Set generic placeholder data as a last resort
-      console.log('Setting placeholder player data after all retries failed');
-      
-      setWhitePlayer({
-        username: 'White Player',
-        rating: 1500,
-        capturedPieces: capturedByWhite,
-        isGuest: false,
-        photoURL: null
-      });
-      
-      setBlackPlayer({
-        username: 'Black Player',
-        rating: 1500,
-        capturedPieces: capturedByBlack,
-        isGuest: false,
-        photoURL: null
-      });
-    };
-    
-    // Start the fetch process with retries
-    fetchPlayersWithRetries();
-    
-    // Set up a periodic refresh to ensure player data stays up-to-date
-    const refreshInterval = setInterval(() => {
-      console.log('Periodic refresh of player data');
-      fetchPlayersWithRetries(2, 1000); // Fewer retries for periodic refresh
-    }, 30000); // Refresh every 30 seconds
-    
-    // Clean up interval on unmount
-    return () => clearInterval(refreshInterval);
-  }, [gameRoomId, capturedByWhite, capturedByBlack]);
   
   // Debug gameState.hasWhiteMoved changes
   useEffect(() => {
@@ -337,14 +182,6 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   // Define captured pieces for each player
   const [whiteCapturedPieces, setWhiteCapturedPieces] = useState<CapturedPiece[]>([]);
   const [blackCapturedPieces, setBlackCapturedPieces] = useState<CapturedPiece[]>([]);
-
-  // For this demo, we'll copy pieces from mock data
-  // Initialize empty captured pieces arrays
-  useEffect(() => {
-    // Initialize with empty arrays instead of mock data
-    setCapturedByWhite([]);
-    setCapturedByBlack([]);
-  }, []);
 
   // Preload sound effects when component mounts
   useEffect(() => {
@@ -626,10 +463,10 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       const resultData = {
         result: isWinner ? 'win' : (isLoser ? 'loss' : 'draw') as GameResultType,
         reason: 'checkmate' as GameEndReason,
-        playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
-        opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-        playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-        opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
+        playerName: player1.username,
+        opponentName: player2.username,
+        playerRating: player1.rating || 1500,
+        opponentRating: player2.rating || 1500,
         playerRatingChange: isWinner ? 10 : -10,
         opponentRatingChange: isWinner ? -10 : 10
       };
@@ -676,8 +513,8 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     // Add disconnection event handlers
     safeSocket.on('opponent_disconnected', ({ playerId, reconnectTimeoutSeconds }) => {
       // Determine which player disconnected and set their name
-      const isWhitePlayer = playerColor === 'white';
-      const disconnectedPlayer = isWhitePlayer ? blackPlayer : whitePlayer;
+      const isPlayer1 = playerId === player1.id;
+      const disconnectedPlayer = isPlayer1 ? player1 : player2;
       
       setDisconnectedPlayerName(disconnectedPlayer.username);
       setOpponentDisconnected(true);
@@ -735,10 +572,10 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       const resultData = {
         result: isWinner ? 'win' : 'loss' as GameResultType,
         reason: 'disconnection' as GameEndReason,
-        playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
-        opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-        playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-        opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
+        playerName: player1.username,
+        opponentName: player2.username,
+        playerRating: player1.rating || 1500,
+        opponentRating: player2.rating || 1500,
         playerRatingChange: isWinner ? 10 : -10,
         opponentRatingChange: isWinner ? -10 : 10
       };
@@ -772,136 +609,21 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         if (soundEnabled) {
           playSound('NOTIFICATION', true);
         }
-        
-        // First, check if we already have real player data
-        const hasRealWhiteData = whitePlayer.username !== 'Loading...';
-        const hasRealBlackData = blackPlayer.username !== 'Loading...';
-        
-        console.log('Current player data before abort handling:', {
-          hasRealWhiteData,
-          hasRealBlackData,
-          whitePlayer,
-          blackPlayer
+
+        // Set game result data for abort
+        setGameResultData({
+          result: 'draw',
+          reason: 'abort',
+          playerName: player1.username,
+          opponentName: player2.username,
+          playerRating: player1.rating || 1500,
+          opponentRating: player2.rating || 1500,
+          playerRatingChange: 0, // No rating change on abort
+          opponentRatingChange: 0  // No rating change on abort
         });
-        
-        // If we don't have real player data yet, try to fetch it first
-        if (!hasRealWhiteData || !hasRealBlackData) {
-          console.log('Missing real player data, attempting to fetch before showing abort screen');
-          
-          // Try to fetch player data directly
-          fetchGamePlayers(gameRoomId)
-            .then(data => {
-              console.log('Successfully fetched player data for abort:', data);
-              
-              // Create updated player data with real values from API
-              const updatedWhitePlayer = {
-                username: data?.whitePlayer?.username || 'White Player',
-                rating: typeof data?.whitePlayer?.rating === 'number' ? data.whitePlayer.rating : 1500,
-                capturedPieces: capturedByWhite,
-                isGuest: false,
-                photoURL: data?.whitePlayer?.photoURL || null
-              };
-              
-              const updatedBlackPlayer = {
-                username: data?.blackPlayer?.username || 'Black Player',
-                rating: typeof data?.blackPlayer?.rating === 'number' ? data.blackPlayer.rating : 1500,
-                capturedPieces: capturedByBlack,
-                isGuest: false,
-                photoURL: data?.blackPlayer?.photoURL || null
-              };
-              
-              // Update player states with real data
-              setWhitePlayer(updatedWhitePlayer);
-              setBlackPlayer(updatedBlackPlayer);
-              
-              // Create game result data with the real player data we just fetched
-              const abortResultData = {
-                result: 'draw' as GameResultType,
-                reason: 'abort' as GameEndReason,
-                playerName: playerColor === 'white' ? updatedWhitePlayer.username : updatedBlackPlayer.username,
-                opponentName: playerColor === 'white' ? updatedBlackPlayer.username : updatedWhitePlayer.username,
-                playerRating: playerColor === 'white' ? updatedWhitePlayer.rating : updatedBlackPlayer.rating,
-                opponentRating: playerColor === 'white' ? updatedBlackPlayer.rating : updatedWhitePlayer.rating,
-                playerPhotoURL: playerColor === 'white' ? updatedWhitePlayer.photoURL : updatedBlackPlayer.photoURL,
-                opponentPhotoURL: playerColor === 'white' ? updatedBlackPlayer.photoURL : updatedWhitePlayer.photoURL,
-                playerRatingChange: 0, // No rating change on abort
-                opponentRatingChange: 0  // No rating change on abort
-              };
-              
-              console.log('Created game result data for abort with real player data:', abortResultData);
-              
-              // Set the game result data and show the result screen
-              setGameResultData(abortResultData);
-              setShowResultScreen(true);
-            })
-            .catch(error => {
-              console.error('Failed to fetch player data for abort:', error);
-              
-              // Use fallback values if fetch fails
-              const fallbackWhitePlayer = {
-                username: 'White Player',
-                rating: 1500,
-                capturedPieces: capturedByWhite,
-                isGuest: false,
-                photoURL: null
-              };
-              
-              const fallbackBlackPlayer = {
-                username: 'Black Player',
-                rating: 1500,
-                capturedPieces: capturedByBlack,
-                isGuest: false,
-                photoURL: null
-              };
-              
-              // Update player states with fallback data
-              setWhitePlayer(fallbackWhitePlayer);
-              setBlackPlayer(fallbackBlackPlayer);
-              
-              // Create game result data with fallback values
-              const abortResultData = {
-                result: 'draw' as GameResultType,
-                reason: 'abort' as GameEndReason,
-                playerName: playerColor === 'white' ? fallbackWhitePlayer.username : fallbackBlackPlayer.username,
-                opponentName: playerColor === 'white' ? fallbackBlackPlayer.username : fallbackWhitePlayer.username,
-                playerRating: playerColor === 'white' ? fallbackWhitePlayer.rating : fallbackBlackPlayer.rating,
-                opponentRating: playerColor === 'white' ? fallbackBlackPlayer.rating : fallbackWhitePlayer.rating,
-                playerPhotoURL: playerColor === 'white' ? fallbackWhitePlayer.photoURL : fallbackBlackPlayer.photoURL,
-                opponentPhotoURL: playerColor === 'white' ? fallbackBlackPlayer.photoURL : fallbackWhitePlayer.photoURL,
-                playerRatingChange: 0, // No rating change on abort
-                opponentRatingChange: 0  // No rating change on abort
-              };
-              
-              console.log('Created game result data for abort with fallback values:', abortResultData);
-              
-              // Set the game result data and show the result screen
-              setGameResultData(abortResultData);
-              setShowResultScreen(true);
-            });
-        } else {
-          // We already have real player data, use it directly
-          console.log('Using existing real player data for abort');
-          
-          // Create game result data with existing player data
-          const abortResultData = {
-            result: 'draw' as GameResultType,
-            reason: 'abort' as GameEndReason,
-            playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
-            opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-            playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-            opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
-            playerPhotoURL: playerColor === 'white' ? whitePlayer.photoURL : blackPlayer.photoURL,
-            opponentPhotoURL: playerColor === 'white' ? blackPlayer.photoURL : whitePlayer.photoURL,
-            playerRatingChange: 0, // No rating change on abort
-            opponentRatingChange: 0  // No rating change on abort
-          };
-          
-          console.log('Created game result data for abort with existing player data:', abortResultData);
-          
-          // Set the game result data and show the result screen
-          setGameResultData(abortResultData);
-          setShowResultScreen(true);
-        }
+
+        // Show the result screen
+        setShowResultScreen(true);
 
         console.log(`Game ${gameRoomId} has been aborted. Reason: ${reason}`);
       }
@@ -953,8 +675,8 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         }
 
         // Get player names based on perspective (determined by the result)
-        const myName = playerColor === 'white' ? whitePlayer.username : blackPlayer.username;
-        const opponentName = playerColor === 'white' ? blackPlayer.username : whitePlayer.username;
+        const myName = resultType === 'win' ? player1.username : player2.username;
+        const opponentName = resultType === 'win' ? player2.username : player1.username;
 
         // Log the resulting data for debugging
         console.log('Creating game result data with:', {
@@ -967,33 +689,17 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
           isResigningPlayer
         });
 
-        // Log player data before creating result data for resignation
-        console.log('Player data for game result (resignation):', {
-          playerColor,
-          whitePlayer,
-          blackPlayer,
-          myName,
-          opponentName
-        });
-
         // Set game result data for resignation
-        const resignationResultData = {
+        setGameResultData({
           result: resultType,
-          reason: 'resignation' as GameEndReason,
+          reason: 'resignation',
           playerName: myName,
           opponentName: opponentName,
-          playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-          opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
-          playerPhotoURL: playerColor === 'white' ? whitePlayer.photoURL : blackPlayer.photoURL,
-          opponentPhotoURL: playerColor === 'white' ? blackPlayer.photoURL : whitePlayer.photoURL,
+          playerRating: resultType === 'win' ? player1.rating || 1500 : player2.rating || 1500,
+          opponentRating: resultType === 'win' ? player2.rating || 1500 : player1.rating || 1500,
           playerRatingChange: resultType === 'win' ? 10 : -10, 
           opponentRatingChange: resultType === 'win' ? -10 : 10
-        };
-
-        // Log the created result data
-        console.log('Created game result data (resignation):', resignationResultData);
-        
-        setGameResultData(resignationResultData);
+        });
 
         // Dispatch a game_ended event to ensure result screen shows
         console.log('Dispatching game_ended event for resignation from ChessBoardWrapper');
@@ -1050,64 +756,6 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     safeSocket.on('game_end', (data) => {
       console.log('========= RECEIVED GAME_END EVENT FROM SERVER =========', data);
 
-      // Handle threefold repetition game end
-      if (data.reason === 'threefold_repetition') {
-        console.log('Game ended due to threefold repetition - showing result screen');
-        
-        // Ensure player data is ready before creating game result data
-        ensurePlayerDataReady();
-        
-        // Create game result data for threefold repetition
-        const drawResultData = {
-          result: 'draw' as GameResultType,
-          reason: 'threefold_repetition' as GameEndReason,
-          playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
-          opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-          playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-          opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
-          playerPhotoURL: playerColor === 'white' ? whitePlayer.photoURL : blackPlayer.photoURL,
-          opponentPhotoURL: playerColor === 'white' ? blackPlayer.photoURL : whitePlayer.photoURL,
-          // Use rating changes from server data if available
-          playerRatingChange: playerColor === 'white' ? (data.whitePlayer?.ratingChange || 0) : (data.blackPlayer?.ratingChange || 0),
-          opponentRatingChange: playerColor === 'white' ? (data.blackPlayer?.ratingChange || 0) : (data.whitePlayer?.ratingChange || 0)
-        };
-        
-        // Store the result data in localStorage for the result page
-        try {
-          localStorage.setItem(`gameResult_${gameRoomId}`, JSON.stringify(drawResultData));
-          console.log('Game result data saved to localStorage for result page');
-        } catch (error) {
-          console.error('Failed to save game result data to localStorage:', error);
-        }
-        
-        // Set game result data
-        setGameResultData(drawResultData);
-        
-        // Update game state
-        setGameState(prevState => ({
-          ...prevState,
-          isGameOver: true
-        }));
-        
-        // Stop the clocks
-        setActivePlayer(null);
-        
-        // Show result screen
-        setShowResultScreen(true);
-        console.log('Result screen activated for threefold repetition');
-        
-        // Play game end sound
-        playSound('GAME_END', soundEnabled);
-        
-        // Navigate to the result page
-        console.log(`Navigating to result page for game ${gameRoomId}`);
-        setTimeout(() => {
-          router.push(`/play/game/${gameRoomId}/result`);
-        }, 1000); // Short delay to ensure the server has time to process the event
-        
-        return;
-      }
-      
       // Determine if this is a checkmate
       if (data.reason === 'checkmate') {
         console.log('Game ended due to checkmate - showing result screen');
@@ -1131,10 +779,10 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         const resultData = {
           result: resultType,
           reason: 'checkmate' as GameEndReason,
-          playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
-          opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-          playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-          opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
+          playerName: player1.username,
+          opponentName: player2.username,
+          playerRating: player1.rating || 1500,
+          opponentRating: player2.rating || 1500,
           playerRatingChange: resultType === 'win' ? 10 : -10,
           opponentRatingChange: resultType === 'win' ? -10 : 10
         };
@@ -1181,10 +829,10 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         const resultData = {
           result: resultType,
           reason: data.reason as GameEndReason,
-          playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
-          opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-          playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-          opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
+          playerName: player1.username,
+          opponentName: player2.username,
+          playerRating: player1.rating || 1500,
+          opponentRating: player2.rating || 1500,
           playerRatingChange: resultType === 'win' ? 10 : (resultType === 'loss' ? -10 : 0),
           opponentRatingChange: resultType === 'win' ? -10 : (resultType === 'loss' ? 10 : 0)
         };
@@ -1192,14 +840,13 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         // Set game result data
         setGameResultData(resultData);
         
-        // Update game state and UI
-        setGameState(prevState => ({
-          ...prevState,
-          isGameOver: true
+        // Update game state
+        setGameState(prev => ({
+          ...prev,
+          isGameOver: true,
         }));
         
-        // Ensure player data is ready before creating game result data
-        ensurePlayerDataReady();
+        // Stop clocks
         setActivePlayer(null);
         
         // Show result screen
@@ -1207,8 +854,6 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         console.log('Result screen activated for game_end event');
       }
     });
-
-    // Threefold repetition handling is now integrated into the main game_end handler above
 
     return () => {
       safeSocket.off('offer_draw');
@@ -1254,94 +899,6 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   // This helps ensure moves can be made even if other socket operations interrupt the connection
   const [moveQueue, setMoveQueue] = useState<Array<{from: string, to: string, promotion?: string}>>([]);
   
-  // Function to synchronize the board state from move history (primary source of truth)
-  const synchronizeBoardFromMoveHistory = useCallback((moveHistory: string[]) => {
-    try {
-      console.log(`Synchronizing board state from move history (${moveHistory.length} moves)`);
-      
-      // Reset the chess engine to the initial position
-      const chess = resetChessEngine();
-      
-      // Apply each move in the history
-      let allMovesApplied = true;
-      for (let i = 0; i < moveHistory.length; i++) {
-        const move = moveHistory[i];
-        try {
-          // Apply the move using SAN notation
-          const result = chess.move(move);
-          if (!result) {
-            console.error(`Failed to apply move ${i+1}: ${move}`);
-            allMovesApplied = false;
-            break;
-          }
-        } catch (moveError) {
-          console.error(`Error applying move ${i+1}: ${move}. Error: ${moveError instanceof Error ? moveError.message : 'Unknown error'}`);
-          allMovesApplied = false;
-          break;
-        }
-      }
-      
-      if (allMovesApplied) {
-        // Get the current FEN after applying all moves
-        const currentFen = chess.fen();
-        console.log(`Successfully synchronized board state from move history. Final FEN: ${currentFen}`);
-        
-        // Log the FEN parts for debugging
-        const fenParts = currentFen.split(' ');
-        console.log(`FEN parts: position=${fenParts.slice(0, 4).join(' ')}, halfmove=${fenParts[4]}, fullmove=${fenParts[5]}`);
-        
-        // Update the SAN move list
-        setSanMoveList(moveHistory);
-        
-        // Notify parent about SAN move list changes if callback exists
-        if (onSanMoveListChange) {
-          onSanMoveListChange(moveHistory);
-        }
-        
-        // Check for threefold repetition after synchronizing
-        if (chess.isThreefoldRepetition()) {
-          console.log('Threefold repetition detected after synchronizing board state');
-          
-          // If the game isn't already over and we have a socket connection
-          if (!gameState.isGameOver && socket && socket.connected) {
-            console.log('Emitting threefold_repetition event to server');
-            
-            // Emit game_end event to the server with threefold_repetition reason
-            socket.emit('game_end', {
-              gameId: gameRoomId,
-              reason: 'threefold_repetition',
-              fen: chess.fen(),
-              moveHistory: chess.history() // Include move history for verification
-            });
-            
-            // Update game state to mark game as over
-            setGameState(prev => ({
-              ...prev,
-              isGameOver: true,
-              gameOverReason: 'threefold_repetition'
-            }));
-            
-            // Stop the clocks
-            setActivePlayer(null);
-          }
-        }
-        
-        return true;
-      } else {
-        console.error('Failed to synchronize board state from move history');
-        return false;
-      }
-    } catch (error) {
-      console.error(`Error synchronizing board state from move history: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      return false;
-    }
-  }, [onSanMoveListChange, gameState.isGameOver, socket, gameRoomId, setGameState, setActivePlayer]);
-  
-  // Legacy function to rebuild the board state from move history
-  const rebuildBoardFromMoveHistory = useCallback((moveHistory: string[]) => {
-    return synchronizeBoardFromMoveHistory(moveHistory);
-  }, [synchronizeBoardFromMoveHistory]);
-  
   // Dedicated effect for handling the move queue
   // This is completely separated from sound settings or other game state updates
   useEffect(() => {
@@ -1356,95 +913,17 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         console.log(`Processing move: ${move.from} to ${move.to} (Socket connected: ${currentSocket.connected})`);
         const currentPlayerColor = !gameState.isWhiteTurn ? 'white' : 'black'; // Invert since move is being made
         
-        // Get the current chess engine instance
-        const chess = getChessEngine();
+        // Attempt to emit the move event
+        currentSocket.emit('move_made', {
+          gameId: gameRoomId,
+          from: move.from,
+          to: move.to,
+          player: currentPlayerColor,
+          promotion: move.promotion
+        });
         
-        // Verify that the chess engine state is synchronized with the server
-        // If we have a move history, rebuild the board state first to ensure consistency
-        if (sanMoveList.length > 0) {
-          console.log(`Verifying chess engine state with ${sanMoveList.length} moves in history`);
-          synchronizeBoardFromMoveHistory(sanMoveList);
-        }
-        
-        // Get the current FEN position before making the move
-        const currentFen = chess.fen();
-        
-        // Apply the move to get the SAN notation and resulting state
-        try {
-          // Make a copy of the current position to avoid modifying the actual game state
-          const tempChess = resetChessEngine();
-          
-          // If we have a move history, apply it to the temporary chess instance
-          if (sanMoveList.length > 0) {
-            for (const historyMove of sanMoveList) {
-              tempChess.move(historyMove);
-            }
-          } else {
-            // Otherwise, load the current FEN
-            tempChess.load(currentFen);
-          }
-          
-          // Apply the move to the temporary chess instance
-          const moveResult = tempChess.move({
-            from: move.from,
-            to: move.to,
-            promotion: move.promotion
-          });
-          
-          if (!moveResult) {
-            console.error(`Invalid move: ${move.from} to ${move.to}`);
-            // Remove this move from the queue and continue
-            setMoveQueue(prev => prev.slice(1));
-            return;
-          }
-          
-          // Get the SAN notation of the move
-          const sanMove = moveResult.san;
-          
-          // Get the resulting FEN and move history after the move
-          const resultingFen = tempChess.fen();
-          const moveHistory = tempChess.history();
-          
-          // Log move details for debugging
-          console.log('Move details:', {
-            san: sanMove,
-            beforeMove: currentFen,
-            afterMove: resultingFen,
-            fenParts: resultingFen.split(' '),
-            halfMoveClock: resultingFen.split(' ')[4],
-            fullMoveNumber: resultingFen.split(' ')[5],
-            moveHistory
-          });
-          
-          // Emit the move_made event with SAN notation as the primary identifier
-          currentSocket.emit('move_made', {
-            gameId: gameRoomId,
-            san: sanMove, // Primary identifier - Standard Algebraic Notation
-            from: move.from, // Include from/to for backward compatibility
-            to: move.to,
-            player: currentPlayerColor,
-            promotion: move.promotion,
-            currentFen: currentFen, // FEN before the move (for validation)
-            resultingFen: resultingFen, // FEN after the move (for validation)
-            moveHistory: moveHistory // Include move history for verification
-          });
-          
-          console.log(`Move emitted successfully to server: ${sanMove} (${move.from}-${move.to})`);
-        } catch (moveError) {
-          console.error(`Error processing move: ${moveError instanceof Error ? moveError.message : 'Unknown error'}`);
-          
-          // Fall back to sending just the from/to coordinates
-          currentSocket.emit('move_made', {
-            gameId: gameRoomId,
-            from: move.from,
-            to: move.to,
-            player: currentPlayerColor,
-            promotion: move.promotion,
-            currentFen: currentFen // Include current FEN for validation
-          });
-          
-          console.log(`Fallback move emitted to server: ${move.from}-${move.to}`);
-        }
+        // Log successful move emission
+        console.log(`Move emitted successfully to server: ${move.from}-${move.to}`);
         
         // Remove this move from the queue
         setMoveQueue(prev => prev.slice(1));
@@ -1458,377 +937,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     
     // Execute immediately
     processMoveWithRetry();
-  }, [socket, moveQueue, gameRoomId, gameState.isWhiteTurn, sanMoveList, synchronizeBoardFromMoveHistory]);
-  
-  // Add a function to synchronize the board from FEN or move history
-  const synchronizeBoardFromFen = useCallback((fen: string, moveHistory?: string[]) => {
-    try {
-      // If we have move history, prioritize it over FEN
-      if (moveHistory && moveHistory.length > 0) {
-        console.log(`Prioritizing move history (${moveHistory.length} moves) over FEN for synchronization`);
-        const result = synchronizeBoardFromMoveHistory(moveHistory);
-        
-        if (result) {
-          // If synchronization from move history was successful, validate against the FEN
-          const chess = getChessEngine();
-          const currentFen = chess.fen();
-          
-          // Compare only the position part (first 4 parts) of the FEN
-          const providedFenParts = fen.split(' ');
-          const currentFenParts = currentFen.split(' ');
-          
-          const providedPosition = providedFenParts.slice(0, 4).join(' ');
-          const currentPosition = currentFenParts.slice(0, 4).join(' ');
-          
-          if (providedPosition !== currentPosition) {
-            console.warn(`Position mismatch after synchronizing from move history. Server: ${providedPosition}, Local: ${currentPosition}`);
-            console.warn('Continuing with move history-based position as it is the primary source of truth');
-          } else {
-            console.log('Position matches after synchronizing from move history');
-          }
-          
-          return true;
-        }
-        
-        // If synchronization from move history failed, fall back to FEN
-        console.warn('Failed to synchronize from move history, falling back to FEN');
-      }
-      
-      console.log(`Attempting to synchronize board with FEN: ${fen}`);
-      const chess = getChessEngine();
-      
-      // Try to load the FEN into the chess engine
-      try {
-        // Attempt to load the FEN and check if it was successful
-        chess.load(fen);
-        
-        // If we get here without an error, the FEN was loaded successfully
-        // Verify the loaded FEN matches what we expected
-        const loadedFen = chess.fen();
-        
-        // Check if the FEN was loaded correctly
-        // We only compare the position part (first 4 parts of the FEN string)
-        // because the halfmove clock and fullmove number might be different
-        const fenParts = fen.split(' ');
-        const loadedFenParts = loadedFen.split(' ');
-        
-        const fenPosition = fenParts.slice(0, 4).join(' ');
-        const loadedFenPosition = loadedFenParts.slice(0, 4).join(' ');
-        
-        if (fenPosition !== loadedFenPosition) {
-          console.error(`FEN position mismatch. Expected: ${fenPosition}, Got: ${loadedFenPosition}`);
-          
-          // Request a board sync from the server
-          if (socket && gameRoomId) {
-            console.log('Requesting board sync from server due to FEN position mismatch');
-            socket.emit('request_board_sync', {
-              gameId: gameRoomId,
-              reason: 'fen_position_mismatch',
-              clientState: chess.fen()
-            });
-          }
-          return false;
-        }
-        
-        // FEN was loaded successfully, but check if the move counts are incorrect
-        // This is a common issue causing the FEN errors
-        const halfMoveClock = parseInt(fenParts[4]);
-        const fullMoveNumber = parseInt(fenParts[5]);
-        const loadedHalfMoveClock = parseInt(loadedFenParts[4]);
-        const loadedFullMoveNumber = parseInt(loadedFenParts[5]);
-        
-        if (halfMoveClock !== loadedHalfMoveClock || fullMoveNumber !== loadedFullMoveNumber) {
-          console.warn(`Move count mismatch in FEN. Expected: ${halfMoveClock}/${fullMoveNumber}, Got: ${loadedHalfMoveClock}/${loadedFullMoveNumber}`);
-          // We can continue since the position is correct, just log the issue
-        }
-        
-        // Check for threefold repetition after loading FEN
-        if (chess.isThreefoldRepetition()) {
-          console.log('Threefold repetition detected after loading FEN');
-          
-          // If the game isn't already over and we have a socket connection
-          if (!gameState.isGameOver && socket && socket.connected) {
-            console.log('Emitting threefold_repetition event to server');
-            
-            // Emit game_end event to the server with threefold_repetition reason
-            socket.emit('game_end', {
-              gameId: gameRoomId,
-              reason: 'threefold_repetition',
-              fen: chess.fen(),
-              moveHistory: chess.history() // Include move history for verification
-            });
-            
-            // Update game state to mark game as over
-            setGameState(prev => ({
-              ...prev,
-              isGameOver: true,
-              gameOverReason: 'threefold_repetition'
-            }));
-            
-            // Stop the clocks
-            setActivePlayer(null);
-          }
-        }
-      } catch (loadError) {
-        console.error(`Error loading FEN: ${fen}. Error: ${loadError instanceof Error ? loadError.message : 'Unknown error'}`);
-        
-        // Request a board sync from the server
-        if (socket && gameRoomId) {
-          console.log('Requesting board sync from server due to FEN load error');
-          socket.emit('request_board_sync', {
-            gameId: gameRoomId,
-            reason: 'fen_load_error',
-            clientState: chess.fen()
-          });
-        }
-        return false;
-      }
-      
-      console.log(`Successfully synchronized board with FEN: ${fen}`);
-      return true;
-    } catch (error) {
-      console.error(`Error synchronizing board from FEN: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      return false;
-    }
-  }, [socket, gameRoomId, synchronizeBoardFromMoveHistory, gameState.isGameOver, setGameState, setActivePlayer]);
-  
-  // Function to synchronize the board state from move history (primary source of truth)
-    // These functions were previously duplicated and have been removed to fix TypeScript errors
-
-  
-  // Listen for board_updated events from the server (primary source of truth)
-  useEffect(() => {
-    if (!socket) return;
-    
-    const handleBoardUpdated = (data: { 
-      gameId: string, 
-      moveHistory: string[], // Primary source of truth
-      verboseMoveHistory?: any[], 
-      lastMove?: string,
-      fen?: string, // For validation only
-      pgn?: string,
-      whiteTurn?: boolean,
-      isCapture?: boolean,
-      isCheck?: boolean,
-      moveCount?: number,
-      isGameOver?: boolean,
-      gameOverReason?: string,
-      timestamp: number 
-    }) => {
-      if (data.gameId !== gameRoomId) return;
-      
-      // Check if the game is already over
-      if (gameState.isGameOver) {
-        console.log('Game is already over, ignoring board_updated event');
-        return;
-      }
-      
-      console.log(`Received board_updated event for game ${data.gameId} with ${data.moveHistory.length} moves`);
-      
-      // Log the last move if available
-      if (data.lastMove) {
-        console.log(`Last move: ${data.lastMove}, isCapture: ${data.isCapture}, isCheck: ${data.isCheck}`);
-      }
-      
-      // Synchronize the board using move history as the primary source of truth
-      const syncResult = synchronizeBoardFromMoveHistory(data.moveHistory);
-      
-      if (syncResult) {
-        console.log(`Successfully synchronized board from move history`);
-        
-        // If FEN is provided, validate it against our local state
-        if (data.fen) {
-          const chess = getChessEngine();
-          const localFen = chess.fen();
-          
-          // Compare only the position part (first 4 parts) of the FEN
-          const serverFenParts = data.fen.split(' ');
-          const localFenParts = localFen.split(' ');
-          
-          const serverPosition = serverFenParts.slice(0, 4).join(' ');
-          const localPosition = localFenParts.slice(0, 4).join(' ');
-          
-          if (serverPosition !== localPosition) {
-            console.warn(`FEN position mismatch after synchronization. Server: ${serverPosition}, Local: ${localPosition}`);
-          } else {
-            console.log(`FEN position matches after synchronization`);
-            
-            // Check move counts
-            const serverHalfMove = parseInt(serverFenParts[4]);
-            const serverFullMove = parseInt(serverFenParts[5]);
-            const localHalfMove = parseInt(localFenParts[4]);
-            const localFullMove = parseInt(localFenParts[5]);
-            
-            if (serverHalfMove !== localHalfMove || serverFullMove !== localFullMove) {
-              console.warn(`Move count mismatch. Server: ${serverHalfMove}/${serverFullMove}, Local: ${localHalfMove}/${localFullMove}`);
-            }
-          }
-        }
-        
-        // Update active player based on whiteTurn if provided
-        if (data.whiteTurn !== undefined) {
-          setActivePlayer(data.whiteTurn ? 'white' : 'black');
-          
-          // Also update game state
-          setGameState(prev => ({
-            ...prev,
-            isWhiteTurn: data.whiteTurn === true, // Ensure boolean type
-            hasWhiteMoved: data.moveHistory.length > 0
-          }));
-        }
-      } else {
-        console.error(`Failed to synchronize board from move history, falling back to FEN if available`);
-        
-        // Fall back to FEN synchronization if move history synchronization failed
-        if (data.fen) {
-          synchronizeBoardFromFen(data.fen, data.moveHistory);
-        }
-      }
-      
-      // Check for game end conditions in the data
-      if (data.isGameOver) {
-        console.log(`Game over detected in board_updated event. Reason: ${data.gameOverReason || 'unknown'}`);
-        
-        setGameState(prev => ({
-          ...prev,
-          isGameOver: true,
-          gameOverReason: data.gameOverReason || prev.gameOverReason
-        }));
-        
-        // Stop the clocks
-        setActivePlayer(null);
-      }
-    };
-    
-    // Register the board_updated event handler
-    socket.on('board_updated', handleBoardUpdated);
-    
-    // For backward compatibility, also keep the board_sync handler
-    const handleBoardSync = (data: { 
-      gameId: string, 
-      fen: string, 
-      moveHistory?: string[], 
-      verboseMoveHistory?: any[], 
-      pgn?: string,
-      whiteTurn?: boolean,
-      timestamp: number 
-    }) => {
-      if (data.gameId !== gameRoomId) return;
-      
-      console.log(`Received board_sync event for game ${data.gameId} with FEN: ${data.fen}`);
-      
-      // If move history is available, use it as the primary source of truth
-      if (data.moveHistory && data.moveHistory.length > 0) {
-        console.log(`Using move history from board_sync event (${data.moveHistory.length} moves)`);
-        synchronizeBoardFromMoveHistory(data.moveHistory);
-      } else {
-        // Fall back to FEN synchronization
-        console.log(`No move history in board_sync event, falling back to FEN`);
-        synchronizeBoardFromFen(data.fen);
-      }
-      
-      // Update active player based on whiteTurn if provided
-      if (data.whiteTurn !== undefined) {
-        setActivePlayer(data.whiteTurn ? 'white' : 'black');
-        
-        // Also update game state
-        setGameState(prev => ({
-          ...prev,
-          isWhiteTurn: data.whiteTurn === true, // Ensure boolean type
-          hasWhiteMoved: data.moveHistory !== undefined && data.moveHistory.length > 0
-        }));
-      }
-    };
-    
-    socket.on('board_sync', handleBoardSync);
-    
-    // Handle game_end event from server
-    const handleGameEnd = (data: any) => {
-      console.log('Received game_end event:', data);
-      
-      // Check if this update is for our current game
-      if (data.gameId !== gameRoomId) {
-        console.log(`Ignoring game_end for different game (${data.gameId} vs ${gameRoomId})`);
-        return;
-      }
-      
-      // Check if the game is already marked as over
-      if (gameState.isGameOver) {
-        console.log('Game is already marked as over, updating result details');
-      } else {
-        console.log('Marking game as over and stopping clocks');
-        // Update game state to reflect game over
-        setGameState(prev => ({
-          ...prev,
-          isGameOver: true,
-          gameOverReason: data.reason
-        }));
-        
-        // Stop the clocks
-        setActivePlayer(null);
-      }
-      
-      // Determine the result from the player's perspective
-      let playerResult: GameResultType = 'draw';
-      if (data.result === 'draw' || data.reason === 'threefold_repetition') {
-        playerResult = 'draw';
-      } else if (data.winner) {
-        // If there's a winner, determine if it's the player
-        const isPlayerWinner = 
-          (playerColor === 'white' && data.winner === 'white') ||
-          (playerColor === 'black' && data.winner === 'black');
-        playerResult = isPlayerWinner ? 'win' : 'loss';
-      }
-      
-      // Set the game result for display
-      const resultData = {
-        result: playerResult,
-        reason: data.reason as GameEndReason,
-        playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
-        opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-        playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-        opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
-        playerPhotoURL: playerColor === 'white' ? whitePlayer.photoURL : blackPlayer.photoURL,
-        opponentPhotoURL: playerColor === 'white' ? blackPlayer.photoURL : whitePlayer.photoURL,
-        playerRatingChange: data.whitePlayer?.ratingChange !== undefined ? 
-          (playerColor === 'white' ? data.whitePlayer.ratingChange : data.blackPlayer.ratingChange) : 0,
-        opponentRatingChange: data.whitePlayer?.ratingChange !== undefined ? 
-          (playerColor === 'white' ? data.blackPlayer.ratingChange : data.whitePlayer.ratingChange) : 0
-      };
-      
-      // Create game result data for the window event
-      const gameEndedEvent = new CustomEvent('game_ended', {
-        detail: resultData
-      });
-      
-      // Dispatch the event to trigger the game result screen
-      window.dispatchEvent(gameEndedEvent);
-      
-      console.log('Dispatched game_ended event with result data:', resultData);
-      
-      console.log(`Game over: ${playerResult} by ${data.reason}. Showing result screen.`);
-      
-      // Play game end sound
-      playSound('GAME_END', soundEnabled);
-    };
-    
-    // Also listen for game_ended event (backward compatibility)
-    const handleGameEnded = (data: any) => {
-      console.log('Received game_ended event:', data);
-      handleGameEnd(data); // Reuse the same handler
-    };
-    
-    // Register the game end event handlers
-    socket.on('game_end', handleGameEnd);
-    socket.on('game_ended', handleGameEnded);
-    
-    return () => {
-      socket.off('board_updated', handleBoardUpdated);
-      socket.off('board_sync', handleBoardSync);
-      socket.off('game_end', handleGameEnd);
-      socket.off('game_ended', handleGameEnded);
-    };
-  }, [socket, gameRoomId, synchronizeBoardFromMoveHistory, synchronizeBoardFromFen, onSanMoveListChange, gameState.isGameOver, setGameState, setActivePlayer, playerColor, whitePlayer, blackPlayer, soundEnabled]);
+  }, [socket, moveQueue, gameRoomId, gameState.isWhiteTurn]);
 
   // Effect to notify parent about SAN move list changes
   useEffect(() => {
@@ -1899,117 +1008,24 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     // Check game status after every move
     const status = getGameStatus();
     
-    // Handle threefold repetition
-    if (status.isThreefoldRepetition) {
-      console.log('Threefold repetition detected - game is a draw');
-      
-      // Ensure player data is ready before creating game result data
-      ensurePlayerDataReady();
-      
-      // Create game result data for threefold repetition
-      const resultData = {
-        result: 'draw' as GameResultType,
-        reason: 'threefold_repetition' as GameEndReason,
-        playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
-        opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-        playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-        opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
-        playerPhotoURL: playerColor === 'white' ? whitePlayer.photoURL : blackPlayer.photoURL,
-        opponentPhotoURL: playerColor === 'white' ? blackPlayer.photoURL : whitePlayer.photoURL,
-        playerRatingChange: 0, // Draw means no rating change
-        opponentRatingChange: 0  // Draw means no rating change
-      };
-      
-      // Log the created result data
-      console.log('Created game result data (threefold repetition):', resultData);
-      
-      // Set the game result data and show result screen
-      setGameResultData(resultData);
-      setShowResultScreen(true);
-      
-      // Update game state
-      setGameState(prev => ({
-        ...prev,
-        isGameOver: true,
-        isWhiteTurn: status.turn === 'white'
-      }));
-      
-      // Stop both clocks
-      setActivePlayer(null);
-      
-      // Play draw sound - only if sound is enabled
-      if (soundEnabled) {
-        playSound('GAME_END', true);
-      }
-      
-      // Notify the server about the threefold repetition
-      if (socket) {
-        console.log('Emitting threefold_repetition event to server');
-        socket.emit('threefold_repetition', {
-          gameId: gameRoomId,
-          fen: status.fen
-        });
-        
-        // Also emit a game_ended event for consistency with other end conditions
-        socket.emit('game_ended', {
-          gameId: gameRoomId,
-          reason: 'threefold_repetition',
-          result: 'draw'
-        });
-      }
-      
-      // Dispatch a local game_ended event
-      try {
-        const gameEndedEvent = new CustomEvent('game_ended', {
-          detail: {
-            reason: 'threefold_repetition',
-            result: 'draw',
-            source: 'local_threefold_repetition',
-            timestamp: Date.now()
-          }
-        });
-        window.dispatchEvent(gameEndedEvent);
-      } catch (error) {
-        console.error('Error dispatching threefold_repetition event:', error);
-      }
-      
-      return;
-    }
-    
     // Handle checkmate immediately
     if (status.isCheckmate) {
-      // Ensure player data is ready before creating game result data
-      ensurePlayerDataReady();
-      
       // Determine the winner based on whose turn it is
       // In chess, the player who can't move is in checkmate, so the other player wins
       const isCurrentPlayerWinner = (status.turn === 'white' && playerColor === 'black') || 
                                   (status.turn === 'black' && playerColor === 'white');
       
-      // Log player data before creating result data for checkmate
-      console.log('Player data for game result (checkmate):', {
-        playerColor,
-        whitePlayer,
-        blackPlayer,
-        isCurrentPlayerWinner
-      });
-
       // Create game result data for checkmate
       const resultData = {
         result: isCurrentPlayerWinner ? 'win' : 'loss' as 'win' | 'loss',
         reason: 'checkmate' as GameEndReason,
-        playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
-        opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-        playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-        opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
-        playerPhotoURL: playerColor === 'white' ? whitePlayer.photoURL : blackPlayer.photoURL,
-        opponentPhotoURL: playerColor === 'white' ? blackPlayer.photoURL : whitePlayer.photoURL,
+        playerName: player1.username,
+        opponentName: player2.username,
+        playerRating: player1.rating || 1500,
+        opponentRating: player2.rating || 1500,
         playerRatingChange: isCurrentPlayerWinner ? 10 : -10,
         opponentRatingChange: isCurrentPlayerWinner ? -10 : 10
       };
-      
-      // Log the created result data
-      console.log('Created game result data (checkmate):', resultData);
       
       // Set the game result data and show result screen
       setGameResultData(resultData);
@@ -2043,9 +1059,6 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     
     // If the game is over due to checkmate, stalemate, etc., show the result screen
     if (status.isGameOver) {
-      // Ensure player data is ready before creating game result data
-      ensurePlayerDataReady();
-      
       // Determine the result
       let result: GameResultType = 'draw';
       let reason: GameEndReason = 'stalemate';
@@ -2059,43 +1072,17 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         reason = 'stalemate';
       }
       
-      // Get player and opponent based on color
-      const player = playerColor === 'white' ? whitePlayer : blackPlayer;
-      const opponent = playerColor === 'white' ? blackPlayer : whitePlayer;
-
-      // Ensure we have valid player data, or use fallback values
-      const playerName = player?.username || (playerColor === 'white' ? 'White Player' : 'Black Player');
-      const opponentName = opponent?.username || (playerColor === 'white' ? 'Black Player' : 'White Player');
-      const playerRating = typeof player?.rating === 'number' ? player.rating : 1500;
-      const opponentRating = typeof opponent?.rating === 'number' ? opponent.rating : 1500;
-
-      // Log player data before creating result data
-      console.log('Player data for game result (stalemate/draw):', {
-        playerColor,
-        player,
-        opponent,
-        whitePlayer,
-        blackPlayer
-      });
-
-      // Create result data with safe values
+      // Create result data
       const resultData = {
         result,
         reason,
-        playerName,
-        opponentName,
-        playerRating,
-        opponentRating,
-        playerPhotoURL: player?.photoURL || null,
-        opponentPhotoURL: opponent?.photoURL || null,
+        playerName: player1.username,
+        opponentName: player2.username,
+        playerRating: player1.rating || 1500,
+        opponentRating: player2.rating || 1500,
         playerRatingChange: result === 'win' ? 10 : (result === 'loss' ? -10 : 0),
         opponentRatingChange: result === 'win' ? -10 : (result === 'loss' ? 10 : 0)
       };
-      
-      // Log the created result data
-      console.log('Created game result data (stalemate/draw):', resultData);
-      
-      console.log('Game result data created:', resultData);
       
       // Set result data and show the screen
       setGameResultData(resultData);
@@ -2107,95 +1094,6 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       setActivePlayer(null); // Stop both clocks
     } else {
       setActivePlayer(status.turn === 'white' ? 'white' : 'black'); // Set the active player based on whose turn it is
-      
-      // Check for threefold repetition after the move with enhanced validation
-      try {
-        // First ensure the chess engine is in a valid state
-        const chess = getChessEngine();
-        const currentFen = chess.fen();
-        
-        // Log the current position for debugging
-        console.log(`Current position FEN: ${currentFen}`);
-        console.log(`Move history length: ${chess.history().length}`);
-        
-        // Only check for threefold repetition if we have enough moves
-        // Threefold repetition requires at least 8 moves (4 by each player)
-        if (chess.history().length >= 8) {
-          // Use the chess.js isThreefoldRepetition method to check
-          const isThreefoldRep = isThreefoldRepetition();
-          
-          console.log(`Threefold repetition check result: ${isThreefoldRep}`);
-          
-          if (isThreefoldRep && !gameState.isGameOver && socket) {
-            console.log('THREEFOLD REPETITION DETECTED! Emitting game_end event to server...');
-            
-            // Emit game_end event to the server with threefold_repetition reason
-            // This follows the same pattern as other game-ending scenarios
-            socket.emit('game_end', {
-              gameId: gameRoomId,
-              reason: 'threefold_repetition',
-              fen: currentFen,
-              moveHistory: chess.history() // Include move history for verification
-            });
-            
-            // Update game state to mark game as over
-            setGameState(prev => ({
-              ...prev,
-              isGameOver: true,
-              gameOverReason: 'threefold_repetition'
-            }));
-            
-            // Stop the clocks
-            setActivePlayer(null);
-            
-            // Play game end sound
-            playSound('GAME_END', soundEnabled);
-            
-            console.log('Waiting for server to process threefold repetition and emit game_end event...');
-            
-            // Request a board sync to ensure all clients have the correct state
-            socket.emit('request_board_sync', {
-              gameId: gameRoomId,
-              reason: 'threefold_repetition_detected',
-              clientState: currentFen
-            });
-            
-            // Store a temporary game result in localStorage to ensure we can show the result screen
-            // even if there's a delay in receiving the server's game_end event
-            try {
-              const tempResultData = {
-                result: 'draw' as GameResultType,
-                reason: 'threefold_repetition' as GameEndReason,
-                playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
-                opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-                playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-                opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
-                playerPhotoURL: playerColor === 'white' ? whitePlayer.photoURL : blackPlayer.photoURL,
-                opponentPhotoURL: playerColor === 'white' ? blackPlayer.photoURL : whitePlayer.photoURL,
-                playerRatingChange: 0, // Will be updated when server responds
-                opponentRatingChange: 0 // Will be updated when server responds
-              };
-              
-              localStorage.setItem(`gameResult_${gameRoomId}`, JSON.stringify(tempResultData));
-              console.log('Temporary game result data saved to localStorage for threefold repetition');
-            } catch (storageError) {
-              console.error('Failed to save temporary game result data to localStorage:', storageError);
-            }
-          }
-        }
-      } catch (error) {
-        console.error(`Error checking for threefold repetition: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        
-        // If there's an error, request a board sync to recover
-        if (socket && gameRoomId) {
-          console.log('Requesting board sync due to threefold repetition check error');
-          socket.emit('request_board_sync', {
-            gameId: gameRoomId,
-            reason: 'threefold_repetition_check_error',
-            clientState: getChessEngine().fen()
-          });
-        }
-      }
     }
     
     // If a move is made, add it to the move queue
@@ -2212,7 +1110,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         promotion: lastMove.promotion
       }]);
     }
-  }, [soundEnabled, playerColor, whitePlayer.username, whitePlayer.rating, blackPlayer.username, blackPlayer.rating]);
+  }, [soundEnabled, playerColor, player1.username, player1.rating, player2.username, player2.rating]);
   
   // Handle back button click
   const handleBackClick = useCallback(() => {
@@ -2278,10 +1176,10 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     const timeoutResultData = {
       result: player === playerColor ? 'loss' : 'win' as GameResultType,
       reason: 'timeout' as GameEndReason,
-      playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
-      opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-      playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-      opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
+      playerName: player1.username,
+      opponentName: player2.username,
+      playerRating: player1.rating || 1500,
+      opponentRating: player2.rating || 1500,
       playerRatingChange: player === playerColor ? -10 : 10,
       opponentRatingChange: player === playerColor ? 10 : -10
     };
@@ -2300,10 +1198,10 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     setGameResultData({
       result: resultType as GameResultType,
       reason: 'timeout' as GameEndReason,
-      playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
-      opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-      playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-      opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
+      playerName: player1.username,
+      opponentName: player2.username,
+      playerRating: player1.rating || 1500,
+      opponentRating: player2.rating || 1500,
       playerRatingChange: resultType === 'win' ? 10 : -10,
       opponentRatingChange: resultType === 'win' ? -10 : 10
     });
@@ -2338,10 +1236,10 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     const drawResultData = {
       result: 'draw' as GameResultType,
       reason: 'agreement' as GameEndReason,
-      playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
-      opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-      playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-      opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
+      playerName: player1.username,
+      opponentName: player2.username,
+      playerRating: player1.rating || 1500,
+      opponentRating: player2.rating || 1500,
       playerRatingChange: 0,
       opponentRatingChange: 0
     };
@@ -2384,10 +1282,10 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     const resignResultData = {
       result: 'loss' as GameResultType, // Explicitly type as 'loss'
       reason: 'resignation' as GameEndReason,
-      playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
-      opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-      playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-      opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
+      playerName: player1.username,
+      opponentName: player2.username,
+      playerRating: player1.rating || 1500,
+      opponentRating: player2.rating || 1500,
       playerRatingChange: -10, // Always negative for resigner
       opponentRatingChange: 10  // Always positive for opponent
     };
@@ -2477,18 +1375,16 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
 
   // Add game result screen state
   const [showResultScreen, setShowResultScreen] = useState(false);
-  const [gameResultData, setGameResultData] = useState<GameResult>({
-    result: 'draw',
-    reason: 'stalemate',
-    playerName: 'Player',
-    opponentName: 'Opponent',
-    playerRating: 1500,
-    opponentRating: 1500,
-    playerPhotoURL: null,
-    opponentPhotoURL: null,
-    playerRatingChange: 0,
-    opponentRatingChange: 0
-  });
+  const [gameResultData, setGameResultData] = useState<{
+    result: GameResultType;
+    reason: GameEndReason;
+    playerName: string;
+    opponentName: string;
+    playerRating: number;
+    opponentRating: number;
+    playerRatingChange: number;
+    opponentRatingChange: number;
+  } | null>(null);
 
   // Add handler to close game result screen
   const handleCloseResultScreen = useCallback(() => {
@@ -2498,40 +1394,9 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     window.location.href = '/';
   }, []);
 
-  // Helper function to ensure player data is ready before creating game result data
-  const ensurePlayerDataReady = () => {
-    console.log('Ensuring player data is ready for game result display');
-    console.log('Current white player:', whitePlayer);
-    console.log('Current black player:', blackPlayer);
-    
-    // If player data is still loading or incomplete, set fallback values
-    if (whitePlayer.username === 'Loading...' || blackPlayer.username === 'Loading...' ||
-        whitePlayer.photoURL === undefined || blackPlayer.photoURL === undefined) {
-      console.log('Player data incomplete, setting fallback values');
-      
-      // Update white player with fallback values
-      setWhitePlayer(prev => ({
-        ...prev,
-        username: prev.username === 'Loading...' ? 'White Player' : prev.username,
-        rating: prev.rating || 1500,
-        photoURL: prev.photoURL !== undefined ? prev.photoURL : null
-      }));
-      
-      // Update black player with fallback values
-      setBlackPlayer(prev => ({
-        ...prev,
-        username: prev.username === 'Loading...' ? 'Black Player' : prev.username,
-        rating: prev.rating || 1500,
-        photoURL: prev.photoURL !== undefined ? prev.photoURL : null
-      }));
-    }
-  };
-
   // Listen for the game_ended custom event
   useEffect(() => {
     const handleGameEnded = (event: CustomEvent) => {
-      // Ensure player data is ready before creating game result data
-      ensurePlayerDataReady();
       const { reason, result, winnerSocketId, loserSocketId, source, winnerColor, loserColor } = event.detail;
       console.log('Game ended event received:', { 
         reason, 
@@ -2596,12 +1461,10 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       const resultData = {
         result: finalResult,
         reason: reason as GameEndReason,
-        playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
-        opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-        playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-        opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
-        playerPhotoURL: playerColor === 'white' ? whitePlayer.photoURL : blackPlayer.photoURL,
-        opponentPhotoURL: playerColor === 'white' ? blackPlayer.photoURL : whitePlayer.photoURL,
+        playerName: player1.username,
+        opponentName: player2.username,
+        playerRating: player1.rating || 1500,
+        opponentRating: player2.rating || 1500,
         playerRatingChange: finalResult === 'win' ? 10 : (finalResult === 'loss' ? -10 : 0),
         opponentRatingChange: finalResult === 'win' ? -10 : (finalResult === 'loss' ? 10 : 0)
       };
@@ -2773,15 +1636,12 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         <GameResultScreen
           result={gameResultData.result}
           reason={gameResultData.reason}
-          gameId={gameRoomId}
           playerName={gameResultData.playerName}
           opponentName={gameResultData.opponentName}
           playerRating={gameResultData.playerRating}
           opponentRating={gameResultData.opponentRating}
           playerRatingChange={gameResultData.playerRatingChange}
           opponentRatingChange={gameResultData.opponentRatingChange}
-          playerPhotoURL={gameResultData.playerPhotoURL}
-          opponentPhotoURL={gameResultData.opponentPhotoURL}
           onClose={handleCloseResultScreen}
         />
       )}
@@ -2791,10 +1651,9 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         isOpen={drawOfferReceived}
         onAccept={handleAcceptDraw}
         onDecline={handleDeclineDraw}
-        opponentName={playerColor === 'white' ? blackPlayer.username : whitePlayer.username}
+        opponentName={player2.username}
         timeRemaining={drawOfferTimeRemaining}
       /> */}
-      
       {/* Determine which player is at top/bottom based on perspective */}
       {playerColor === 'black' ? (
         <>
@@ -2802,13 +1661,11 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
           <div className="flex justify-between items-center mb-4 sm:mb-2 mx-[21px]">
             <PlayerInfo 
               position="top"
-              username={whitePlayer.username}
-              rating={whitePlayer.rating}
-              clubAffiliation={whitePlayer.clubAffiliation}
-              isGuest={whitePlayer.isGuest || false}
-              capturedPieces={capturedByWhite}
-              photoURL={whitePlayer.photoURL}
-              isActive={activePlayer === 'white'}
+              username={playerColor === 'white' ? (blackPlayer?.username || 'Loading...') : (whitePlayer?.username || 'Loading...')}
+              rating={playerColor === 'white' ? (blackPlayer?.rating || 0) : (whitePlayer?.rating || 0)}
+              isGuest={false}
+              capturedPieces={capturedByWhite || whiteCapturedPieces}
+              isActive={activePlayer === (playerColor === 'white' ? 'black' : 'white')}
             />
             {/* Top player timer (White) */}
             <div>
@@ -2819,6 +1676,11 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
                 onTimeOut={() => handleTimeOut('white')}
                 playLowTimeSound={() => playSound('TIME_LOW', soundEnabled)}
               />
+            </div>
+          </div>
+          
+          {/* Chess Board */}
+          <ChessBoard 
         </div>
       </div>
       
@@ -2834,14 +1696,12 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
           <div className="flex justify-between items-center mt-4 sm:mt-2 mx-[21px]">
         <PlayerInfo 
           position="bottom"
-          username={blackPlayer.username}
-          rating={blackPlayer.rating}
-          clubAffiliation={blackPlayer.clubAffiliation}
-          isGuest={blackPlayer.isGuest || false}
-          capturedPieces={capturedByBlack}
-          photoURL={blackPlayer.photoURL}
-          isActive={activePlayer === 'black'}
-        />
+          username={player2.username}
+          rating={player2.rating}
+          clubAffiliation={player2.clubAffiliation}
+          isGuest={player2.isGuest}
+              capturedPieces={capturedByBlack || blackCapturedPieces}
+            />
             {/* Bottom player timer (Black) */}
             <div>
               <GameClock 
@@ -2860,13 +1720,11 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
           <div className="flex justify-between items-center mb-4 sm:mb-2 mx-[21px]">
             <PlayerInfo 
               position="top"
-              username={blackPlayer.username}
-              rating={blackPlayer.rating}
-              clubAffiliation={blackPlayer.clubAffiliation}
-              isGuest={blackPlayer.isGuest || false}
-              capturedPieces={capturedByBlack}
-              photoURL={blackPlayer.photoURL}
-              isActive={activePlayer === 'black'}
+              username={player2.username}
+              rating={player2.rating}
+              clubAffiliation={player2.clubAffiliation}
+              isGuest={player2.isGuest}
+              capturedPieces={capturedByBlack || blackCapturedPieces}
             />
             {/* Top player timer (Black) */}
             <div>
@@ -2892,14 +1750,12 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
           <div className="flex justify-between items-center mt-4 sm:mt-2 mx-[21px]">
             <PlayerInfo 
               position="bottom"
-              username={whitePlayer.username}
-              rating={whitePlayer.rating}
-              clubAffiliation={whitePlayer.clubAffiliation}
-              isGuest={whitePlayer.isGuest || false}
-              capturedPieces={capturedByWhite}
-              photoURL={whitePlayer.photoURL}
-              isActive={activePlayer === 'white'}
-            />
+              username={player1.username}
+              rating={player1.rating}
+              clubAffiliation={player1.clubAffiliation}
+              isGuest={player1.isGuest}
+              capturedPieces={capturedByWhite || whiteCapturedPieces}
+        />
         {/* Bottom player timer (White) */}
             <div>
           <GameClock 
