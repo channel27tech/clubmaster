@@ -59,14 +59,16 @@ export const getChessEngine = (gameId?: string): Chess => {
       // Only use stored FEN if the game IDs match or no gameId was specified
       if (storedFen && (!gameId || gameId === storedGameId)) {
         // Validate FEN first before trying to use it
-        const tempChess = new Chess();
         try {
+          const tempChess = new Chess();
+          // In some versions of chess.js, load() might return void instead of boolean
+          // So we need to try/catch instead of checking the return value
           tempChess.load(storedFen);
-          // If no exception was thrown, the FEN is valid
+          // If we got here without an error, the FEN is valid
           console.log('Restoring chess engine from stored state:', storedFen);
           chessInstance = tempChess; // Use the already loaded instance
         } catch (error) {
-          console.error('Invalid stored FEN format, using default position');
+          console.error('Failed to load stored FEN, using default position');
           chessInstance = new Chess(); // Fallback to default
         }
       } else {
@@ -104,9 +106,13 @@ export const setChessPosition = (fen: string, gameId?: string): boolean => {
     
     // Use a fresh chess instance to validate the FEN
     const validationChess = new Chess();
-    const isValid = validationChess.load(fen);
     
-    if (!isValid) {
+    try {
+      // In some versions of chess.js, load() might return void instead of boolean
+      // So we need to try/catch instead of checking the return value
+      validationChess.load(fen);
+      // If we got here without an error, the FEN is valid
+    } catch (error) {
       console.error('Invalid FEN string format:', fen);
       return false;
     }

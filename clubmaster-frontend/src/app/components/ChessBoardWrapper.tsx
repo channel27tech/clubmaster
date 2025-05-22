@@ -89,6 +89,14 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   // Sound context
   const { soundEnabled } = useSound();
   
+  // Add a ref to track the current sound state - MOVED UP to avoid reference errors
+  const soundEnabledRef = useRef(soundEnabled);
+  
+  // Update the ref when sound state changes
+  useEffect(() => {
+    soundEnabledRef.current = soundEnabled;
+  }, [soundEnabled]);
+  
   const [moveHistory, setMoveHistory] = useState<MoveHistoryState | null>(null);
   const [sanMoveList, setSanMoveList] = useState<string[]>([]);
   
@@ -496,7 +504,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       setDrawOfferReceived(true);
       
       // Play notification sound if enabled
-      if (soundEnabled) {
+      if (soundEnabledRef.current) {
         playSound('NOTIFICATION', true);
       }
       
@@ -531,7 +539,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       }));
       
       // Play game start sound if enabled
-      if (soundEnabled) {
+      if (soundEnabledRef.current) {
         playSound('GAME_START', true);
       }
     });
@@ -569,7 +577,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       }
       
       // Then play sounds if enabled
-      if (soundEnabled) {
+      if (soundEnabledRef.current) {
         if (isCheck) {
           playSound('CHECK', true);
         } else if (isCapture) {
@@ -644,7 +652,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         isGameOver: true
       }));
       
-      if (soundEnabled) {
+      if (soundEnabledRef.current) {
         playSound('CHECKMATE', true);
       }
     });
@@ -653,7 +661,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       // Update game tracker state
       gameStateTracker.activePlayer = null;
       
-      if (soundEnabled) {
+      if (soundEnabledRef.current) {
         playSound('DRAW', true);
       }
     });
@@ -687,7 +695,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       setReconnectionTimeRemaining(timeLimit);
       
       // Play disconnection sound if enabled
-      if (soundEnabled) {
+      if (soundEnabledRef.current) {
         playSound('NOTIFICATION', true);
       }
       
@@ -715,7 +723,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       }
       
       // Play reconnection sound if enabled
-      if (soundEnabled) {
+      if (soundEnabledRef.current) {
         playSound('GAME_START', true);
       }
     });
@@ -751,7 +759,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       setActivePlayer(null);
       
       // Play game end sound
-      if (soundEnabled) {
+      if (soundEnabledRef.current) {
         playSound('GAME_END', true);
       }
     });
@@ -769,7 +777,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         setActivePlayer(null);
 
         // Play notification sound
-        if (soundEnabled) {
+        if (soundEnabledRef.current) {
           playSound('NOTIFICATION', true);
         }
         
@@ -926,7 +934,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         setActivePlayer(null);
 
         // Play notification sound
-        if (soundEnabled) {
+        if (soundEnabledRef.current) {
           playSound('GAME_END', true);
         }
 
@@ -1236,7 +1244,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
 
       safeSocket.off('game_aborted');
     };
-  }, [socket, soundEnabled, gameRoomId]);
+  }, [socket, gameRoomId, playSound]);
 
   // Add redundant clock state synchronization
   useEffect(() => {
@@ -2026,7 +2034,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       setActivePlayer(null);
       
       // Play checkmate sound - only if sound is enabled
-      if (soundEnabled) {
+      if (soundEnabledRef.current) {
         playSound('CHECKMATE', true);
       }
       
@@ -2223,9 +2231,9 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       backButton.click();
     }
     
-    // Play button click sound with button label
-    playSound('BUTTON_CLICK', soundEnabled, 1.0, 'Back');
-  }, [soundEnabled]);
+    // Play button click sound with button label - use the ref value
+    playSound('BUTTON_CLICK', soundEnabledRef.current, 1.0, 'Back');
+  }, [playSound]); // Remove soundEnabled from deps
   
   // Handle forward button click
   const handleForwardClick = useCallback(() => {
@@ -2236,9 +2244,9 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       forwardButton.click();
     }
     
-    // Play button click sound with button label
-    playSound('BUTTON_CLICK', soundEnabled, 1.0, 'Forward');
-  }, [soundEnabled]);
+    // Play button click sound with button label - use the ref value
+    playSound('BUTTON_CLICK', soundEnabledRef.current, 1.0, 'Forward');
+  }, [playSound]); // Remove soundEnabled from deps
   
   // Determine if we can go back/forward in the move history
   const canGoBack = moveHistory ? moveHistory.currentMoveIndex >= 0 : false;
@@ -2291,7 +2299,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     setShowResultScreen(true);
     
     // Play time out sound
-    if (soundEnabled) {
+    if (soundEnabledRef.current) {
       playSound('GAME_END', true);
     }
     
@@ -2320,8 +2328,8 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     socket.emit('accept_draw', { gameId: gameRoomId });
     setDrawOfferReceived(false);
     
-    // Play button click sound
-    playSound('BUTTON_CLICK', soundEnabled, 1.0, 'Accept');
+    // Play button click sound using ref
+    playSound('BUTTON_CLICK', soundEnabledRef.current, 1.0, 'Accept');
     
     if (drawOfferTimeout) {
       clearTimeout(drawOfferTimeout);
@@ -2352,7 +2360,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     
     // Stop the clocks
     setActivePlayer(null);
-  }, [socket, gameRoomId, drawOfferTimeout, soundEnabled]);
+  }, [socket, gameRoomId, drawOfferTimeout, playSound]); // Remove soundEnabled dependency
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleDeclineDraw = useCallback(() => {
@@ -2361,14 +2369,14 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     socket.emit('decline_draw', { gameId: gameRoomId });
     setDrawOfferReceived(false);
     
-    // Play button click sound
-    playSound('BUTTON_CLICK', soundEnabled, 1.0, 'Decline');
+    // Play button click sound using ref
+    playSound('BUTTON_CLICK', soundEnabledRef.current, 1.0, 'Decline');
     
     if (drawOfferTimeout) {
       clearTimeout(drawOfferTimeout);
       setDrawOfferTimeout(null);
     }
-  }, [socket, gameRoomId, drawOfferTimeout, soundEnabled]);
+  }, [socket, gameRoomId, drawOfferTimeout, playSound]); // Remove soundEnabled dependency
 
   // Handle resignation from the current player
   const handleResignGame = () => {
@@ -2435,8 +2443,8 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     // Emit abort_game event with gameId
     socket.emit('abort_game', { gameId: gameRoomId });
     
-    // Play sound
-    playSound('BUTTON_CLICK', soundEnabled, 1.0, 'Abort');
+    // Play sound using ref
+    playSound('BUTTON_CLICK', soundEnabledRef.current, 1.0, 'Abort');
   };
 
   // When gameRoomId changes, join the socket room
@@ -2737,34 +2745,45 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     stableBoardStateRef.current.lastSoundToggleTime = Date.now();
     console.log('Sound toggle detected, timestamp recorded:', stableBoardStateRef.current.lastSoundToggleTime);
     
-    // If we have a stored board state, ensure it's preserved after the sound toggle
-    if (stableBoardStateRef.current.fen) {
-      // Use a small delay to ensure this runs after any potential board reset
-      const timeoutId = setTimeout(() => {
-        const currentFen = getFen();
-        
-        // If the current FEN is different from our stored reference (indicating a reset),
-        // restore the correct board state
-        if (currentFen !== stableBoardStateRef.current.fen) {
-          console.log('Board state mismatch detected after sound toggle. Restoring from reference.');
-          console.log('Current:', currentFen);
-          console.log('Expected:', stableBoardStateRef.current.fen);
-          
-          // Restore the correct position
-          if (stableBoardStateRef.current.fen) {
-            setChessPosition(stableBoardStateRef.current.fen, gameId || undefined);
-            
-            // If we have move history, ensure it's restored as well
-            if (stableBoardStateRef.current.moveHistory && moveHistory !== stableBoardStateRef.current.moveHistory) {
-              setMoveHistory(stableBoardStateRef.current.moveHistory);
-            }
-          }
-        }
-      }, 50);
-      
-      return () => clearTimeout(timeoutId);
-    }
+    // This useEffect should now only log the sound toggle without affecting chess state
   }, [soundEnabled, gameId]);
+
+  // Socket reconnection and game abort event handler
+  useEffect(() => {
+    if (!socket || !gameRoomId) {
+      return () => {};
+    }
+    
+    // Create a safe reference to the socket for cleanup
+    const safeSocket = socket;
+    let reconnectionTimerId: ReturnType<typeof setInterval> | undefined;
+    
+    // Listen for game aborted events
+    safeSocket.on('game_aborted', () => {
+      console.log('Game was aborted by server or opponent');
+      
+      // Play sound, using ref value
+      if (soundEnabledRef.current) {
+        playSound('GAME_END', true);
+      }
+      
+      // Implement local state updates for game aborted
+      // ...
+    });
+    
+    // Return cleanup function
+    return () => {
+      console.log('Cleaning up socket handlers');
+      
+      // Clean up event handlers
+      safeSocket.off('game_aborted');
+      
+      // Clear any existing timeouts
+      if (reconnectionTimerId) {
+        clearInterval(reconnectionTimerId);
+      }
+    };
+  }, [socket, gameRoomId, playSound]); // Properly reference only stable dependencies
 
   return (
     <div className="flex flex-col w-full h-full rounded-t-xl rounded-b-none sm:rounded-t-xl sm:rounded-b-none overflow-hidden flex-shrink-0 pb-[62px]" style={{ backgroundColor: '#4A7C59' }}>
@@ -2849,7 +2868,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
                 isActive={activePlayer === 'black'}
                 isDarkTheme={true}
                 onTimeOut={() => handleTimeOut('black')}
-                playLowTimeSound={() => playSound('TIME_LOW', soundEnabled)}
+                playLowTimeSound={() => playSound('TIME_LOW', soundEnabledRef.current)}
               />
             </div>
           </div>
@@ -2875,7 +2894,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
                 isActive={activePlayer === 'black'}
                 isDarkTheme={false}
                 onTimeOut={() => handleTimeOut('black')}
-                playLowTimeSound={() => playSound('TIME_LOW', soundEnabled)}
+                playLowTimeSound={() => playSound('TIME_LOW', soundEnabledRef.current)}
               />
             </div>
           </div>
@@ -2907,7 +2926,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
             isActive={activePlayer === 'white'}
             isDarkTheme={true}
                 onTimeOut={() => handleTimeOut('white')}
-                playLowTimeSound={() => playSound('TIME_LOW', soundEnabled)}
+                playLowTimeSound={() => playSound('TIME_LOW', soundEnabledRef.current)}
           />
         </div>
       </div>
