@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { MatchmakingService } from './matchmaking.service';
 import { GameEndService } from './game-end/game-end.service';
@@ -9,13 +9,15 @@ import { TimerModule } from './timer/timer.module';
 import { Game } from './entities/game.entity';
 import { GameRepositoryService } from './game-repository.service';
 import { UsersModule } from '../users/users.module';
+import { GameController } from './game.controller';
 
 @Module({
   imports: [
     TimerModule,
     TypeOrmModule.forFeature([Game]),
-    UsersModule,
+    forwardRef(() => UsersModule),
   ],
+  controllers: [GameController],
   providers: [
     MatchmakingService,
     GameEndService,

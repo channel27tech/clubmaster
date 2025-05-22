@@ -1,7 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Game } from './entities/game.entity';
+import { v4 as uuidv4, validate as uuidValidate } from 'uuid';
 
 @Injectable()
 export class GameRepositoryService {
@@ -24,18 +25,132 @@ export class GameRepositoryService {
   }
 
   async findOne(id: string): Promise<Game | null> {
-    return this.gamesRepository.findOne({
-      where: { id },
-      relations: ['whitePlayer', 'blackPlayer'],
-    });
+    try {
+      // Check if we received a full game ID in the format 'game_timestamp_id'
+      if (id.includes('game_')) {
+        // This is a custom format like 'game_1747841011532_2thg993'
+        // Store the full ID as customId for future lookups
+        const customId = id;
+        this.logger.log(`Received custom format game ID: ${customId}`);
+        
+        // Try to find the game by customId
+        const gameByCustomId = await this.gamesRepository.findOne({
+          where: { customId },
+          relations: ['whitePlayer', 'blackPlayer'],
+        });
+        
+        if (gameByCustomId) {
+          this.logger.log(`Found game with customId '${customId}': ${gameByCustomId.id}`);
+          return gameByCustomId;
+        }
+        
+        // If not found by full customId, extract the identifier part
+        const parts = id.split('_');
+        if (parts.length >= 3) {
+          const shortId = parts[parts.length - 1]; // e.g., '2thg993' from 'game_1747841011532_2thg993'
+          this.logger.log(`Extracted short ID '${shortId}' from format '${id}'`);
+          
+          // Try to find by the extracted short ID as customId
+          const gameByShortId = await this.gamesRepository.findOne({
+            where: { customId: shortId },
+            relations: ['whitePlayer', 'blackPlayer'],
+          });
+          
+          if (gameByShortId) {
+            this.logger.log(`Found game with short ID '${shortId}': ${gameByShortId.id}`);
+            return gameByShortId;
+          }
+          
+          // If still not found, try to find any game where customId contains the short ID
+          // This uses a safe approach for PostgreSQL with UUID columns
+          const games = await this.gamesRepository.createQueryBuilder('game')
+            .where('game.customId LIKE :pattern', { pattern: `%${shortId}%` })
+            .leftJoinAndSelect('game.whitePlayer', 'whitePlayer')
+            .leftJoinAndSelect('game.blackPlayer', 'blackPlayer')
+            .getMany();
+          
+          if (games.length > 0) {
+            if (games.length > 1) {
+              this.logger.warn(`Found ${games.length} games matching short ID '${shortId}'. Using the first match: ${games[0].id}`);
+            } else {
+              this.logger.log(`Found game containing short ID '${shortId}': ${games[0].id}`);
+            }
+            return games[0];
+          }
+        }
+        
+        // If we still haven't found the game, log and return null
+        this.logger.warn(`No game found with custom ID '${customId}' or any part of it`);
+        return null;
+      }
+      
+      // Check if this is a valid UUID
+      if (this.isValidUuid(id)) {
+        // This is a standard UUID, do a direct lookup
+        this.logger.log(`Looking up game with UUID: ${id}`);
+        return this.gamesRepository.findOne({
+          where: { id },
+          relations: ['whitePlayer', 'blackPlayer'],
+        });
+      }
+      
+      // If it's not a UUID or custom format, try to find by customId
+      this.logger.log(`Looking up game with customId: ${id}`);
+      const game = await this.gamesRepository.findOne({
+        where: { customId: id },
+        relations: ['whitePlayer', 'blackPlayer'],
+      });
+      
+      if (game) {
+        this.logger.log(`Found game with customId '${id}': ${game.id}`);
+        return game;
+      }
+      
+      // If we get here, we couldn't find the game
+      this.logger.warn(`No game found with ID or customId '${id}'`);
+      return null;
+    } catch (error) {
+      this.logger.error(`Error finding game with ID ${id}: ${error.message}`);
+      return null;
+    }
   }
 
   async create(gameData: Partial<Game>): Promise<Game> {
+    // If no ID provided, generate a new UUID
+    if (!gameData.id) {
+      gameData.id = uuidv4();
+    } else if (!this.isValidUuid(gameData.id)) {
+      // If ID provided but it's not a valid UUID, generate a new one and log warning
+      this.logger.warn(`Invalid UUID format provided: ${gameData.id} - generating new UUID`);
+      gameData.id = uuidv4();
+    }
+    
+    // If a custom ID format is provided (e.g., 'game_timestamp_id'), store it in customId
+    if (gameData.customId) {
+      this.logger.log(`Using provided customId: ${gameData.customId}`);
+    } else if (typeof gameData.id === 'string' && gameData.id.includes('game_')) {
+      // If the ID is in the format 'game_timestamp_id', store it as customId
+      gameData.customId = gameData.id;
+      this.logger.log(`Stored game ID as customId: ${gameData.customId}`);
+    } else {
+      // Generate a custom ID in the format 'game_timestamp_shortId'
+      const timestamp = Date.now();
+      const shortId = Math.random().toString(36).substring(2, 9); // 7 character alphanumeric ID
+      gameData.customId = `game_${timestamp}_${shortId}`;
+      this.logger.log(`Generated customId: ${gameData.customId}`);
+    }
+    
     const game = this.gamesRepository.create(gameData);
     return this.gamesRepository.save(game);
   }
 
   async update(id: string, gameData: Partial<Game>): Promise<Game | null> {
+    // Validate UUID format
+    if (!this.isValidUuid(id)) {
+      this.logger.warn(`Invalid UUID format for update: ${id}`);
+      return null;
+    }
+    
     await this.gamesRepository.update(id, gameData);
     return this.findOne(id);
   }
@@ -45,7 +160,15 @@ export class GameRepositoryService {
     status: 'white_win' | 'black_win' | 'draw' | 'aborted',
     endReason: string,
     pgn?: string,
+    moves?: any[],
+    totalMoves?: number,
   ): Promise<Game | null> {
+    // Validate UUID format
+    if (!this.isValidUuid(id)) {
+      this.logger.warn(`Invalid UUID format for endGame: ${id}`);
+      return null;
+    }
+    
     const updateData: Partial<Game> = {
       status,
       endReason,
@@ -54,18 +177,27 @@ export class GameRepositoryService {
     if (pgn) {
       updateData.pgn = pgn;
     }
+    
+    // Add moves and totalMoves if provided
+    if (moves) {
+      updateData.moves = moves;
+    }
+    
+    if (totalMoves !== undefined) {
+      updateData.totalMoves = totalMoves;
+    }
+
+    // Find the game first to make sure it exists
+    const game = await this.findOne(id);
+    if (!game) {
+      this.logger.warn(`Game not found for endGame: ${id}`);
+      return null;
+    }
 
     if (status === 'white_win') {
-      // Get the game to set the winnerId
-      const game = await this.findOne(id);
-      if (game) {
-        updateData.winnerId = game.whitePlayerId;
-      }
+      updateData.winnerId = game.whitePlayerId;
     } else if (status === 'black_win') {
-      const game = await this.findOne(id);
-      if (game) {
-        updateData.winnerId = game.blackPlayerId;
-      }
+      updateData.winnerId = game.blackPlayerId;
     }
 
     await this.gamesRepository.update(id, updateData);
@@ -73,6 +205,12 @@ export class GameRepositoryService {
   }
 
   async addMove(id: string, move: any): Promise<Game | null> {
+    // Validate UUID format
+    if (!this.isValidUuid(id)) {
+      this.logger.warn(`Invalid UUID format for addMove: ${id}`);
+      return null;
+    }
+    
     const game = await this.findOne(id);
     if (!game) {
       return null;
@@ -89,6 +227,12 @@ export class GameRepositoryService {
   }
 
   async findPlayerGames(playerId: string, limit: number = 10): Promise<Game[]> {
+    // Validate UUID format
+    if (!this.isValidUuid(playerId)) {
+      this.logger.warn(`Invalid UUID format for findPlayerGames: ${playerId}`);
+      return [];
+    }
+    
     return this.gamesRepository.find({
       where: [
         { whitePlayerId: playerId },
@@ -106,6 +250,12 @@ export class GameRepositoryService {
     losses: number;
     draws: number;
   }> {
+    // Validate UUID format
+    if (!this.isValidUuid(playerId)) {
+      this.logger.warn(`Invalid UUID format for getGameStats: ${playerId}`);
+      return { total: 0, wins: 0, losses: 0, draws: 0 };
+    }
+    
     // Get all games where the player was white
     const whiteGames = await this.gamesRepository.find({
       where: { whitePlayerId: playerId },
@@ -142,5 +292,10 @@ export class GameRepositoryService {
     }
 
     return stats;
+  }
+  
+  // Helper method to validate UUID format
+  private isValidUuid(id: string): boolean {
+    return uuidValidate(id);
   }
 } 

@@ -74,24 +74,40 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       });
       console.log('🔑 Token available:', !!token);
       
-      // Send to backend
-      const response = await fetch(`${API_URL}/users/sync`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify(payload),
-        credentials: 'include'
-      });
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Backend sync failed: ${response.status} ${response.statusText}. Details: ${errorText}`);
+      // Check if backend is available
+      try {
+        // Send to backend with a timeout of 5 seconds
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        
+        const response = await fetch(`${API_URL}/users/sync`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify(payload),
+          credentials: 'include',
+          signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.warn(`Backend sync response not OK: ${response.status} ${response.statusText}. Details: ${errorText}`);
+          return; // Continue without blocking auth flow
+        }
+        
+        const data = await response.json();
+        console.log('✅ User data synced successfully:', data);
+      } catch (fetchError: unknown) {
+        // Handle network errors or timeout
+        console.warn('⚠️ Backend sync network error (continuing with auth flow):', 
+          fetchError instanceof Error ? fetchError.message : String(fetchError));
+        // Still allow the user to proceed with authentication
+        // This prevents the backend being down from blocking the entire auth flow
       }
-      
-      const data = await response.json();
-      console.log('✅ User data synced successfully:', data);
     } catch (error) {
       console.error('❌ Error syncing user data with backend:', error);
       // We don't set error state here to avoid blocking the login flow

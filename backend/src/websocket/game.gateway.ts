@@ -10,12 +10,15 @@ import {
 } from '@nestjs/websockets';
 import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
+import { Chess } from 'chess.js';
 import { MatchmakingService } from '../game/matchmaking.service';
 import { GameManagerService } from '../game/game-manager.service';
 import { GameEndService, GameEndReason, GameResult } from '../game/game-end/game-end.service';
-import { RatingService } from '../game/rating/rating.service';
+import { RatingService, RatingResult } from '../game/rating/rating.service';
 import { DisconnectionService } from '../game/disconnection.service';
 import { JoinGameDto } from '../game/dto/join-game.dto';
+import { UsersService } from '../users/users.service';
+import { GameRepositoryService } from '../game/game-repository.service';
 
 interface MatchmakingOptions {
   gameMode?: string;
@@ -27,13 +30,17 @@ interface MatchmakingOptions {
 // Define an interface for the move_made payload
 interface MoveMadePayload {
   gameId: string;
-  from: string;
-  to: string;
+  from?: string; // Optional now since we can use SAN notation instead
+  to?: string; // Optional now since we can use SAN notation instead
   player: string;
-  notation: string;
+  notation?: string; // Legacy field for backward compatibility
+  san?: string; // Standard Algebraic Notation (e.g., "e4", "Nf3")
   promotion?: string; // Add optional promotion field
   isCapture?: boolean; // Already being added, but good to have in type if strict
-  fen?: string; // Already being added, good to have
+  fen?: string; // Legacy field for backward compatibility
+  currentFen?: string; // FEN before the move
+  resultingFen?: string; // FEN after the move
+  moveHistory?: string[]; // Move history for verification
 }
 
 // Add this mapping
@@ -58,13 +65,17 @@ export class GameGateway
 {
   @WebSocketServer() server: Server;
   private logger: Logger = new Logger('GameGateway');
+  // Map to store chess instances by game ID for consistent state management
+  private chessInstances: Map<string, Chess> = new Map();
 
   constructor(
     private readonly matchmakingService: MatchmakingService,
     private readonly gameManagerService: GameManagerService,
     private readonly gameEndService: GameEndService,
     private readonly ratingService: RatingService,
-    private readonly disconnectionService: DisconnectionService
+    private readonly disconnectionService: DisconnectionService,
+    private readonly usersService: UsersService,
+    private readonly gameRepositoryService: GameRepositoryService
   ) {}
 
   /**
@@ -169,6 +180,52 @@ export class GameGateway
     
     this.logger.log(`Game ${payload.gameId} found - White: ${game.whitePlayer.socketId}, Black: ${game.blackPlayer.socketId}`);
     
+    // Initialize or get the chess instance for this game
+    let chessInstance = this.chessInstances.get(payload.gameId);
+    if (!chessInstance) {
+      this.logger.log(`Creating new chess instance for game ${payload.gameId} during enter_game`);
+      chessInstance = new Chess(); // Start with a fresh instance with correct move counts
+      
+      // If the game already has moves, rebuild the state from the move history
+      if (game.chessInstance && game.chessInstance.history().length > 0) {
+        const moveHistory = game.chessInstance.history();
+        this.logger.log(`Rebuilding chess instance from ${moveHistory.length} moves in game history`);
+        
+        // Apply each move from the move history
+        let allMovesApplied = true;
+        for (let i = 0; i < moveHistory.length; i++) {
+          try {
+            const result = chessInstance.move(moveHistory[i]);
+            if (!result) {
+              this.logger.error(`Failed to apply move ${i+1} during rebuild: ${moveHistory[i]}`);
+              allMovesApplied = false;
+              break;
+            }
+          } catch (moveError) {
+            this.logger.error(`Error applying move ${i+1} during rebuild: ${moveHistory[i]}. Error: ${moveError instanceof Error ? moveError.message : 'Unknown error'}`);
+            allMovesApplied = false;
+            break;
+          }
+        }
+        
+        if (!allMovesApplied) {
+          // If we couldn't apply all moves, use the game's chess instance as fallback
+          this.logger.warn(`Failed to rebuild board from move history. Using game's chess instance as fallback.`);
+          chessInstance = game.chessInstance;
+        } else {
+          this.logger.log(`Successfully rebuilt board from move history. New FEN: ${chessInstance.fen()}`);
+          // Update the game's chess instance with our rebuilt instance
+          game.chessInstance = chessInstance;
+        }
+      } else if (game.chessInstance) {
+        // If the game has a chess instance but no moves, just use it
+        chessInstance = game.chessInstance;
+      }
+      
+      // Store the chess instance for future use
+      this.chessInstances.set(payload.gameId, chessInstance);
+    }
+    
     // Send initial game state that explicitly includes hasWhiteMoved status
     client.emit('game_state', {
       gameId: payload.gameId,
@@ -196,6 +253,24 @@ export class GameGateway
       timeControl: game.timeControl,
     });
     
+    // Send board_updated event with move history as primary source of truth
+    if (chessInstance && chessInstance.history().length > 0) {
+      const moveHistory = chessInstance.history();
+      const verboseMoveHistory = chessInstance.history({ verbose: true });
+      
+      client.emit('board_updated', {
+        gameId: payload.gameId,
+        moveHistory: moveHistory, // Primary source of truth
+        verboseMoveHistory: verboseMoveHistory, // Detailed move information
+        lastMove: moveHistory.length > 0 ? moveHistory[moveHistory.length - 1] : null,
+        fen: chessInstance.fen(), // Current FEN (for validation)
+        pgn: chessInstance.pgn(), // PGN representation
+        whiteTurn: game.whiteTurn, // Whose turn it is
+        moveCount: moveHistory.length, // Total number of moves
+        timestamp: Date.now() // Timestamp for synchronization
+      });
+    }
+    
     return {
       event: 'enterGameResponse',
       data: { success: true, message: 'Joined game room' },
@@ -206,19 +281,62 @@ export class GameGateway
    * Handle a client request to start matchmaking
    */
   @SubscribeMessage('startMatchmaking')
-  handleStartMatchmaking(client: Socket, payload: MatchmakingOptions) {
+  async handleStartMatchmaking(client: Socket, payload: { 
+    gameMode?: string;
+    timeControl?: string;
+    rated?: boolean;
+    preferredSide?: string;
+    firebaseUid?: string;
+    username?: string;
+  }) {
     this.logger.log(
       `Client ${client.id} requested to start matchmaking: ${JSON.stringify(payload)}`,
     );
     
     try {
-      // Add player to matchmaking queue
-      this.matchmakingService.addPlayerToQueue(client, {
-        gameMode: payload.gameMode || 'Blitz',
-        timeControl: payload.timeControl || '5+0',
-        rated: payload.rated !== undefined ? payload.rated : true,
-        preferredSide: payload.preferredSide || 'random', // Added preferredSide to pass player color preference
-      });
+      // Extract player identification data
+      const firebaseUid = payload.firebaseUid || 'guest';
+      const username = payload.username || `Player-${client.id.substring(0, 5)}`;
+      
+      // If the user is registered (not a guest), fetch their data
+      let userId: string | undefined;
+      let rating = 1500; // Default rating
+      let isGuest = true;
+      
+      if (firebaseUid !== 'guest') {
+        try {
+          // Fetch user from database using firebaseUid
+          const user = await this.usersService.findByFirebaseUid(firebaseUid);
+          
+          if (user) {
+            userId = user.id; // This is the UUID from the database
+            rating = user.rating;
+            isGuest = false;
+            this.logger.log(`Found registered user: ${username} (${userId}), Rating: ${rating}`);
+          } else {
+            this.logger.warn(`Firebase user ${firebaseUid} not found in database, treating as guest`);
+          }
+        } catch (error) {
+          this.logger.error(`Error fetching user data for ${firebaseUid}: ${error.message}`, error.stack);
+        }
+      } else {
+        this.logger.log(`User is a guest: ${username}`);
+      }
+      
+      // Add player to matchmaking queue with all the collected data
+      this.matchmakingService.addPlayerToQueue(
+        client,
+        {
+          gameMode: payload.gameMode || 'Blitz',
+          timeControl: payload.timeControl || '5+0',
+          rated: payload.rated !== undefined ? payload.rated : true,
+          preferredSide: payload.preferredSide || 'random',
+        },
+        rating,
+        userId,
+        username,
+        isGuest
+      );
       
       return {
         event: 'matchmakingStarted',
@@ -282,7 +400,7 @@ export class GameGateway
    * Handle a client making a move
    */
   @SubscribeMessage('make_move')
-  handleMakeMove(client: Socket, payload: { gameId: string; move: string }) {
+  async handleMakeMove(client: Socket, payload: { gameId: string; move: string }) {
     try {
       this.logger.log(
         `Client ${client.id} made move ${payload.move} in game ${payload.gameId}`,
@@ -328,68 +446,96 @@ export class GameGateway
             isWhiteTurn: game.whiteTurn,
           });
           
-          // Check if the game has ended after this move
-          const gameResult = this.gameManagerService.checkGameEnd(
-            payload.gameId,
-            this.server,
-          );
-          
-          if (gameResult) {
-            // Game has ended, the gameEnd event has already been emitted
-            // from within the gameManagerService
+          // Check for game end conditions like checkmate
+          if (game.chessInstance.isCheckmate()) {
+            this.logger.log(`Checkmate detected in game ${payload.gameId}`);
+            const winnerColor = game.whiteTurn ? 'black' : 'white'; // The one who just moved
+            const loserColor = game.whiteTurn ? 'white' : 'black'; // The one who got checkmated
             
-            // For checkmate, we want to ensure a proper game_end event with clear winner/loser
-            if (gameResult.reason === 'checkmate') {
-              this.logger.log(`Checkmate detected in game ${payload.gameId}. Emitting game_end event.`);
+            // Add additional logging for database ID
+            this.logger.log(`Checkmate detected - database ID: ${game.dbGameId || 'not available'}, event gameId: ${payload.gameId}`);
+            
+            // Log the attempt to call checkGameEnd
+            this.logger.log(`Calling checkGameEnd for checkmate in game ${payload.gameId}, database ID: ${game.dbGameId || 'not available'}`);
+            
+            try {
+              // Call checkGameEnd to update the database record
+              const resultData = await this.gameManagerService.checkGameEnd(
+                payload.gameId,
+                this.server
+              );
               
-              // The current chess.js turn indicates the player who is in checkmate (loser)
-              // The opponent (not in turn) is the winner
-              const winnerSocketId = game.whiteTurn ? game.blackPlayer.socketId : game.whitePlayer.socketId;
-              const loserSocketId = game.whiteTurn ? game.whitePlayer.socketId : game.blackPlayer.socketId;
-              const winnerColor = game.whiteTurn ? 'black' : 'white'; // the one who just moved
-              const loserColor = game.whiteTurn ? 'white' : 'black'; // the one who got checkmated
+              if (resultData) {
+                this.logger.log(`Successfully handled game end for ${payload.gameId}`);
+              } else {
+                this.logger.warn(`checkGameEnd returned null for ${payload.gameId}, may need manual game end handling`);
+                
+                // Emit game_end event to clients as fallback
+                this.server.to(payload.gameId).emit('game_end', {
+                  result: 'checkmate',
+                  reason: 'checkmate',
+                  winnerColor: winnerColor,
+                  loserColor: loserColor,
+                  finalFEN: game.chessInstance.fen()
+                });
+              }
+            } catch (error) {
+              this.logger.error(`Error handling game end for ${payload.gameId}: ${error.message}`, error.stack);
               
-              // Emit game_end event to all clients in the game room
+              // Even if checkGameEnd fails, still emit the game_end event to clients
               this.server.to(payload.gameId).emit('game_end', {
-                gameId: payload.gameId,
+                result: 'checkmate',
                 reason: 'checkmate',
-                result: game.whiteTurn ? 'black_wins' : 'white_wins',
-                winnerSocketId,
-                loserSocketId,
-                winnerColor,
-                loserColor,
-                finalFEN: game.chessInstance.fen(),
-                // Include player information for result screen
-                whitePlayer: {
-                  socketId: game.whitePlayer.socketId,
-                  username: game.whitePlayer.username,
-                  rating: game.whitePlayer.rating,
-                },
-                blackPlayer: {
-                  socketId: game.blackPlayer.socketId,
-                  username: game.blackPlayer.username,
-                  rating: game.blackPlayer.rating,
-                },
+                winnerColor: winnerColor,
+                loserColor: loserColor,
+                finalFEN: game.chessInstance.fen()
               });
             }
+          } else if (game.chessInstance.isDraw() || game.chessInstance.isStalemate() || 
+                    game.chessInstance.isThreefoldRepetition() || game.chessInstance.isInsufficientMaterial()) {
+            this.logger.log(`Draw detected in game ${payload.gameId}`);
             
-            return {
-              event: 'moveMade',
-              data: {
-                success: true,
-                message: 'Move made and game ended',
-                gameEnd: true,
-                result: gameResult,
-              },
-            };
+            // Log the attempt to call checkGameEnd
+            this.logger.log(`Calling checkGameEnd for draw in game ${payload.gameId}, database ID: ${game.dbGameId || 'not available'}`);
+            
+            try {
+              // Call checkGameEnd to update the database record
+              const resultData = await this.gameManagerService.checkGameEnd(
+                payload.gameId,
+                this.server
+              );
+              
+              if (resultData) {
+                this.logger.log(`Successfully handled game end for ${payload.gameId}`);
+              } else {
+                this.logger.warn(`checkGameEnd returned null for ${payload.gameId}, may need manual game end handling`);
+                
+                // Emit game_end event to clients as fallback
+                this.server.to(payload.gameId).emit('game_end', {
+                  result: 'draw',
+                  reason: 'draw',
+                  finalFEN: game.chessInstance.fen()
+                });
+              }
+            } catch (error) {
+              this.logger.error(`Error handling game end for ${payload.gameId}: ${error.message}`, error.stack);
+              
+              // Even if checkGameEnd fails, still emit the game_end event to clients
+              this.server.to(payload.gameId).emit('game_end', {
+                result: 'draw',
+                reason: 'draw',
+                finalFEN: game.chessInstance.fen()
+              });
+            }
           }
           
           return {
             event: 'moveMade',
             data: {
               success: true,
-              message: 'Move made',
-              gameEnd: false,
+              message: 'Move made and game ended',
+              gameEnd: true,
+              result: game.chessInstance.isCheckmate() ? GameResult.WHITE_WINS : GameResult.DRAW,
             },
           };
         } else {
@@ -429,7 +575,7 @@ export class GameGateway
    * Handle a client resigning from a game
    */
   @SubscribeMessage('resign')
-  handleResign(client: Socket, payload: { gameId: string }) {
+  async handleResign(client: Socket, payload: { gameId: string }) {
     try {
       this.logger.log(
         `Client ${client.id} resigned from game ${payload.gameId}`,
@@ -467,7 +613,7 @@ export class GameGateway
       this.logger.log(`Pre-resignation data - Winner: ${winnerSocketId}, Loser: ${loserSocketId}, isWhiteResigning: ${isWhiteResigning}`);
       
       // Now process the resignation with the game manager
-      const gameResult = this.gameManagerService.registerResignation(
+      const gameResult = await this.gameManagerService.registerResignation(
         payload.gameId,
         client.id,
         this.server,
@@ -684,7 +830,7 @@ export class GameGateway
    * Handle a client request to abort a game
    */
   @SubscribeMessage('abort_game')
-  handleAbortGame(client: Socket, payload: { gameId: string }) {
+  async handleAbortGame(client: Socket, payload: { gameId: string }) {
     this.logger.log(
       `Client ${client.id} requested to abort game ${payload.gameId}`,
     );
@@ -753,63 +899,70 @@ export class GameGateway
     }
     
     try {
-      // Determine the color of the player aborting
-      const isWhitePlayer = game.whitePlayer.socketId === client.id;
-      const abortingPlayer = isWhitePlayer ? game.whitePlayer : game.blackPlayer;
-      const otherPlayer = isWhitePlayer ? game.blackPlayer : game.whitePlayer;
+      // Create game end details object for abort
+      const gameEndDetails = {
+        result: GameResult.ABORTED,
+        reason: GameEndReason.ABORT,
+        winnerSocketId: undefined,
+        loserSocketId: undefined
+      };
       
-      this.logger.log(`Aborting game ${payload.gameId}, requested by ${abortingPlayer.username || client.id}`);
-      
-      // Validate and handle the abort request with the disconnection service
-      const success = this.disconnectionService.handleAbortRequest(
-        this.server,
-        client.id,
-        payload.gameId
+      // Call handleGameEnd to update database
+      this.logger.log(`[GameAbortRequest] Calling gameEndService.checkGameEnd for game ${payload.gameId} to update database`);
+      const resultData = await this.gameManagerService.checkGameEnd(
+        payload.gameId,
+        this.server
       );
       
-      if (success) {
-        // Mark the game as ended with abort result
-        if (game) {
-          game.ended = true;
-          game.endTime = new Date();
-          game.result = GameResult.ABORTED;
-          game.endReason = GameEndReason.ABORT;
-          
-          // Create an informative abort payload
-          const abortPayload = {
-            gameId: payload.gameId,
-            playerId: client.id,
-            playerColor: isWhitePlayer ? 'white' : 'black',
-            playerName: abortingPlayer.username || 'Unknown',
-            opponentName: otherPlayer.username || 'Unknown',
-            reason: 'Game aborted by player before first move',
-            timestamp: new Date().toISOString()
-          };
-          
-          // Use setTimeout to ensure clients have time to process any previous events
-          setTimeout(() => {
-            // Emit game aborted event to all players in the room
-            this.server.to(payload.gameId).emit('game_aborted', abortPayload);
-            
-            // Also emit directly to both players in case they're not in the room
-            if (game.whitePlayer && game.whitePlayer.socketId) {
-              this.server.to(game.whitePlayer.socketId).emit('game_aborted', abortPayload);
-            }
-            
-            if (game.blackPlayer && game.blackPlayer.socketId) {
-              this.server.to(game.blackPlayer.socketId).emit('game_aborted', abortPayload);
-            }
-            
-            this.logger.log(`Successfully emitted game_aborted event for game ${payload.gameId}`);
-          }, 300); // Small delay to ensure event sequence
+      this.logger.log(`[GameAbortRequest] Game end result: ${resultData ? 'Success' : 'Failed'}`);
+      
+      // 1. Emit game_aborted event (compatibility)
+      this.server.to(payload.gameId).emit('game_aborted', { 
+        gameId: payload.gameId,
+        reason: GameEndReason.ABORT,
+        result: GameResult.ABORTED
+      });
+      
+      // 2. Emit the standard game_end event that the frontend listens for
+      const gameEndEvent = {
+        gameId: payload.gameId,
+        reason: 'abort',
+        result: 'aborted',
+        finalFEN: game.chessInstance.fen(),
+        timestamp: new Date().toISOString(),
+        // Include player information
+        whitePlayer: {
+          socketId: game.whitePlayer.socketId,
+          username: game.whitePlayer.username,
+          rating: game.whitePlayer.rating || 1500,
+          isGuest: game.whitePlayer.isGuest
+        },
+        blackPlayer: {
+          socketId: game.blackPlayer.socketId,
+          username: game.blackPlayer.username,
+          rating: game.blackPlayer.rating || 1500,
+          isGuest: game.blackPlayer.isGuest
         }
-      }
+      };
+      
+      // Emit to room
+      this.server.to(payload.gameId).emit('game_end', gameEndEvent);
+      
+      // 4. For backward compatibility, also emit specific events the frontend might be listening for
+      this.server.to(payload.gameId).emit('game_ended', {
+        gameId: payload.gameId,
+        reason: 'abort',
+        result: 'aborted',
+        timestamp: new Date().toISOString()
+      });
+      
+      this.logger.log(`[GameAbortRequest] Game ${payload.gameId} successfully aborted. Game end events emitted.`);
       
       return {
         event: 'abortGameResponse',
         data: {
-          success,
-          message: success ? 'Game successfully aborted' : 'Unable to abort game',
+          success: true,
+          message: 'Game successfully aborted',
         },
       };
     } catch (error) {
@@ -830,10 +983,10 @@ export class GameGateway
    * Mark that white has made the first move, preventing further abort requests
    */
   @SubscribeMessage('move_made')
-  handleMoveMade(client: Socket, payload: MoveMadePayload) {
+  async handleMoveMade(client: Socket, payload: MoveMadePayload) {
     try {
       // Guard against missing payload properties
-      if (!payload || !payload.gameId || !payload.from || !payload.to || !payload.player) {
+      if (!payload || !payload.gameId || !payload.player) {
         this.logger.error('Invalid move_made payload:', payload);
         return {
           event: 'moveMadeResponse',
@@ -844,9 +997,24 @@ export class GameGateway
         };
       }
       
-      this.logger.log(
-        `Move made in game ${payload.gameId} by ${payload.player}: ${payload.from} -> ${payload.to} (${payload.notation})${payload.promotion ? ' promotion: ' + payload.promotion : ''}`,
-      );
+      // Check if we have a SAN move or from/to coordinates
+      if (!payload.san && (!payload.from || !payload.to)) {
+        this.logger.error('Move payload must contain either SAN notation or from/to coordinates:', payload);
+        return {
+          event: 'moveMadeResponse',
+          data: {
+            success: false,
+            message: 'Move payload must contain either SAN notation or from/to coordinates',
+          },
+        };
+      }
+      
+      // Log the move details
+      if (payload.san) {
+        this.logger.log(`Move made in game ${payload.gameId} by ${payload.player}: ${payload.san}${payload.promotion ? ' promotion: ' + payload.promotion : ''}`);
+      } else {
+        this.logger.log(`Move made in game ${payload.gameId} by ${payload.player}: ${payload.from} -> ${payload.to}${payload.promotion ? ' promotion: ' + payload.promotion : ''}`);
+      }
       
       // Get game from gameManagerService
       const game = this.gameManagerService.getGame(payload.gameId);
@@ -894,41 +1062,159 @@ export class GameGateway
       // Update PGN and last move time
       game.lastMoveTime = new Date();
       
-      // Update the chess instance
-      try {
-        const moveOptions: { from: string; to: string; promotion?: string } = {
-          from: payload.from,
-          to: payload.to,
-        };
-        if (payload.promotion) {
-          const mappedPromotion = pieceTypeToChessJs[payload.promotion.toLowerCase()];
-          if (mappedPromotion) {
-            moveOptions.promotion = mappedPromotion;
+      // Log FEN information from client if available
+      if (payload.currentFen) {
+        this.logger.log(`Client provided current FEN: ${payload.currentFen}`);
+      }
+      if (payload.resultingFen) {
+        this.logger.log(`Client provided resulting FEN: ${payload.resultingFen}`);
+      }
+      if (payload.moveHistory) {
+        this.logger.log(`Client provided move history with ${payload.moveHistory.length} moves`);
+      }
+      
+      // Check if we should validate the client's current FEN against our server state
+      if (payload.currentFen) {
+        const serverFen = game.chessInstance.fen();
+        
+        // Compare only the position part (first 4 parts) of the FEN
+        const clientFenParts = payload.currentFen.split(' ');
+        const serverFenParts = serverFen.split(' ');
+        
+        const clientPosition = clientFenParts.slice(0, 4).join(' ');
+        const serverPosition = serverFenParts.slice(0, 4).join(' ');
+        
+        if (clientPosition !== serverPosition) {
+          this.logger.warn(`FEN position mismatch. Client: ${clientPosition}, Server: ${serverPosition}`);
+          this.logger.warn('Proceeding with move, but board states may be out of sync');
+        }
+      }
+      
+      // Get or create a chess instance for this game
+      let chessInstance = this.chessInstances.get(payload.gameId);
+      
+      // If we don't have a chess instance for this game, create one and initialize it
+      if (!chessInstance) {
+        this.logger.log(`Creating new chess instance for game ${payload.gameId}`);
+        chessInstance = new Chess(); // Start with a fresh instance with correct move counts
+        this.chessInstances.set(payload.gameId, chessInstance);
+      }
+      
+      // If we have move history from the client, validate and potentially rebuild the board
+      if (payload.moveHistory && payload.moveHistory.length > 0) {
+        // Compare the client's move history with our server's move history
+        const serverMoveHistory = chessInstance.history();
+        
+        // If the move counts don't match or we need to rebuild, reset and replay the moves
+        if (serverMoveHistory.length !== payload.moveHistory.length) {
+          this.logger.log(`Move history mismatch. Server: ${serverMoveHistory.length} moves, Client: ${payload.moveHistory.length} moves. Rebuilding board state.`);
+          
+          // Reset the chess instance to the starting position
+          chessInstance.reset();
+          
+          // Apply each move from the client's move history
+          let allMovesApplied = true;
+          for (let i = 0; i < payload.moveHistory.length; i++) {
+            try {
+              const result = chessInstance.move(payload.moveHistory[i]);
+              if (!result) {
+                this.logger.error(`Failed to apply move ${i+1} during rebuild: ${payload.moveHistory[i]}`);
+                allMovesApplied = false;
+                break;
+              }
+            } catch (moveError) {
+              this.logger.error(`Error applying move ${i+1} during rebuild: ${payload.moveHistory[i]}. Error: ${moveError.message}`);
+              allMovesApplied = false;
+              break;
+            }
+          }
+          
+          if (!allMovesApplied) {
+            // If we couldn't apply all moves, reset and use the game's chess instance as fallback
+            this.logger.warn(`Failed to rebuild board from move history. Using game's chess instance as fallback.`);
+            chessInstance = game.chessInstance;
+            this.chessInstances.set(payload.gameId, chessInstance);
           } else {
-            this.logger.warn(`Invalid or unmapped promotion piece received: ${payload.promotion}. Move will attempt without specific promotion piece if mapping failed.`);
-            // chess.js will likely error if promotion is required and not provided or malformed.
-            // Alternatively, could default to 'q' or throw an error.
-            // For now, log and let chess.js handle it.
+            this.logger.log(`Successfully rebuilt board from move history. New FEN: ${chessInstance.fen()}`);
           }
         }
-        const moveResult = game.chessInstance.move(moveOptions);
+      }
+      
+      // Update the game's chess instance with our validated instance
+      game.chessInstance = chessInstance;
+      
+      // Now apply the new move
+      try {
+        let moveResult;
         
-        if (!moveResult) {
-          this.logger.error(`Invalid move attempted: ${payload.from} -> ${payload.to}`);
-          return {
-            event: 'moveMadeResponse',
-            data: {
-              success: false,
-              message: 'Invalid move',
-            },
+        // Apply the move using SAN notation if provided, otherwise use from/to coordinates
+        if (payload.san) {
+          this.logger.log(`Applying move using SAN notation: ${payload.san}`);
+          moveResult = chessInstance.move(payload.san);
+          
+          if (!moveResult) {
+            this.logger.error(`Invalid SAN move attempted: ${payload.san}`);
+            return {
+              event: 'moveMadeResponse',
+              data: {
+                success: false,
+                message: `Invalid SAN move: ${payload.san}`,
+              },
+            };
+          }
+        } else {
+          // Using from/to coordinates (legacy approach)
+          const moveOptions: { from: string; to: string; promotion?: string } = {
+            from: payload.from!,
+            to: payload.to!,
           };
+          
+          if (payload.promotion) {
+            const mappedPromotion = pieceTypeToChessJs[payload.promotion.toLowerCase()];
+            if (mappedPromotion) {
+              moveOptions.promotion = mappedPromotion;
+            } else {
+              this.logger.warn(`Invalid or unmapped promotion piece received: ${payload.promotion}. Move will attempt without specific promotion piece if mapping failed.`);
+            }
+          }
+          
+          moveResult = chessInstance.move(moveOptions);
+          
+          if (!moveResult) {
+            this.logger.error(`Invalid move attempted: ${payload.from} -> ${payload.to}`);
+            return {
+              event: 'moveMadeResponse',
+              data: {
+                success: false,
+                message: `Invalid move: ${payload.from} -> ${payload.to}`,
+              },
+            };
+          }
         }
         
+        // Get the move in SAN format from the move result
+        const sanMove = moveResult.san;
+        
+        // Get the current move history
+        const moveHistory = chessInstance.history();
+        
+        // Log the successful move and the current move history
+        this.logger.log(`Successfully applied move: ${sanMove}`);
+        this.logger.log(`Current move history: ${moveHistory.join(', ')}`);
+        
         // Update PGN
-        game.pgn = game.chessInstance.pgn();
+        game.pgn = chessInstance.pgn();
         
         // Update turn
         game.whiteTurn = !game.whiteTurn;
+        
+        // Get the current FEN after the move
+        const currentFen = chessInstance.fen();
+        
+        // Log FEN details for debugging
+        const fenParts = currentFen.split(' ');
+        this.logger.log(`Current FEN after move: ${currentFen}`);
+        this.logger.log(`FEN parts: position=${fenParts.slice(0, 4).join(' ')}, halfmove=${fenParts[4]}, fullmove=${fenParts[5]}`);
       } catch (chessError) {
         this.logger.error(`Chess engine error: ${chessError.message}`);
         return {
@@ -946,49 +1232,226 @@ export class GameGateway
       const isCheck = payload.notation && typeof payload.notation === 'string' && 
         (payload.notation.includes('+') || payload.notation.includes('#'));
       
-      // Broadcast move to all clients in the game room
+      // Get the current FEN after the move
+      const currentFen = game.chessInstance.fen();
+      
+      // Log the current FEN for debugging
+      this.logger.log(`Current FEN after move: ${currentFen}`);
+      
+      // Update the game in the database with the current move history, move count, and FEN
+      try {
+        if (game.dbGameId) {
+          // Get the current FEN from the chess instance
+          const currentFen = chessInstance.fen();
+          
+          // Get the move history in SAN format
+          const moveHistory = chessInstance.history();
+          
+          // Get the verbose move history with more details
+          const verboseMoveHistory = chessInstance.history({ verbose: true });
+          
+          // Get the total number of moves
+          const totalMoves = moveHistory.length;
+          
+          // Extract the move counts from the FEN string for logging
+          const fenParts = currentFen.split(' ');
+          const halfMoveClock = parseInt(fenParts[4]);
+          const fullMoveNumber = parseInt(fenParts[5]);
+          
+          this.logger.log(`Move counts from FEN: halfMoveClock=${halfMoveClock}, fullMoveNumber=${fullMoveNumber}`);
+          this.logger.log(`Total moves in history: ${totalMoves}`);
+          
+          // Update the database with the current game state
+          // Using move history as the primary source of truth
+          await this.gameRepositoryService.update(game.dbGameId, {
+            pgn: game.pgn,
+            moves: verboseMoveHistory, // Store the verbose move history
+            totalMoves: totalMoves, // Store the total number of moves
+            fen: currentFen // Store the current FEN as a secondary reference
+          });
+          
+          this.logger.log(`Updated game ${payload.gameId} in database with ${totalMoves} moves and FEN: ${currentFen}`);
+        }
+      } catch (dbError) {
+        this.logger.error(`Error updating game in database: ${dbError.message}`);
+      }
+      
+      // We've already checked that game exists earlier in the function, but let's add an extra check
+      // to satisfy TypeScript and prevent potential runtime errors
+      if (!game) {
+        this.logger.error(`Game ${payload.gameId} not found after move application. This should not happen.`);
+        return {
+          event: 'moveMadeResponse',
+          data: {
+            success: false,
+            message: 'Game not found after move application',
+          },
+        };
+      }
+      
+      // Get the current game state for broadcasting
+      const gameFen = chessInstance.fen();
+      const gameMoveHistory = chessInstance.history();
+      const gameVerboseMoveHistory = chessInstance.history({ verbose: true });
+      
+      // Get the move that was just made (the last move in the history)
+      const lastMove = gameMoveHistory.length > 0 ? gameMoveHistory[gameMoveHistory.length - 1] : null;
+      
+      // Determine if the move was a capture or check
+      const moveIsCapture = lastMove ? lastMove.includes('x') : false;
+      const moveIsCheck = lastMove ? lastMove.includes('+') || lastMove.includes('#') : false;
+      
+      // Log the move details
+      this.logger.log(`Last move: ${lastMove}, isCapture: ${moveIsCapture}, isCheck: ${moveIsCheck}`);
+      
+      // Check for threefold repetition
+      const isThreefoldRepetition = chessInstance.isThreefoldRepetition();
+      if (isThreefoldRepetition) {
+        this.logger.log(`Threefold repetition detected in game ${payload.gameId} after move ${lastMove}`);
+      }
+      
+      // Create a board_updated event with move history as the primary source of truth
+      const boardUpdatedEvent = {
+        gameId: payload.gameId,
+        moveHistory: gameMoveHistory, // Primary source of truth
+        verboseMoveHistory: gameVerboseMoveHistory, // Detailed move information
+        lastMove: lastMove, // The move that was just made
+        fen: gameFen, // Current FEN (for validation)
+        pgn: game.pgn, // PGN representation
+        whiteTurn: game.whiteTurn, // Whose turn it is
+        isCapture: moveIsCapture, // Whether the move was a capture
+        isCheck: moveIsCheck, // Whether the move resulted in check
+        moveCount: gameMoveHistory.length, // Total number of moves
+        isThreefoldRepetition: isThreefoldRepetition, // Whether threefold repetition has occurred
+        timestamp: Date.now() // Timestamp for synchronization
+      };
+      
+      // Broadcast the board_updated event to all clients in the game room
+      this.server.to(payload.gameId).emit('board_updated', boardUpdatedEvent);
+      
+      // For backward compatibility, also emit the move_made event
       this.server.to(payload.gameId).emit('move_made', {
         ...payload,
-        isCapture,
-        isCheck,
-        fen: game.chessInstance.fen(),
+        san: lastMove, // Include the SAN notation of the move
+        isCapture: moveIsCapture,
+        isCheck: moveIsCheck,
+        fen: gameFen,
+        moveHistory: gameMoveHistory,
+        pgn: game?.pgn || ''
       });
       
+      // Return a success response
+      return {
+        event: 'moveMadeResponse',
+        data: {
+          success: true,
+          message: 'Move applied successfully',
+          moveHistory: gameMoveHistory,
+          fen: gameFen,
+          pgn: game?.pgn || '',
+          whiteTurn: game?.whiteTurn || false
+        },
+      };
+      
+      // Early return if game is not defined
+      if (!game) {
+        return {
+          event: 'moveMadeResponse',
+          data: {
+            success: true,
+            message: 'Move applied successfully',
+            moveHistory: gameMoveHistory,
+            fen: gameFen,
+            pgn: '',
+            whiteTurn: false
+          },
+        };
+      }
+      
       // Check for game end conditions like checkmate
-      if (game.chessInstance.isCheckmate()) {
+      if (game?.chessInstance?.isCheckmate?.()) {
         this.logger.log(`Checkmate detected in game ${payload.gameId}`);
-        const winnerColor = game.whiteTurn ? 'black' : 'white'; // The one who just moved
-        const loserColor = game.whiteTurn ? 'white' : 'black'; // The one who got checkmated
+        // Add null checks for all game properties
+        const winnerColor = game?.whiteTurn ? 'black' : 'white'; // The one who just moved
+        const loserColor = game?.whiteTurn ? 'white' : 'black'; // The one who got checkmated
         
-        // Emit game_end event with winner and loser information
-        this.server.to(payload.gameId).emit('game_end', {
-          result: 'checkmate',
-          reason: 'checkmate',
-          winnerColor: winnerColor,
-          loserColor: loserColor,
-          finalFEN: game.chessInstance.fen()
-        });
+        // Add additional logging for database ID
+        this.logger.log(`Checkmate detected - database ID: ${game?.dbGameId || 'not available'}, event gameId: ${payload.gameId}`);
         
-        // Mark game as ended
-        game.ended = true;
-        game.result = winnerColor === 'white' ? GameResult.WHITE_WINS : GameResult.BLACK_WINS;
-        game.endReason = GameEndReason.CHECKMATE;
-        game.endTime = new Date();
-      } else if (game.chessInstance.isDraw() || game.chessInstance.isStalemate() || game.chessInstance.isThreefoldRepetition() || game.chessInstance.isInsufficientMaterial()) {
+        // Log the attempt to call checkGameEnd
+        this.logger.log(`Calling checkGameEnd for checkmate in game ${payload.gameId}, database ID: ${game?.dbGameId || 'not available'}`);
+        
+        try {
+          // Call checkGameEnd to update the database record
+          const resultData = await this.gameManagerService.checkGameEnd(
+            payload.gameId,
+            this.server
+          );
+          
+          if (resultData) {
+            this.logger.log(`Successfully handled game end for ${payload.gameId}`);
+          } else {
+            this.logger.warn(`checkGameEnd returned null for ${payload.gameId}, may need manual game end handling`);
+            
+            // Emit game_end event to clients as fallback
+            this.server.to(payload.gameId).emit('game_end', {
+              result: 'checkmate',
+              reason: 'checkmate',
+              winnerColor: winnerColor,
+              loserColor: loserColor,
+              finalFEN: game?.chessInstance?.fen() || ''
+            });
+          }
+        } catch (error) {
+          this.logger.error(`Error handling game end for ${payload.gameId}: ${error.message}`, error.stack);
+          
+          // Even if checkGameEnd fails, still emit the game_end event to clients
+          this.server.to(payload.gameId).emit('game_end', {
+            result: 'checkmate',
+            reason: 'checkmate',
+            winnerColor: winnerColor,
+            loserColor: loserColor,
+            finalFEN: game?.chessInstance?.fen() || ''
+          });
+        }
+      } else if (game?.chessInstance?.isDraw?.() || 
+                game?.chessInstance?.isStalemate?.() || 
+                game?.chessInstance?.isThreefoldRepetition?.() || 
+                game?.chessInstance?.isInsufficientMaterial?.()) {
         this.logger.log(`Draw detected in game ${payload.gameId}`);
         
-        // Emit game_end event for draw
-        this.server.to(payload.gameId).emit('game_end', {
-          result: 'draw',
-          reason: 'draw',
-          finalFEN: game.chessInstance.fen()
-        });
+        // Log the attempt to call checkGameEnd
+        this.logger.log(`Calling checkGameEnd for draw in game ${payload.gameId}, database ID: ${game?.dbGameId || 'not available'}`);
         
-        // Mark game as ended
-        game.ended = true;
-        game.result = GameResult.DRAW;
-        game.endReason = GameEndReason.DRAW_AGREEMENT;
-        game.endTime = new Date();
+        try {
+          // Call checkGameEnd to update the database record
+          const resultData = await this.gameManagerService.checkGameEnd(
+            payload.gameId,
+            this.server
+          );
+          
+          if (resultData) {
+            this.logger.log(`Successfully handled game end for ${payload.gameId}`);
+          } else {
+            this.logger.warn(`checkGameEnd returned null for ${payload.gameId}, may need manual game end handling`);
+            
+            // Emit game_end event to clients as fallback
+            this.server.to(payload.gameId).emit('game_end', {
+              result: 'draw',
+              reason: 'draw',
+              finalFEN: game?.chessInstance?.fen() || ''
+            });
+          }
+        } catch (error) {
+          this.logger.error(`Error handling game end for ${payload.gameId}: ${error.message}`, error.stack);
+          
+          // Even if checkGameEnd fails, still emit the game_end event to clients
+          this.server.to(payload.gameId).emit('game_end', {
+            result: 'draw',
+            reason: 'draw',
+            finalFEN: game?.chessInstance?.fen() || ''
+          });
+        }
       }
       
       return {
@@ -1041,12 +1504,24 @@ export class GameGateway
         this.logger.log(`Server state: ${fen}`);
       }
       
-      // Send board sync event back to the client
+      // Get the move history in SAN format
+      const moveHistory = game.chessInstance.history();
+      
+      // Get the verbose move history with more details
+      const verboseMoveHistory = game.chessInstance.history({ verbose: true });
+      
+      // Send board sync event back to the client with complete game state
       client.emit('board_sync', {
         gameId: payload.gameId,
         fen,
-        timestamp: Date.now()
+        moveHistory,
+        verboseMoveHistory,
+        pgn: game.pgn,
+        timestamp: Date.now(),
+        whiteTurn: game.whiteTurn
       });
+      
+      this.logger.log(`Sent board sync to client ${client.id} with FEN: ${fen} and ${moveHistory.length} moves`);
       
       return {
         event: 'boardSyncResponse',
@@ -1109,12 +1584,12 @@ export class GameGateway
   }
   
   /**
-   * Handle a timeout from a player
+   * Handle a client reporting a timeout
    */
   @SubscribeMessage('report_timeout')
-  handleReportTimeout(client: Socket, payload: { gameId: string, color: 'w' | 'b' }) {
+  async handleReportTimeout(client: Socket, payload: { gameId: string, color: 'w' | 'b' }) {
     this.logger.log(
-      `Timeout reported for ${payload.color === 'w' ? 'white' : 'black'} in game ${payload.gameId}`,
+      `[TIMEOUT] Timeout reported for ${payload.color === 'w' ? 'white' : 'black'} in game ${payload.gameId}`,
     );
     
     // Verify reporter is in the game
@@ -1145,14 +1620,39 @@ export class GameGateway
       };
     }
     
+    // Add explicit logging to track timeout processing
+    this.logger.log(`[TIMEOUT] Processing timeout in game ${payload.gameId} with database ID: ${game.dbGameId || 'not available'}`);
+    
     // Register the timeout
-    const gameResult = this.gameManagerService.registerTimeout(
+    const gameResult = await this.gameManagerService.registerTimeout(
       payload.gameId,
       payload.color,
       this.server,
     );
     
     if (gameResult) {
+      // Add explicit logging to confirm the timeout was processed with the correct reason
+      this.logger.log(`[TIMEOUT] Timeout successfully processed for game ${payload.gameId} with reason: ${gameResult.reason}`);
+      
+      // Make sure we emit the game_end event with the correct reason
+      this.server.to(payload.gameId).emit('game_end', {
+        gameId: payload.gameId,
+        reason: 'timeout',
+        result: gameResult.result,
+        winnerColor: payload.color === 'w' ? 'black' : 'white',
+        loserColor: payload.color === 'w' ? 'white' : 'black',
+        finalFEN: game.chessInstance.fen(),
+        timestamp: new Date().toISOString()
+      });
+      
+      // For backward compatibility, also emit the game_ended event
+      this.server.to(payload.gameId).emit('game_ended', {
+        gameId: payload.gameId,
+        reason: 'timeout',
+        result: gameResult.result,
+        timestamp: new Date().toISOString()
+      });
+      
       return {
         event: 'timeoutReported',
         data: {
@@ -1176,7 +1676,7 @@ export class GameGateway
    * Handle a player claiming a draw (e.g., for insufficent material)
    */
   @SubscribeMessage('claim_draw')
-  handleClaimDraw(client: Socket, payload: { gameId: string }) {
+  async handleClaimDraw(client: Socket, payload: { gameId: string }) {
     this.logger.log(
       `Client ${client.id} claimed a draw in game ${payload.gameId}`
     );
@@ -1194,7 +1694,7 @@ export class GameGateway
     }
     
     // Check if the game has actually ended in a draw
-    const gameResult = this.gameManagerService.checkGameEnd(
+    const gameResult = await this.gameManagerService.checkGameEnd(
       payload.gameId,
       this.server
     );
@@ -1274,6 +1774,319 @@ export class GameGateway
     return { event: 'draw_response', data: { success: true } };
   }
 
+  /**
+   * Handle game end event from client
+   * This handles various game-ending scenarios including threefold repetition
+   */
+  @SubscribeMessage('game_end')
+  async handleGameEnd(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { gameId: string, reason: string, fen?: string, moveHistory?: string[] },
+  ) {
+    try {
+      this.logger.log(`[GAME_END] Client ${client.id} reported game end in game ${payload.gameId} with reason: ${payload.reason}`);
+      
+      // Get the game from the game manager
+      const game = this.gameManagerService.getGame(payload.gameId);
+      if (!game) {
+        this.logger.error(`[GAME_END] Game ${payload.gameId} not found for game_end event`);
+        return {
+          event: 'error',
+          data: { success: false, message: 'Game not found' }
+        };
+      }
+      
+      // Check if the game is already over
+      if (game.ended) {
+        this.logger.warn(`[GAME_END] Game ${payload.gameId} is already over, ignoring game_end event`);
+        return {
+          event: 'error',
+          data: { success: false, message: 'Game is already over' }
+        };
+      }
+      
+      // Handle threefold repetition with enhanced validation
+      if (payload.reason === 'threefold_repetition') {
+        this.logger.log(`[GAME_END] Processing threefold repetition for game ${payload.gameId}`);
+        
+        // Log received FEN and move history for debugging
+        if (payload.fen) {
+          this.logger.log(`[GAME_END] Client reported FEN: ${payload.fen}`);
+        }
+        if (payload.moveHistory) {
+          this.logger.log(`[GAME_END] Client reported move history: ${JSON.stringify(payload.moveHistory)}`);
+        }
+        
+        // Get or use the dedicated chess instance for this game
+        let chessInstance = this.chessInstances.get(payload.gameId);
+        if (!chessInstance) {
+          // If we don't have a dedicated instance, use the game's instance
+          chessInstance = game.chessInstance;
+          // And store it for future use
+          this.chessInstances.set(payload.gameId, chessInstance);
+        }
+        
+        // If we have move history from the client, validate and potentially rebuild the board
+        if (payload.moveHistory && payload.moveHistory.length > 0) {
+          // Compare the client's move history with our server's move history
+          const serverMoveHistory = chessInstance.history();
+          
+          // If the move counts don't match or we need to rebuild, reset and replay the moves
+          if (serverMoveHistory.length !== payload.moveHistory.length) {
+            this.logger.log(`[GAME_END] Move history mismatch. Server: ${serverMoveHistory.length} moves, Client: ${payload.moveHistory.length} moves. Rebuilding board state.`);
+            
+            // Reset the chess instance to the starting position
+            chessInstance.reset();
+            
+            // Apply each move from the client's move history
+            let allMovesApplied = true;
+            for (let i = 0; i < payload.moveHistory.length; i++) {
+              try {
+                const result = chessInstance.move(payload.moveHistory[i]);
+                if (!result) {
+                  this.logger.error(`[GAME_END] Failed to apply move ${i+1} during rebuild: ${payload.moveHistory[i]}`);
+                  allMovesApplied = false;
+                  break;
+                }
+              } catch (moveError) {
+                this.logger.error(`[GAME_END] Error applying move ${i+1} during rebuild: ${payload.moveHistory[i]}. Error: ${moveError.message}`);
+                allMovesApplied = false;
+                break;
+              }
+            }
+            
+            if (!allMovesApplied) {
+              // If we couldn't apply all moves, reset and use the game's chess instance as fallback
+              this.logger.warn(`[GAME_END] Failed to rebuild board from move history. Using game's chess instance as fallback.`);
+              chessInstance = game.chessInstance;
+              this.chessInstances.set(payload.gameId, chessInstance);
+            } else {
+              this.logger.log(`[GAME_END] Successfully rebuilt board from move history. New FEN: ${chessInstance.fen()}`);
+              // Update the game's chess instance with our rebuilt instance
+              game.chessInstance = chessInstance;
+            }
+          }
+        }
+        
+        // Validate the current position using the server's chess instance
+        const serverFen = chessInstance.fen();
+        this.logger.log(`[GAME_END] Server current FEN: ${serverFen}`);
+        
+        // Double-check threefold repetition using the server's chess instance
+        const isThreefoldRepetition = chessInstance.isThreefoldRepetition();
+        this.logger.log(`[GAME_END] Server threefold repetition check: ${isThreefoldRepetition}`);
+        
+        // If server doesn't detect threefold repetition, force check using the game end service
+        if (!isThreefoldRepetition) {
+          this.logger.log(`[GAME_END] Server didn't detect threefold repetition, using forceThreefoldCheck=true`);
+        }
+        
+        // Get game end details using the game end service with forceThreefoldCheck=true
+        const gameEndDetails = this.gameEndService.checkGameEnd(
+          chessInstance,
+          game.whitePlayer.socketId,
+          game.blackPlayer.socketId,
+          undefined, // No timeout
+          undefined, // No resignation
+          false, // No draw agreement
+          undefined, // No disconnection
+          false, // Not first move
+          true // Force threefold repetition check
+        );
+        
+        // If threefold repetition is confirmed or we're forcing it (client detected it)
+        if (gameEndDetails && (gameEndDetails.reason === GameEndReason.THREEFOLD_REPETITION || isThreefoldRepetition)) {
+          // Handle the game end
+          this.logger.log(`[GAME_END] Threefold repetition confirmed for game ${payload.gameId}`);
+          
+          // Mark the game as ended in the game manager
+          game.ended = true;
+          
+          // Get the database ID for the game
+          const dbGameId = game.dbGameId || payload.gameId;
+          
+          // Update the game in the database
+          try {
+            // Mark the game as draw with threefold_repetition reason
+            await this.gameRepositoryService.update(dbGameId, {
+              status: 'draw', // Using a valid status value from the Game entity
+              endReason: 'threefold_repetition', // Using the correct property name from the Game entity
+              pgn: chessInstance.pgn(), // Include the final PGN
+              moves: chessInstance.history({ verbose: true }), // Include detailed move history
+              totalMoves: chessInstance.history().length // Include total moves count
+            });
+            
+            this.logger.log(`[GAME_END] Game ${payload.gameId} updated in database as draw with threefold_repetition reason`);
+          } catch (dbError) {
+            this.logger.error(`[GAME_END] Error updating game in database: ${dbError.message}`);
+          }
+          
+          // Calculate rating changes if the game is rated
+          let whiteRatingChange = 0;
+          let blackRatingChange = 0;
+          
+          if (game.rated) {
+            try {
+              // For a draw, both players' ratings change based on their rating difference
+              const ratingChanges = this.ratingService.calculateGameRatingChanges(
+                game.whitePlayer.rating || 1500,
+                game.blackPlayer.rating || 1500,
+                RatingResult.DRAW
+              );
+              
+              whiteRatingChange = ratingChanges.white.ratingChange;
+              blackRatingChange = ratingChanges.black.ratingChange;
+              
+              // Update player ratings in the database
+              const dbGameId = game.dbGameId || payload.gameId;
+              await this.gameRepositoryService.update(dbGameId, {
+                whitePlayerRatingAfter: (game.whitePlayer.rating || 1500) + whiteRatingChange,
+                blackPlayerRatingAfter: (game.blackPlayer.rating || 1500) + blackRatingChange,
+              });
+              
+              this.logger.log(`[GAME_END] Updated ratings for game ${payload.gameId}: White: ${whiteRatingChange}, Black: ${blackRatingChange}`);
+            } catch (ratingError) {
+              this.logger.error(`[GAME_END] Error calculating or updating ratings: ${ratingError.message}`);
+            }
+          } else {
+            this.logger.log(`[GAME_END] Game ${payload.gameId} is unrated, no rating changes`);
+          }
+          
+          // Create a consistent payload for all emissions
+          const gameEndPayload = {
+            gameId: payload.gameId,
+            reason: 'threefold_repetition',
+            result: 'draw',
+            timestamp: Date.now(),
+            whitePlayer: {
+              username: game.whitePlayer.username,
+              rating: game.whitePlayer.rating || 1500,
+              ratingChange: whiteRatingChange,
+              // Use optional chaining to safely access photoURL if it exists
+              photoURL: game.whitePlayer.photoURL || null
+            },
+            blackPlayer: {
+              username: game.blackPlayer.username,
+              rating: game.blackPlayer.rating || 1500,
+              ratingChange: blackRatingChange,
+              // Use optional chaining to safely access photoURL if it exists
+              photoURL: game.blackPlayer.photoURL || null
+            },
+            finalFEN: chessInstance.fen()
+          };
+          
+          // Log the payload we're about to emit
+          this.logger.log(`[GAME_END] Emitting game_end event to room ${payload.gameId} with payload:`, JSON.stringify(gameEndPayload));
+          
+          // Emit to all clients in the game room
+          this.server.to(payload.gameId).emit('game_end', gameEndPayload);
+          this.server.to(payload.gameId).emit('game_ended', gameEndPayload); // For backward compatibility
+          
+          // Also emit directly to each player to ensure delivery
+          if (game.whitePlayer?.socketId) {
+            this.logger.log(`[GAME_END] Emitting game_end event directly to white player: ${game.whitePlayer.socketId}`);
+            this.server.to(game.whitePlayer.socketId).emit('game_end', gameEndPayload);
+            this.server.to(game.whitePlayer.socketId).emit('game_ended', gameEndPayload);
+          }
+          
+          if (game.blackPlayer?.socketId) {
+            this.logger.log(`[GAME_END] Emitting game_end event directly to black player: ${game.blackPlayer.socketId}`);
+            this.server.to(game.blackPlayer.socketId).emit('game_end', gameEndPayload);
+            this.server.to(game.blackPlayer.socketId).emit('game_ended', gameEndPayload);
+          }
+          
+          // Also emit a board_updated event with isGameOver flag to ensure both clients update their UI
+          // This is crucial for threefold repetition to ensure both players navigate to the result screen
+          const boardUpdatePayload = {
+            gameId: payload.gameId,
+            moveHistory: chessInstance.history(),
+            verboseMoveHistory: chessInstance.history({ verbose: true }),
+            fen: chessInstance.fen(),
+            pgn: chessInstance.pgn(),
+            whiteTurn: game.whiteTurn,
+            isGameOver: true,
+            gameOverReason: 'threefold_repetition',
+            timestamp: Date.now()
+          };
+          
+          this.logger.log(`[GAME_END] Emitting board_updated event with isGameOver flag to room ${payload.gameId}`);
+          this.server.to(payload.gameId).emit('board_updated', boardUpdatePayload);
+          
+          // Also emit directly to each player to ensure delivery
+          if (game.whitePlayer?.socketId) {
+            this.server.to(game.whitePlayer.socketId).emit('board_updated', boardUpdatePayload);
+          }
+          
+          if (game.blackPlayer?.socketId) {
+            this.server.to(game.blackPlayer.socketId).emit('board_updated', boardUpdatePayload);
+          }
+          
+          // Send delayed events as a fallback in case the first ones didn't arrive
+          setTimeout(() => {
+            this.logger.log(`[GAME_END] Sending delayed game_end events as fallback for game ${payload.gameId}`);
+            this.server.to(payload.gameId).emit('game_end', gameEndPayload);
+            this.server.to(payload.gameId).emit('game_ended', gameEndPayload);
+            
+            if (game.whitePlayer?.socketId) {
+              this.server.to(game.whitePlayer.socketId).emit('game_end', gameEndPayload);
+              this.server.to(game.whitePlayer.socketId).emit('game_ended', gameEndPayload);
+            }
+            
+            if (game.blackPlayer?.socketId) {
+              this.server.to(game.blackPlayer.socketId).emit('game_end', gameEndPayload);
+              this.server.to(game.blackPlayer.socketId).emit('game_ended', gameEndPayload);
+            }
+            
+            // Also resend the board_updated event in the delayed fallback
+            this.logger.log(`[GAME_END] Sending delayed board_updated event as fallback for game ${payload.gameId}`);
+            this.server.to(payload.gameId).emit('board_updated', boardUpdatePayload);
+            
+            if (game.whitePlayer?.socketId) {
+              this.server.to(game.whitePlayer.socketId).emit('board_updated', boardUpdatePayload);
+            }
+            
+            if (game.blackPlayer?.socketId) {
+              this.server.to(game.blackPlayer.socketId).emit('board_updated', boardUpdatePayload);
+            }
+          }, 1000); // Send again after 1 second
+          
+          // Return success response
+          return {
+            event: 'game_end',
+            data: {
+              success: true,
+              message: 'Game ended due to threefold repetition',
+              result: 'draw',
+              reason: 'threefold_repetition'
+            }
+          };
+        } else {
+          this.logger.warn(`[GAME_END] Threefold repetition not confirmed by game end service for game ${payload.gameId}`);
+          return {
+            event: 'error',
+            data: { success: false, message: 'Threefold repetition not confirmed' }
+          };
+        }
+      }
+      
+      // Handle other game end reasons here if needed
+      // ...
+      
+      // If we reach here, the reason wasn't handled
+      this.logger.warn(`[GAME_END] Unhandled game end reason: ${payload.reason}`);
+      return {
+        event: 'error',
+        data: { success: false, message: `Unhandled game end reason: ${payload.reason}` }
+      };
+    } catch (error) {
+      this.logger.error(`[GAME_END] Error handling game end: ${error.message}`);
+      return {
+        event: 'error',
+        data: { success: false, message: `Error: ${error.message}` }
+      };
+    }
+  }
+
   @SubscribeMessage('game_abort_request')
   async handleGameAbortRequest(
     @ConnectedSocket() client: Socket,
@@ -1283,7 +2096,7 @@ export class GameGateway
     const game = this.gameManagerService.getGame(gameId);
 
     if (!game) {
-      this.logger.warn(`[GameAbortRequest] Game not found: ${gameId}`);
+      this.logger.warn(`[GameAbortRequest] Game ${gameId} not found: ${gameId}`);
       // Optionally emit an error back to the client if game not found
       client.emit('error_occurred', { message: 'Game not found for abort request.', gameId });
       return;
@@ -1299,8 +2112,6 @@ export class GameGateway
     }
 
     // Check if any moves have been made.
-    // The `game.chessInstance.history()` will be empty if no moves are made.
-    // Or, you might have a flag like `game.isFirstMove` or check `game.pgn` length.
     // Using `game.chessInstance.history().length` is a reliable way from chess.js perspective.
     const movesMade = game.chessInstance.history().length > 0;
 
@@ -1311,28 +2122,67 @@ export class GameGateway
     } else {
       this.logger.log(`[GameAbortRequest] Game ${gameId} has no moves. Processing abort.`);
       
-      // Call a method in GameManagerService to handle the game end logic for an abort.
-      // This method should mark the game as ended, set the reason to ABORTED, and NOT update ratings.
-      // It should then be responsible for emitting 'game_aborted' if this gateway isn't doing it directly.
-      // For now, let's assume handleGameEnd is robust enough or we adapt it.
-      
-      // IMPORTANT: Ensure GameEndReason.ABORTED exists and handleGameEnd respects it for no rating changes.
-      const gameEndResult = (this.gameManagerService as any).handleGameEnd(
-        gameId,
-        { result: GameResult.DRAW, reason: GameEndReason.ABORT }, // Using ABORT as suggested by linter
-        this.server,
-      );
-
-      if (gameEndResult) {
-         this.logger.log(`[GameAbortRequest] Game ${gameId} successfully aborted. Broadcasting game_aborted.`);
-         // handleGameEnd should ideally emit the game_aborted event if it's the central place for game ending.
-         // If not, we emit it here. Assuming handleGameEnd might emit a generic game_ended, 
-         // but the spec requires a specific game_aborted.
-         this.server.to(gameId).emit('game_aborted', { gameId });
-      } else {
-        this.logger.error(`[GameAbortRequest] Failed to process game end for abort in game ${gameId}.`);
-        // Fallback: Still try to notify clients if gameEndResult was not as expected
-        this.server.to(gameId).emit('game_aborted', { gameId }); // Emit even if handleGameEnd had issues, as a safeguard
+      try {
+        // Create game end details object for abort
+        const gameEndDetails = {
+          result: GameResult.ABORTED,
+          reason: GameEndReason.ABORT,
+          winnerSocketId: undefined,
+          loserSocketId: undefined
+        };
+        
+        // Call handleGameEnd to update database
+        this.logger.log(`[GameAbortRequest] Calling gameEndService.checkGameEnd for game ${gameId} to update database`);
+        const resultData = await this.gameManagerService.checkGameEnd(
+          gameId,
+          this.server
+        );
+        
+        this.logger.log(`[GameAbortRequest] Game end result: ${resultData ? 'Success' : 'Failed'}`);
+        
+        // 1. Emit game_aborted event (compatibility)
+        this.server.to(payload.gameId).emit('game_aborted', { 
+          gameId: payload.gameId,
+          reason: GameEndReason.ABORT,
+          result: GameResult.ABORTED
+        });
+        
+        // 2. Emit the standard game_end event that the frontend listens for
+        const gameEndEvent = {
+          gameId: payload.gameId,
+          reason: 'abort',
+          result: 'aborted',
+          finalFEN: game.chessInstance.fen(),
+          timestamp: new Date().toISOString(),
+          // Include player information
+          whitePlayer: {
+            socketId: game.whitePlayer.socketId,
+            username: game.whitePlayer.username,
+            rating: game.whitePlayer.rating || 1500,
+            isGuest: game.whitePlayer.isGuest
+          },
+          blackPlayer: {
+            socketId: game.blackPlayer.socketId,
+            username: game.blackPlayer.username,
+            rating: game.blackPlayer.rating || 1500,
+            isGuest: game.blackPlayer.isGuest
+          }
+        };
+        
+        // Emit to room
+        this.server.to(payload.gameId).emit('game_end', gameEndEvent);
+        
+        // 4. For backward compatibility, also emit specific events the frontend might be listening for
+        this.server.to(payload.gameId).emit('game_ended', {
+          gameId: payload.gameId,
+          reason: 'abort',
+          result: 'aborted',
+          timestamp: new Date().toISOString()
+        });
+        
+        this.logger.log(`[GameAbortRequest] Game ${payload.gameId} successfully aborted. Game end events emitted.`);
+      } catch (error) {
+        this.logger.error(`[GameAbortRequest] Error processing game abort: ${error.message}`, error.stack);
         client.emit('error_occurred', { message: 'Error processing game abort on server.', gameId });
       }
     }

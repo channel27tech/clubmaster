@@ -51,6 +51,7 @@ export class GameEndService {
    * @param drawAgreement Whether a draw was agreed upon
    * @param disconnectedColor Color of the disconnected player (if applicable)
    * @param isFirstMove Whether the first move has been made
+   * @param forceThreefoldCheck Whether to force check for threefold repetition (for client-reported cases)
    */
   checkGameEnd(
     chessInstance: Chess,
@@ -61,6 +62,7 @@ export class GameEndService {
     drawAgreement = false,
     disconnectedColor?: Color,
     isFirstMove = false,
+    forceThreefoldCheck = false,
   ): GameEndDetails | null {
     // Check for timeout
     if (timeoutColor) {
@@ -139,7 +141,11 @@ export class GameEndService {
     }
 
     // Check for threefold repetition
-    if (chessInstance.isThreefoldRepetition()) {
+    if (chessInstance.isThreefoldRepetition() || forceThreefoldCheck) {
+      // If forceThreefoldCheck is true, we trust the client's report of threefold repetition
+      // This is needed because the client may detect it before the server does
+      this.logger.log(`Threefold repetition detected: ${forceThreefoldCheck ? 'forced by client' : 'detected by server'}`);
+      
       return {
         result: GameResult.DRAW,
         reason: GameEndReason.THREEFOLD_REPETITION,
