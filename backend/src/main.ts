@@ -1,7 +1,8 @@
-// Add crypto module polyfill globally if needed
+// Add crypto module polyfill globally to fix TypeORM issue with randomUUID
 import * as crypto from 'crypto';
-// Remove the problematic line that tries to override global.crypto
-// global.crypto = crypto as any;
+
+// Make crypto globally available for TypeORM
+(global as any).crypto = crypto;
 
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
