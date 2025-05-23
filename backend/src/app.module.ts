@@ -13,6 +13,7 @@ import { DataSource } from 'typeorm';
 import { DatabaseModule } from './database/database.module';
 import { UsersModule } from './users/users.module';
 import { FirebaseModule } from './firebase/firebase.module';
+import { ProfileModule } from './profile/profile.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { FirebaseModule } from './firebase/firebase.module';
     SoundModule,
     ClubModule,
     ClubMemberModule,
+    ProfileModule,
   ],
   controllers: [AppController],
   providers: [AppService],
