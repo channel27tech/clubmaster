@@ -1,77 +1,69 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
 import BottomNavigation from '../../components/BottomNavigation';
+import { useClub } from '../../context/ClubContext';
+import { useAuth } from '../../../context/AuthContext';
 
 // Array of profile images
-const profileImages = [
-  '/images/dp 1.svg',
-  '/images/dp 2.svg',
-  '/images/dp 3.svg',
-  '/images/dp 4.svg',
-  '/images/dp 5.svg'
-];
+// const profileImages = [
+//   '/images/dp 1.svg',
+//   '/images/dp 2.svg',
+//   '/images/dp 3.svg',
+//   '/images/dp 4.svg',
+//   '/images/dp 5.svg'
+// ];
 
-const clubData = [
-  {
-    id: 1,
-    name: 'Black Panther',
-    members: 227,
-    location: 'Ernakulam',
-    rank: '#23',
-    points: '12,345 pts',
-    logo: '/images/black-panther.jpg',
-    locked: false
-  },
-  {
-    id: 2,
-    name: 'Fradel and Spies',
-    members: 227,
-    location: 'Thrissur',
-    rank: '#23',
-    points: '12,345 pts',
-    logo: '/images/fradel.jpg',
-    locked: true
-  },
-  {
-    id: 3,
-    name: 'Check Mate',
-    members: 227,
-    location: 'Ernakulam',
-    rank: '#53',
-    points: '12,345 pts',
-    logo: '/images/check-mate.jpg',
-    locked: true
-  },
-  {
-    id: 4,
-    name: 'Chess Master',
-    members: 227,
-    location: 'Aluva',
-    rank: '#33',
-    points: '12,345 pts',
-    logo: '/images/chess-master.jpg',
-    locked: false
-  },
-  {
-    id: 5,
-    name: 'Black Panther',
-    members: 227,
-    location: 'Ernakulam',
-    rank: '#23',
-    points: '12,345 pts',
-    logo: '/images/black-panther.jpg',
-    locked: false
-  }
-];
+// Define a Club interface for type safety
+interface Club {
+  id: number;
+  name: string;
+  location?: string;
+  rank?: string;
+  points?: string;
+  logo?: string;
+  locked?: boolean;
+  members?: number;
+}
 
 export default function ClubsView() {
   const router = useRouter();
+  const { hasClub } = useClub();
+  const { user } = useAuth();
   const [showFilters, setShowFilters] = useState(false);
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [clubs, setClubs] = useState<Club[]>([]);
+  const [myClubId, setMyClubId] = useState<number | null>(null);
+
+  useEffect(() => {
+    fetch('http://localhost:3001/club')
+      .then(res => res.json())
+      .then(data => setClubs(data));
+  }, []);
+
+  // Fetch the user's club id if logged in
+  useEffect(() => {
+    const fetchMyClub = async () => {
+      if (!user) return;
+      try {
+        const token = await user.getIdToken();
+        const res = await fetch('http://localhost:3001/club-member/my', {
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data && data.club && data.club.id) {
+          setMyClubId(data.club.id);
+        }
+      } catch (err) {
+        // Ignore errors
+      }
+    };
+    fetchMyClub();
+  }, [user]);
 
   // Toggle filter menu
   const toggleFilters = () => {
@@ -91,22 +83,14 @@ export default function ClubsView() {
     setSearchQuery(e.target.value);
   };
 
-  // Filter clubs based on search query and active filter
-  const filteredClubs = clubData.filter(club => {
-    // If no search query, return all clubs
+  // Filter clubs based on search query, active filter, and exclude user's own club
+  const filteredClubs = clubs.filter((club) => {
+    if (myClubId && club.id === myClubId) return false;
     if (!searchQuery.trim()) return true;
-    
     const query = searchQuery.toLowerCase().trim();
-    
-    // Search by name
     if (club.name.toLowerCase().includes(query)) return true;
-    
-    // Search by location
-    if (club.location.toLowerCase().includes(query)) return true;
-    
-    // Search by rank
-    if (club.rank.toLowerCase().includes(query)) return true;
-    
+    if (club.location && club.location.toLowerCase().includes(query)) return true;
+    if (club.rank && club.rank.toLowerCase().includes(query)) return true;
     return false;
   });
 
@@ -136,20 +120,35 @@ export default function ClubsView() {
           </h1>
         </div>
 
-        {/* Create Club Button - with updated styling */}
+        {/* Create Club Button - with updated styling and logic */}
         <div className="px-[21px] py-1 bg-[#333939]">
-          <button 
-            onClick={() => router.push('/club/create')}
-            className="w-full h-[57px] bg-[#4A7C59] text-[#FAF3DD] border-2 border-[#E9CB6B]"
-            style={{ 
-              borderRadius: '0.75rem',
-              fontFamily: 'Roboto, sans-serif',
-              fontWeight: '500',
-              fontSize: '18px'
-            }}
-          >
-            Create club
-          </button>
+          {hasClub ? (
+            <button 
+              onClick={() => router.push('/club/created-detail')}
+              className="w-full h-[57px] bg-[#4A7C59] text-[#FAF3DD] border-2 border-[#E9CB6B]"
+              style={{ 
+                borderRadius: '0.75rem',
+                fontFamily: 'Roboto, sans-serif',
+                fontWeight: '500',
+                fontSize: '18px'
+              }}
+            >
+              Go to my club
+            </button>
+          ) : (
+            <button 
+              onClick={() => router.push('/club/create')}
+              className="w-full h-[57px] bg-[#4A7C59] text-[#FAF3DD] border-2 border-[#E9CB6B]"
+              style={{ 
+                borderRadius: '0.75rem',
+                fontFamily: 'Roboto, sans-serif',
+                fontWeight: '500',
+                fontSize: '18px'
+              }}
+            >
+              Create club
+            </button>
+          )}
         </div>
 
         {/* Search Bar - with updated styling */}
@@ -241,12 +240,14 @@ export default function ClubsView() {
               key={club.id} 
               className="bg-[#4C5454] overflow-hidden p-3 flex items-center mb-3 mt-1 cursor-pointer" 
               style={{ borderRadius: '0.75rem' }}
-              onClick={() => router.push('/club/preview')}
+              onClick={() => router.push(`/club/detail?id=${club.id}`)}
             >
               <div className="w-[70px] h-[70px] rounded-full overflow-hidden bg-white flex-shrink-0 mr-4">
                 {/* Use the profile images in the specified order, rotating if needed */}
                 <Image 
-                  src={profileImages[index % profileImages.length]}
+                  src={club.logo && club.logo.startsWith('/uploads/')
+                    ? `http://localhost:3001${club.logo}`
+                    : (club.logo || '/images/club-icon.svg')}
                   alt={`${club.name} profile`}
                   width={70}
                   height={70}

@@ -8,7 +8,10 @@ export class FirebaseAuthGuard implements CanActivate {
     const request = context.switchToHttp().getRequest();
     const authHeader = request.headers.authorization;
 
+    console.log('[FirebaseAuthGuard] Incoming Authorization header:', authHeader);
+
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      console.warn('[FirebaseAuthGuard] Missing or invalid authorization token');
       throw new UnauthorizedException('Missing or invalid authorization token');
     }
 
@@ -16,18 +19,18 @@ export class FirebaseAuthGuard implements CanActivate {
 
     try {
       const decodedToken = await admin.auth().verifyIdToken(token);
-      
+      console.log('[FirebaseAuthGuard] Decoded token:', decodedToken);
       // Attach the Firebase UID to the request object
-      request.firebaseUser = {
+      request.user = {
         uid: decodedToken.uid,
         email: decodedToken.email,
         emailVerified: decodedToken.email_verified,
         displayName: decodedToken.name,
-        // Add other fields as needed
       };
-      
+      console.log('[FirebaseAuthGuard] UID set on request.user:', request.user.uid);
       return true;
     } catch (error) {
+      console.error('[FirebaseAuthGuard] Token verification failed:', error);
       throw new UnauthorizedException('Invalid or expired Firebase token');
     }
   }

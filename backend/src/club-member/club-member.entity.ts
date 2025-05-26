@@ -1,12 +1,13 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { User } from '../users/entities/user.entity';
 
 @Entity()
 export class ClubMember {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column()
-  userId: number;
+  @Column({ nullable: true })
+  userId: string;
 
   @Column()
   clubId: number;
@@ -22,4 +23,8 @@ export class ClubMember {
 
   @Column({ nullable: true })
   location: string;
+
+  @ManyToOne(() => User)
+  @JoinColumn({ name: 'userId' })
+  user: User;
 } 

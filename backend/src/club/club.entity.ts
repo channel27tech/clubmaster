@@ -17,7 +17,7 @@ export class Club {
   @Column({ nullable: true })
   description: string;
 
-  @Column()
+  @Column({ default: '/uploads/default-logo.png' })
   logo: string;
 
   @Column({ default: 300 })
@@ -26,6 +26,6 @@ export class Club {
   @Column({ default: 50 })
   credits: number;
 
-  @Column()
-  superAdminId: number;
+  @Column({ nullable: true })
+  superAdminId: string;
 } 

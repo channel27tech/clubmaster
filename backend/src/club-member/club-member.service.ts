@@ -1,9 +1,10 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ClubMember } from './club-member.entity';
 import { Club } from '../club/club.entity';
 import { JoinClubDto } from './dto/join-club.dto';
+import { User } from '../users/entities/user.entity';
 
 @Injectable()
 export class ClubMemberService {
@@ -12,11 +13,19 @@ export class ClubMemberService {
     private clubMemberRepository: Repository<ClubMember>,
     @InjectRepository(Club)
     private clubRepository: Repository<Club>,
+    @InjectRepository(User)
+    private userRepository: Repository<User>,
   ) {}
 
-  async joinClub(joinClubDto: JoinClubDto, userId: number) {
+  async joinClub(joinClubDto: JoinClubDto, firebaseUid: string) {
+    // 3. Get user details from the database
+    const user = await this.userRepository.findOne({ where: { firebaseUid } });
+    if (!user) {
+      throw new NotFoundException(`User with Firebase UID ${firebaseUid} not found`);
+    }
+
     // 1. Check if user already in a club
-    const alreadyMember = await this.clubMemberRepository.findOne({ where: { userId } });
+    const alreadyMember = await this.clubMemberRepository.findOne({ where: { userId: user.id } });
     if (alreadyMember) {
       throw new BadRequestException('User already in a club');
     }
@@ -27,33 +36,34 @@ export class ClubMemberService {
       throw new BadRequestException('Club not found');
     }
 
-    // 3. Check club type and eligibility
+    // 4. Check club type and eligibility
     if (club.type === 'public') {
       // allow
     } else if (club.type === 'private_by_invite') {
       throw new BadRequestException('Invite required to join this club');
     } else if (club.type === 'private_by_rating') {
-      // Mock: user rating >= 1000
-      const userRating = 1200; // Replace with real user rating
-      if (userRating < 1000) {
+      // Use actual user rating
+      if (user.rating < 1000) {
         throw new BadRequestException('User rating too low to join this club');
       }
     } else if (club.type === 'private_by_location') {
-      // Mock: user location matches club location
-      const userLocation = 'India'; // Replace with real user location
-      if (userLocation !== club.location) {
+      // Use actual user location
+      if (!user.location) {
+        throw new BadRequestException('User location not set');
+      }
+      if (user.location !== club.location) {
         throw new BadRequestException('User location does not match club location');
       }
     }
 
-    // 4. Create ClubMember entry
+    // 5. Create ClubMember entry
     const member = this.clubMemberRepository.create({
-      userId,
+      userId: user.id,
       clubId: club.id,
       role: 'member',
       joinedAt: new Date(),
-      rating: 1200, // mock
-      location: 'India', // mock
+      rating: user.rating,
+      location: user.location || undefined,
     });
     return this.clubMemberRepository.save(member);
   }
