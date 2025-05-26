@@ -43,20 +43,14 @@ export default function BottomNavigation({ onClubClick }: BottomNavigationProps)
     if (onClubClick) {
       onClubClick();
     } else {
-      if (userType === 'hasClub') {
-        router.push('/club/my-clubs');
-      } else if (userType === 'admin') {
-        router.push('/club/preview?admin=1');
-      } else {
-        router.push('/club/clubs');
-      }
+      router.push('/club/clubs');
     }
   };
   
   const isMore = pathname === '/more';
   
   return (
-    <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[400px] bg-[#2B3131] flex justify-between items-center px-[21px] py-2 squared-t-xl border-t border-[#393E3E]" style={{zIndex: 50}}>
+    <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[430px] bg-[#2B3131] flex justify-between items-center px-[21px] py-2 squared-t-xl border-t border-[#393E3E]" style={{zIndex: 50}}>
       <button 
         onClick={() => router.push('/club')}
         className="flex flex-col items-center flex-1"
