@@ -399,9 +399,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           );
           // No setIsAuthenticated needed
         } catch (err) {
-          // If sync fails, log out and show error
-          logout();
-          alert('Authentication failed. Please try again.');
+          // If sync fails, just log the error but don't log out
+          console.error('User sync with backend failed:', err);
+          // We'll continue with the login flow anyway
         }
       });
     }
