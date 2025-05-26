@@ -11,45 +11,32 @@ export default function ClubHomeScreen() {
   const { hasClub, setHasClub, userType, setUserType } = useClub();
   const router = useRouter();
   const { user } = useAuth();
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-  
-  // Handle click outside to close dropdown
+
+  // Automatically set hasClub and userType based on user/club data
   useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsDropdownOpen(false);
+    const fetchClubStatus = async () => {
+      if (!user) return;
+      try {
+        const token = await user.getIdToken();
+        const res = await fetch('http://localhost:3001/club-member/my', {
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error('Failed to fetch club status');
+        const data = await res.json();
+        if (data && data.club) {
+          setHasClub(true);
+          setUserType(data.role === 'super_admin' || data.role === 'admin' ? 'admin' : 'hasClub');
+        } else {
+          setHasClub(false);
+          setUserType('noClub');
+        }
+      } catch (err) {
+        setHasClub(false);
+        setUserType('noClub');
       }
-    }
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, []);
-
-  // Handle user type change
-  const handleUserTypeChange = (type: UserType) => {
-    setUserType(type);
-    setIsDropdownOpen(false);
-    
-    // Update hasClub state based on userType for backward compatibility
-    setHasClub(type === 'hasClub');
-  };
-
-  // Get display text based on current user type
-  const getDisplayText = () => {
-    switch (userType) {
-      case 'hasClub':
-        return 'Has Club View';
-      case 'noClub':
-        return 'No Club View';
-      case 'admin':
-        return 'Admin User View';
-      default:
-        return 'Switch View';
-    }
-  };
+    fetchClubStatus();
+  }, [user, setHasClub, setUserType]);
 
   // Handle navigation to play screen
   const handlePlayClick = () => {
@@ -145,9 +132,9 @@ export default function ClubHomeScreen() {
           )}
         </div>
 
-        {!hasClub && (
-          // No Club View - Featured event section
-          <div className="w-full h-[111px] mx-auto mb-4">
+        {/* {!hasClub && ( */}
+          {/* // No Club View - Featured event section */}
+          <div className="w-full h-[111px] mx-auto mb-4 mt-4">
             <div className="h-full rounded-[5px] overflow-hidden shadow-lg" style={{
               background: 'linear-gradient(to right, #4A7C59, #4c5454)',
             }}>
@@ -180,49 +167,7 @@ export default function ClubHomeScreen() {
               </div>
             </div>
           </div>
-        )}
-
-        {/* Demo flow switch dropdown */}
-        <div className="relative mb-4" ref={dropdownRef}>
-          <button 
-            onClick={() => setIsDropdownOpen(!isDropdownOpen)} 
-            className="px-4 py-2 bg-[#4A7C59] text-[#FAF3DD] rounded-md text-sm flex items-center justify-between min-w-[160px]"
-          >
-            <span>{getDisplayText()}</span>
-            <svg 
-              xmlns="http://www.w3.org/2000/svg" 
-              className={`h-4 w-4 ml-2 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} 
-              fill="none" 
-              viewBox="0 0 24 24" 
-              stroke="currentColor"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-          
-          {isDropdownOpen && (
-            <div className="absolute z-50 mt-1 w-full bg-[#1F2323] border border-[#4A7C59] rounded-md shadow-lg">
-              <button 
-                className={`w-full text-left px-4 py-2 text-sm ${userType === 'hasClub' ? 'bg-[#4A7C59] text-[#FAF3DD]' : 'text-[#D9D9D9] hover:bg-[#4c5454]'}`}
-                onClick={() => handleUserTypeChange('hasClub')}
-              >
-                Has Club View
-              </button>
-              <button 
-                className={`w-full text-left px-4 py-2 text-sm ${userType === 'noClub' ? 'bg-[#4A7C59] text-[#FAF3DD]' : 'text-[#D9D9D9] hover:bg-[#4c5454]'}`}
-                onClick={() => handleUserTypeChange('noClub')}
-              >
-                No Club View
-              </button>
-              <button 
-                className={`w-full text-left px-4 py-2 text-sm ${userType === 'admin' ? 'bg-[#4A7C59] text-[#FAF3DD]' : 'text-[#D9D9D9] hover:bg-[#4c5454]'}`}
-                onClick={() => handleUserTypeChange('admin')}
-              >
-                Admin User View
-              </button>
-            </div>
-          )}
-        </div>
+        {/* )} */}
 
         {/* Main actions - Button section */}
         <div className="w-full mx-auto bg-[#4C5454] rounded-[10px] flex flex-col items-center justify-evenly py-6 px-4 my-4">
@@ -267,23 +212,26 @@ export default function ClubHomeScreen() {
           
           {/* Conditional rendering based on club status */}
           {hasClub ? (
-            // User has a club - Show "Play a club member" button
-            <button className="w-[302px] h-[57px] rounded-[10px] bg-[#1F2323] text-[#D9D9D9] text-base flex items-center justify-center border border-[#000000] mb-4">
+            // User has a club - Show "Play with club member" button
+            <button
+              className="w-[302px] h-[57px] rounded-[10px] bg-[#1F2323] text-[#D9D9D9] text-base flex items-center justify-center border border-[#000000] mb-4"
+              onClick={() => router.push('/club/created-detail')}
+            >
               <span className="mr-3">
                 <Image 
                   src="/images/play a clb membr btn icon.svg" 
-                  alt="Play a club member" 
+                  alt="Play with club member" 
                   width={30} 
                   height={30}
                 />
               </span>
-              Play a club member
+              Play with club member
             </button>
           ) : (
             // User doesn't have a club - Show "Join a club" button
-            <Link 
-              href="/clubs" 
+            <button
               className="w-[302px] h-[57px] rounded-[10px] bg-[#1F2323] text-[#D9D9D9] text-base flex items-center justify-center border border-[#000000] mb-4"
+              onClick={() => router.push('/club/clubs')}
             >
               <span className="mr-3">
                 <Image 
@@ -294,7 +242,7 @@ export default function ClubHomeScreen() {
                 />
               </span>
               Join a club
-            </Link>
+            </button>
           )}
           
           {/* Play a friend Button */}
@@ -314,18 +262,7 @@ export default function ClubHomeScreen() {
 
       {/* Bottom Navigation */}
       <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[430px] z-50">
-        <BottomNavigation 
-          onClubClick={() => {
-            // Navigate to different club views based on userType
-            if (userType === 'hasClub') {
-              router.push('/club/my-clubs');
-            } else if (userType === 'admin') {
-              router.push('/club/preview?admin=1');
-            } else {
-              router.push('/club/clubs');
-            }
-          }}
-        />
+        <BottomNavigation />
       </div>
     </div>
   );

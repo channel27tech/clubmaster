@@ -1,6 +1,17 @@
-import { Controller, Get, Post, Body, Req, UsePipes, ValidationPipe } from '@nestjs/common';
+import { Controller, Get, Post, Body, Req, UsePipes, ValidationPipe, UseGuards, UnauthorizedException, Param, NotFoundException } from '@nestjs/common';
 import { ClubService } from './club.service';
 import { CreateClubDto } from './dto/create-club.dto';
+import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
+
+// Extend the Express Request interface to include our firebaseUser property
+interface FirebaseRequest extends Request {
+  user: {
+    uid: string;
+    email?: string;
+    emailVerified?: boolean;
+    displayName?: string;
+  };
+}
 
 @Controller('club')
 export class ClubController {
@@ -12,10 +23,21 @@ export class ClubController {
   }
 
   @Post()
+  @UseGuards(FirebaseAuthGuard)
   @UsePipes(new ValidationPipe({ whitelist: true }))
-  async create(@Body() createClubDto: CreateClubDto, @Req() req) {
-    // For demonstration, mock userId. In real app, get from auth token/session.
-    const userId = req.user?.id || 3; // Replace with real user ID in production
-    return this.clubService.create(createClubDto, userId);
+  async create(@Body() createClubDto: CreateClubDto, @Req() req: FirebaseRequest) {
+    if (!req.user || !req.user.uid) {
+      throw new UnauthorizedException('User authentication required');
+    }
+    
+    // Use actual user ID from Firebase authentication
+    return this.clubService.create(createClubDto, req.user.uid);
+  }
+
+  @Get(':id')
+  async findOne(@Param('id') id: string) {
+    const club = await this.clubService.findOneById(Number(id));
+    if (!club) throw new NotFoundException('Club not found');
+    return club;
   }
 } 

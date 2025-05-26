@@ -7,13 +7,16 @@ const SOCKET_SERVER_URL = 'http://localhost:3001';
 
 // Default socket options
 const DEFAULT_OPTIONS: Partial<ManagerOptions> = {
-  transports: ['websocket'],
+  transports: ['websocket', 'polling'],  // Allow polling as fallback
   autoConnect: true,
   reconnection: true,
-  reconnectionAttempts: 5,
+  reconnectionAttempts: Infinity,  // Keep trying to reconnect
   reconnectionDelay: 1000,
-  reconnectionDelayMax: 5000,
-  path: '/socket.io'
+  reconnectionDelayMax: 10000,
+  timeout: 20000,  // Increase timeout
+  path: '/socket.io',
+  forceNew: false,  // Allow reusing existing connections
+  multiplex: true   // Enable multiplexing
 };
 
 /**
@@ -445,8 +448,5 @@ export const getTimerState = (gameId: string): void => {
  * @returns Socket ID string or null if socket is not connected
  */
 export const getSocketId = (): string | null => {
-  if (socket && socket.connected) {
-    return socket.id;
-  }
-  return null;
-}; 
+  return socket?.id ?? null;
+};

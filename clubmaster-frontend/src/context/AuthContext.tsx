@@ -17,6 +17,7 @@ import {
   updateProfile
 } from 'firebase/auth';
 import { auth } from '../firebase';
+import axios from 'axios';
 
 // Backend API URL
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
@@ -378,6 +379,33 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     logout,
     error
   };
+  
+  useEffect(() => {
+    if (user) {
+      user.getIdToken().then(async (token) => {
+        try {
+          await axios.post(
+            `${API_URL}/users/sync`,
+            {
+              displayName: user.displayName,
+              email: user.email,
+              photoURL: user.photoURL,
+              phoneNumber: user.phoneNumber,
+              isAnonymous: user.isAnonymous,
+            },
+            {
+              headers: { Authorization: `Bearer ${token}` },
+            }
+          );
+          // No setIsAuthenticated needed
+        } catch (err) {
+          // If sync fails, log out and show error
+          logout();
+          alert('Authentication failed. Please try again.');
+        }
+      });
+    }
+  }, [user]);
   
   return (
     <AuthContext.Provider value={value}>

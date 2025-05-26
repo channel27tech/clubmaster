@@ -31,6 +31,8 @@ interface GameOptions {
 export class MatchmakingService {
   private readonly logger = new Logger(MatchmakingService.name);
   private matchmakingQueue: Map<string, Player> = new Map();
+  private disconnectedPlayers: Map<string, { player: Player; disconnectedAt: Date }> = new Map();
+  private readonly RECONNECT_GRACE_PERIOD = 15000; // 15 seconds grace period for reconnection
   private matchmakingIntervalId: NodeJS.Timeout | null = null;
   private readonly MATCHMAKING_INTERVAL = 2000; // Check for matches every 2 seconds
   private readonly MATCH_RATING_DIFFERENCE = 200; // Maximum rating difference for matching players
@@ -96,10 +98,60 @@ export class MatchmakingService {
   /**
    * Remove a player from the matchmaking queue
    */
-  removePlayerFromQueue(socketId: string): void {
-    if (this.matchmakingQueue.has(socketId)) {
+  removePlayerFromQueue(socketId: string, isDisconnect: boolean = false): void {
+    const player = this.matchmakingQueue.get(socketId);
+    
+    if (player) {
+      if (isDisconnect) {
+        // Store the player in disconnected players map
+        this.disconnectedPlayers.set(socketId, {
+          player,
+          disconnectedAt: new Date()
+        });
+        
+        this.logger.log(`Player ${socketId} temporarily removed from queue due to disconnect. Will be restored if reconnects within ${this.RECONNECT_GRACE_PERIOD}ms`);
+      }
+      
       this.matchmakingQueue.delete(socketId);
       this.logger.log(`Player ${socketId} removed from matchmaking queue. Queue size: ${this.matchmakingQueue.size}`);
+    }
+  }
+
+  /**
+   * Handle a player reconnecting
+   */
+  handlePlayerReconnect(socketId: string): void {
+    const disconnectedEntry = this.disconnectedPlayers.get(socketId);
+    
+    if (disconnectedEntry) {
+      const { player, disconnectedAt } = disconnectedEntry;
+      const now = new Date();
+      const timeSinceDisconnect = now.getTime() - disconnectedAt.getTime();
+      
+      if (timeSinceDisconnect <= this.RECONNECT_GRACE_PERIOD) {
+        // Player reconnected within grace period, restore them to queue
+        this.matchmakingQueue.set(socketId, player);
+        this.logger.log(`Player ${socketId} reconnected within grace period, restored to queue`);
+        
+        // Remove from disconnected players
+        this.disconnectedPlayers.delete(socketId);
+        
+        // Send acknowledgment to player
+        player.socket.emit('matchmakingStatus', {
+          status: 'queued',
+          queuePosition: this.matchmakingQueue.size,
+          estimatedWaitTime: this.estimateWaitTime(player.rating, {
+            gameMode: player.gameMode,
+            timeControl: player.timeControl,
+            rated: player.rated,
+            preferredSide: player.preferredSide
+          }),
+        });
+      } else {
+        // Grace period expired, remove from disconnected players
+        this.disconnectedPlayers.delete(socketId);
+        this.logger.log(`Player ${socketId} reconnection grace period expired`);
+      }
     }
   }
 
