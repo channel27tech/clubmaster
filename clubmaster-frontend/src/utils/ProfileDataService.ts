@@ -63,11 +63,13 @@ export interface FormattedGameEntry {
   resultColor: string;
   timeControl: string;
   timeControlCategory: TimeControlCategory;
+  timeControlIcon: string; // Path to time control icon
   moveCount: string;
   status: string;
   userColor: 'white' | 'black';
   rated: boolean;
   formattedText: string;
+  displayText: string; // Display text without time control category prefix
   ratingInfo: {
     userRatingBefore: number;
     userRatingAfter: number | null;
@@ -182,6 +184,24 @@ export class ProfileDataService {
   }
 
   /**
+   * Get the time control icon path based on the time control
+   * @param timeControl Time control string (e.g., "10+0")
+   * @returns Path to the time control icon
+   */
+  private getTimeControlIcon(timeControl: string): string {
+    // Parse the base time from the time control string (e.g., "10+0" -> 10)
+    const baseTimeMinutes = parseInt(timeControl.split('+')[0], 10);
+    
+    if (baseTimeMinutes >= 10) {
+      return '/icons/time-modes/rapid.svg';
+    } else if (baseTimeMinutes >= 3) {
+      return '/icons/time-modes/blitz.svg';
+    } else {
+      return '/icons/time-modes/bullet.svg';
+    }
+  }
+
+  /**
    * Format game history for display with new requirements
    * @param games Array of game history entries
    * @returns Formatted game history entries
@@ -191,8 +211,9 @@ export class ProfileDataService {
       // Format the date
       const gameDate = format(new Date(game.date), 'MMM dd, yyyy');
       
-      // Determine time control category
+      // Determine time control category and icon
       const timeControlCategory = this.getTimeControlCategory(game.timeControl);
+      const timeControlIcon = this.getTimeControlIcon(game.timeControl);
       
       // Determine result and icon
       let resultText = game.result;
@@ -235,6 +256,11 @@ export class ProfileDataService {
       // Format according to new requirements
       const formattedText = `${timeControlCategory} | vs ${game.opponentName} (${game.opponentRating}) | ${resultIcon}${resultText}`;
       
+      // Display text without time control category prefix
+      const displayText = `vs ${game.opponentName} (${game.opponentRating}) | ${resultIcon}${resultText}`;
+      
+      console.log(`Game ${game.id} - Time Control Icon: ${timeControlIcon}, Display Text: ${displayText}`);
+      
       return {
         id: game.id,
         date: gameDate,
@@ -246,11 +272,13 @@ export class ProfileDataService {
         resultColor,
         timeControl: game.timeControl,
         timeControlCategory,
+        timeControlIcon,
         moveCount: moveText,
         status: game.status,
         userColor: game.userColor,
         rated: game.rated,
         formattedText,
+        displayText,
         ratingInfo: {
           userRatingBefore: game.userColor === 'white' ? game.whitePlayerRating : game.blackPlayerRating,
           userRatingAfter: game.userColor === 'white' ? game.whitePlayerRatingAfter : game.blackPlayerRatingAfter,
