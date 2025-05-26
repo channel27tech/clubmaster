@@ -47,6 +47,8 @@ export default function BottomNavigation({ onClubClick }: BottomNavigationProps)
     }
   };
   
+  const isMore = pathname === '/more';
+  
   return (
     <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[430px] bg-[#2B3131] flex justify-between items-center px-[21px] py-2 squared-t-xl border-t border-[#393E3E]" style={{zIndex: 50}}>
       <button 
@@ -104,15 +106,21 @@ export default function BottomNavigation({ onClubClick }: BottomNavigationProps)
         <span className={`${isBet ? 'text-[#E9CB6B]' : 'text-[#BDBDBD]'} text-xs mt-1`}>Bet</span>
       </div>
       <div className="flex flex-col items-center flex-1">
-        <div className="flex items-center justify-center h-5">
-          <Image
-            src="/images/ftr more.svg"
-            alt="More"
-            width={26}
-            height={19}
-          />
-        </div>
-        <span className="text-[#BDBDBD] text-xs mt-1">More</span>
+        <button 
+          onClick={() => router.push('/more')}
+          className="flex flex-col items-center w-full"
+        >
+          <div className="flex items-center justify-center h-5">
+            <Image
+              src="/images/ftr more.svg"
+              alt="More"
+              width={26}
+              height={19}
+              style={{ filter: isMore ? activeIconFilter : 'none' }}
+            />
+          </div>
+          <span className={`${isMore ? 'text-[#E9CB6B]' : 'text-[#BDBDBD]'} text-xs mt-1`}>More</span>
+        </button>
       </div>
     </div>
   );

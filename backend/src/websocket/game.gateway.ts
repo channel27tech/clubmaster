@@ -89,9 +89,10 @@ export class GameGateway
   /**
    * This method runs when a client connects
    */
-  handleConnection(client: Socket) {
+  handleConnection(client: Socket, ...args: any[]) {
     this.logger.log(`Client connected: ${client.id}`);
-    
+    // Check if this is a reconnecting player
+    this.matchmakingService.handlePlayerReconnect(client.id);
     // Send a welcome message to the connected client
     client.emit('connectionEstablished', {
       message: 'Successfully connected to Chess Game server',
@@ -104,9 +105,20 @@ export class GameGateway
    */
   handleDisconnect(client: Socket) {
     this.logger.log(`Client disconnected: ${client.id}`);
-    
-    // Remove from matchmaking queue if they were in it
-    this.matchmakingService.removePlayerFromQueue(client.id);
+    // Mark player as disconnected but give them time to reconnect
+    this.matchmakingService.removePlayerFromQueue(client.id, true);
+    // Give the client some time to reconnect before removing from queue
+    setTimeout(() => {
+      // Check if client has reconnected
+      const isClientConnected = Array.from(this.server.sockets.sockets.values()).some(socket => socket.id === client.id);
+      
+      if (!isClientConnected) {
+        this.logger.log(`Client ${client.id} did not reconnect, removing from queue`);
+        this.matchmakingService.removePlayerFromQueue(client.id);
+      } else {
+        this.logger.log(`Client ${client.id} reconnected successfully`);
+      }
+    }, 10000); // Wait 10 seconds before removing from queue
     
     // Register disconnection with game manager for ongoing games
     this.gameManagerService.registerDisconnection(client.id, this.server);

@@ -21,7 +21,7 @@ export class RatingService {
   private readonly K_FACTOR = 32;
   
   // Default rating for new players
-  public readonly DEFAULT_RATING = 1500;
+  public readonly DEFAULT_RATING = 400;
 
   /**
    * Calculate rating changes for a player
