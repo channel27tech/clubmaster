@@ -2,6 +2,7 @@
 import { useState, useRef, useEffect } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
+import { useAuth } from "../../context/AuthContext";
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -14,10 +15,19 @@ export default function SettingsPage() {
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [maxRatingGap, setMaxRatingGap] = useState(200);
 
-  function handleLogout() {
-    // TODO: Implement actual logout logic
-    setShowLogoutModal(false);
-    alert('Logged out!');
+  const { logout } = useAuth();
+
+  async function handleLogout() {
+    try {
+      await logout();
+      setShowLogoutModal(false);
+      // Redirect to login page after successful logout
+      router.push('/login');
+    } catch (error) {
+      console.error('Logout failed:', error);
+      alert('Logout failed. Please try again.');
+      setShowLogoutModal(false);
+    }
   }
 
   return (

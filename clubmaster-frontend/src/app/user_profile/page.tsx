@@ -184,7 +184,7 @@ export default function UserProfile() {
         <div className="flex-1 flex justify-center">
           <span className="text-[#FAF3DD] text-[22px] font-semibold font-poppins">Profile</span>
         </div>
-        <button className="ml-2">
+        <button className="ml-2" onClick={() => router.push('/user_profile/edit')}>
           <Image src="/icons/edit-icon.svg" alt="Edit" width={25} height={25} />
         </button>
       </div>
