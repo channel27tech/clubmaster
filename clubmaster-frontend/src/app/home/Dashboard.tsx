@@ -7,7 +7,7 @@ import { useClub, UserType } from '../context/ClubContext';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../../context/AuthContext';
 
-export default function ClubHomeScreen() {
+export default function Dashboard() {
   const { hasClub, setHasClub, userType, setUserType } = useClub();
   const router = useRouter();
   const { user } = useAuth();
@@ -132,42 +132,40 @@ export default function ClubHomeScreen() {
           )}
         </div>
 
-        {/* {!hasClub && ( */}
-          {/* // No Club View - Featured event section */}
-          <div className="w-full h-[111px] mx-auto mb-4 mt-4">
-            <div className="h-full rounded-[5px] overflow-hidden shadow-lg" style={{
-              background: 'linear-gradient(to right, #4A7C59, #4c5454)',
-            }}>
-              <div className="flex h-full">
-                <div className="w-[172px] flex items-center justify-center">
-                  <Image 
-                    src="/images/chess league.svg" 
-                    alt="chess league" 
-                    width={150} 
-                    height={97} 
-                    className="rounded-l-[5px]"
-                  />
-                </div>
-                <div className="flex-1 p-3 flex flex-col justify-center">
-                  <h3 className="text-[#F5F5F5] leading-tight" style={{ 
-                    fontFamily: 'Poppins, sans-serif',
-                    fontSize: '16px',
-                    fontWeight: '600'
-                  }}>
-                    Speed Chess Championship 2024
-                  </h3>
-                  <p className="text-[#F5F5F5] mt-2" style={{ 
-                    fontFamily: 'Roboto, sans-serif',
-                    fontSize: '10px',
-                    fontWeight: '600'
-                  }}>
-                    Sep 4, 2024 - Sep 24, 2024
-                  </p>
-                </div>
+        {/* Featured event section - now shown for all users */}
+        <div className="w-full h-[111px] mx-auto mb-4 mt-4">
+          <div className="h-full rounded-[5px] overflow-hidden shadow-lg" style={{
+            background: 'linear-gradient(to right, #4A7C59, #4c5454)',
+          }}>
+            <div className="flex h-full">
+              <div className="w-[172px] flex items-center justify-center">
+                <Image 
+                  src="/images/chess league.svg" 
+                  alt="chess league" 
+                  width={150} 
+                  height={97} 
+                  className="rounded-l-[5px]"
+                />
+              </div>
+              <div className="flex-1 p-3 flex flex-col justify-center">
+                <h3 className="text-[#F5F5F5] leading-tight" style={{ 
+                  fontFamily: 'Poppins, sans-serif',
+                  fontSize: '16px',
+                  fontWeight: '600'
+                }}>
+                  Speed Chess Championship 2024
+                </h3>
+                <p className="text-[#F5F5F5] mt-2" style={{ 
+                  fontFamily: 'Roboto, sans-serif',
+                  fontSize: '10px',
+                  fontWeight: '600'
+                }}>
+                  Sep 4, 2024 - Sep 24, 2024
+                </p>
               </div>
             </div>
           </div>
-        {/* )} */}
+        </div>
 
         {/* Main actions - Button section */}
         <div className="w-full mx-auto bg-[#4C5454] rounded-[10px] flex flex-col items-center justify-evenly py-6 px-4 my-4">

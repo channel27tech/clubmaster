@@ -6,6 +6,7 @@ import BottomNavigation from '../../components/BottomNavigation';
 import { ShareLinkModal } from '../share-link/page';
 import { useAuth } from '../../../context/AuthContext';
 import { useClub } from '../../context/ClubContext';
+import { joinClub } from '../../../services/clubService';
 
 // Add Club interface for type safety
 interface ClubMember {
@@ -39,6 +40,8 @@ export default function ClubDetailPage() {
   const [showMenu, setShowMenu] = useState(false);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [apiError, setApiError] = useState('');
+  const [loading, setLoading] = useState(false);
 
   // Get club ID from query string (?id=123)
   const clubId = searchParams.get('id');
@@ -91,11 +94,29 @@ export default function ClubDetailPage() {
   };
 
   // Join handler (replace with actual join logic as needed)
-  const handleJoin = () => {
-    // Example: navigate to join endpoint or call join API
-    // router.push(`/club/join?id=${clubId}`);
-    // For now, just log
-    console.log('Join club:', clubId);
+  const handleJoin = async () => {
+    if (!user || !clubId) return;
+    setLoading(true);
+    setApiError('');
+    try {
+      const token = await user.getIdToken();
+      await joinClub(Number(clubId), token);
+      // Refetch club data to update members and hide join button
+      const updatedClub = await fetch(`http://localhost:3001/club/${clubId}`).then(res => res.json());
+      setClub(updatedClub);
+      // Optionally, update hasClub in context if needed
+      // Find the joined user in the updated member list
+    const joinedUser = updatedClub.members.find((member: any) => member.id === user.uid);
+    if (joinedUser) {
+      console.log('User joined club:', joinedUser);
+      // You can also display this info in the UI if needed
+    }
+      // Optionally, show a success message
+    } catch (error: any) {
+      setApiError(error?.response?.data?.message || 'Failed to join club');
+    } finally {
+      setLoading(false);
+    }
   };
 
   // console.log(club);
@@ -363,9 +384,11 @@ export default function ClubDetailPage() {
           <button 
             onClick={handleJoin} 
             className="w-full py-3 rounded-lg bg-[#4A7C59] text-[#FAF3DD] font-medium border border-[#E9CB6B]"
+            disabled={loading}
           >
-            Join
+            {loading ? 'Joining...' : 'Join'}
           </button>
+          {apiError && <div className="text-red-400 text-center mt-2">{apiError}</div>}
         </div>
       )}
 

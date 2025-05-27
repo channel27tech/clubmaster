@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../context/AuthContext';
-import ClubHomeScreen from './club/ClubHomeScreen';
+import Dashboard from './home/Dashboard';
 
 export default function Home() {
   const { user, isLoading, isGuest } = useAuth();
@@ -39,6 +39,6 @@ export default function Home() {
     return null;
   }
 
-  // If user is authenticated (and not guest), show the ClubHomeScreen component
-  return <ClubHomeScreen />;
+  // If user is authenticated (and not guest), show the Dashboard component
+  return <Dashboard />;
 }

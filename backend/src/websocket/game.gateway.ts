@@ -110,7 +110,16 @@ export class GameGateway
     // Give the client some time to reconnect before removing from queue
     setTimeout(() => {
       // Check if client has reconnected
-      const isClientConnected = Array.from(this.server.sockets.sockets.values()).some(socket => socket.id === client.id);
+      let isClientConnected = false;
+      try {
+        // In Socket.IO v4, we need to check if the socket exists in the server
+        if (this.server && this.server.sockets && this.server.sockets.sockets) {
+          isClientConnected = Array.from(this.server.sockets.sockets.values())
+            .some(socket => socket.id === client.id);
+        }
+      } catch (error) {
+        this.logger.error(`Error checking if client ${client.id} is connected: ${error.message}`);
+      }
       
       if (!isClientConnected) {
         this.logger.log(`Client ${client.id} did not reconnect, removing from queue`);
