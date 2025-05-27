@@ -70,7 +70,7 @@ export default function UserProfile() {
     email: '',
     photoURL: '',
     joinDate: new Date(),
-    rating: 400, // Default to 1500 instead of 800
+    rating: 1500, // Default to 1500 instead of 800
     gamesPlayed: 0,
     gamesWon: 0,
     gamesLost: 0,
@@ -89,7 +89,7 @@ export default function UserProfile() {
         email: user.email || '',
         photoURL: user.photoURL || '/images/dp 1.svg',
         joinDate: user.metadata?.creationTime ? new Date(user.metadata.creationTime) : new Date(),
-        rating: 400, // Default to 1500 instead of 800
+        rating: 1500, // Default to 1500 instead of 800
         gamesPlayed: 0,
         gamesWon: 0,
         gamesLost: 0,
@@ -236,54 +236,38 @@ export default function UserProfile() {
           <span className="text-[#FAF3DD] text-[16px] font-semibold font-roboto">Game History</span>
           <Image src="/icons/forward_arrow.svg" alt="Arrow" width={15} height={15} style={{ width: 'auto', height: 'auto' }} />
         </div>
-        {/* Scrollable container with fixed height for 5 rows */}
-        <div className="flex flex-col" style={{ 
-          height: '200px',  
-          overflowY: 'auto',
-          scrollbarWidth: 'thin',
-          scrollbarColor: '#d1d5db #f1f1f1'
-        }}>
+        <div className="flex flex-col">
           {isLoadingHistory ? (
             <div className="flex items-center justify-center h-[100px] bg-[#3A4141]">
               <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[#E9CB6B]"></div>
             </div>
           ) : gameHistory.length > 0 ? (
-            <>
-              {console.log(`Rendering ${gameHistory.length} games in a scrollable container`)}
-              {gameHistory.map((game, i) => (
-                <div key={game.id} className="flex flex-col px-4 py-3" style={{ background: i % 2 === 0 ? '#3A4141' : '#333939' }}>
-                  <div className="flex items-center">
-                    {/* Time Control Icon */}
-                    <div className="mr-2 flex items-center justify-center">
-                      <Image 
-                        src={game.timeControlIcon} 
-                        alt={`${game.timeControlCategory} Icon`} 
-                        width={20} 
-                        height={20} 
-                        style={{ width: 'auto', height: '20px', marginRight: '8px' }} 
-                      />
+            gameHistory.map((game, i) => (
+              <div key={game.id} className="flex flex-col px-4 py-3" style={{ background: i % 2 === 0 ? '#3A4141' : '#333939' }}>
+                <div className="flex items-center">
+                  <div className="w-8 h-8 rounded-full overflow-hidden mr-2 bg-[#4A7C59] flex items-center justify-center">
+                    <span className="text-[#FAF3DD] text-[12px] font-semibold">{game.opponent.charAt(0).toUpperCase()}</span>
+                  </div>
+                  <div className="flex flex-col flex-1">
+                    <div className="flex items-center justify-between w-full">
+                      <span className="text-[#D9D9D9] text-[14px] font-roboto">
+                        {game.timeControlCategory} | vs {game.opponent} ({game.opponentRating})
+                      </span>
+                      <span className="text-[#8FC0A9] text-[12px] font-roboto">{game.date}</span>
                     </div>
-                    <div className="flex flex-col flex-1">
-                      <div className="flex items-center justify-between w-full">
-                        <span className="text-[#D9D9D9] text-[14px] font-roboto">
-                          vs {game.opponent} ({game.opponentRating})
-                        </span>
-                        <span className="text-[#8FC0A9] text-[12px] font-roboto">{game.date}</span>
-                      </div>
-                      <div className="flex items-center justify-between w-full mt-1">
-                        <span 
-                          className={`text-[13px] font-roboto ${game.resultColor === 'green' ? 'text-[#8FC0A9]' : 
-                            game.resultColor === 'red' ? 'text-[#E07A5F]' : 'text-[#E9CB6B]'}`}>
-                          <span className="font-bold">{game.resultIcon}</span>
-                          {game.result}
-                        </span>
-                        <span className="text-[#D9D9D9] text-[12px] font-roboto">{game.moveCount}</span>
-                      </div>
+                    <div className="flex items-center justify-between w-full mt-1">
+                      <span 
+                        className={`text-[13px] font-roboto ${game.resultColor === 'green' ? 'text-[#8FC0A9]' : 
+                          game.resultColor === 'red' ? 'text-[#E07A5F]' : 'text-[#E9CB6B]'}`}>
+                        <span className="font-bold">{game.resultIcon}</span>
+                        {game.result}
+                      </span>
+                      <span className="text-[#D9D9D9] text-[12px] font-roboto">{game.moveCount}</span>
                     </div>
                   </div>
                 </div>
-              ))}
-            </>
+              </div>
+            ))
           ) : (
             <div className="flex items-center justify-center h-[100px] bg-[#3A4141]">
               <span className="text-[#D9D9D9] text-[14px] font-roboto">No game history available</span>
