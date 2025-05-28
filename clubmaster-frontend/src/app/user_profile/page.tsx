@@ -71,6 +71,19 @@ const VerticalMenuIcon = () => (
   </svg>
 );
 
+// Mock friends data for profile lookup
+const FRIENDS_MOCK = [
+  { name: "QueenKnight_22", displayName: "QueenKnight_22", email: "", photoURL: "/images/dp 1.svg", joinDate: new Date("2024-09-10"), rating: 800, gamesPlayed: 0, gamesWon: 0, gamesLost: 0, gamesDraw: 0 },
+  { name: "Abhishek", displayName: "Abhishek", email: "", photoURL: "/images/dp 2.svg", joinDate: new Date("2024-09-10"), rating: 800, gamesPlayed: 0, gamesWon: 0, gamesLost: 0, gamesDraw: 0 },
+  { name: "Asif", displayName: "Asif", email: "", photoURL: "/images/dp 3.svg", joinDate: new Date("2024-09-10"), rating: 800, gamesPlayed: 0, gamesWon: 0, gamesLost: 0, gamesDraw: 0 },
+  { name: "Basith", displayName: "Basith", email: "", photoURL: "/images/dp 4.svg", joinDate: new Date("2024-09-10"), rating: 800, gamesPlayed: 0, gamesWon: 0, gamesLost: 0, gamesDraw: 0 },
+  { name: "Junaid", displayName: "Junaid", email: "", photoURL: "/images/dp 5.svg", joinDate: new Date("2024-09-10"), rating: 800, gamesPlayed: 0, gamesWon: 0, gamesLost: 0, gamesDraw: 0 },
+  { name: "Ramees", displayName: "Ramees", email: "", photoURL: "/images/dp 6.svg", joinDate: new Date("2024-09-10"), rating: 800, gamesPlayed: 0, gamesWon: 0, gamesLost: 0, gamesDraw: 0 },
+  { name: "Akash", displayName: "Akash", email: "", photoURL: "/images/dp 7.svg", joinDate: new Date("2024-09-10"), rating: 800, gamesPlayed: 0, gamesWon: 0, gamesLost: 0, gamesDraw: 0 },
+  { name: "Akhil", displayName: "Akhil", email: "", photoURL: "/images/dp 8.svg", joinDate: new Date("2024-09-10"), rating: 800, gamesPlayed: 0, gamesWon: 0, gamesLost: 0, gamesDraw: 0 },
+  { name: "Safwan", displayName: "Safwan", email: "", photoURL: "/images/dp 9.svg", joinDate: new Date("2024-09-10"), rating: 800, gamesPlayed: 0, gamesWon: 0, gamesLost: 0, gamesDraw: 0 },
+];
+
 export default function UserProfile() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -94,6 +107,21 @@ export default function UserProfile() {
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
+  // For demo: 3rd, 4th, and 6th players are NOT friends, others are friends
+  const NOT_FRIEND_INDEXES = [2, 3, 5]; // 0-based: 3rd, 4th, 6th
+  let selectedIndex = -1;
+  if (from === "friends" && userParam) {
+    selectedIndex = FRIENDS_MOCK.findIndex(
+      f => f.name.toLowerCase() === userParam.toLowerCase()
+    );
+  }
+  const initialIsFriend =
+    from === "friends" && selectedIndex !== -1
+      ? !NOT_FRIEND_INDEXES.includes(selectedIndex)
+      : false;
+
+  const [isFriend, setIsFriend] = useState(initialIsFriend);
+
   // Close menu on outside click
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -111,23 +139,8 @@ export default function UserProfile() {
     };
   }, [showMenu]);
 
-  // Mock friends data for profile lookup
-  const FRIENDS_MOCK = [
-    { name: "QueenKnight_22", displayName: "QueenKnight_22", email: "", photoURL: "/images/dp 1.svg", joinDate: new Date("2024-09-10"), rating: 800, gamesPlayed: 0, gamesWon: 0, gamesLost: 0, gamesDraw: 0 },
-    { name: "Abhishek", displayName: "Abhishek", email: "", photoURL: "/images/dp 2.svg", joinDate: new Date("2024-09-10"), rating: 800, gamesPlayed: 0, gamesWon: 0, gamesLost: 0, gamesDraw: 0 },
-    { name: "Asif", displayName: "Asif", email: "", photoURL: "/images/dp 3.svg", joinDate: new Date("2024-09-10"), rating: 800, gamesPlayed: 0, gamesWon: 0, gamesLost: 0, gamesDraw: 0 },
-    { name: "Basith", displayName: "Basith", email: "", photoURL: "/images/dp 4.svg", joinDate: new Date("2024-09-10"), rating: 800, gamesPlayed: 0, gamesWon: 0, gamesLost: 0, gamesDraw: 0 },
-    { name: "Junaid", displayName: "Junaid", email: "", photoURL: "/images/dp 5.svg", joinDate: new Date("2024-09-10"), rating: 800, gamesPlayed: 0, gamesWon: 0, gamesLost: 0, gamesDraw: 0 },
-    { name: "Ramees", displayName: "Ramees", email: "", photoURL: "/images/dp 6.svg", joinDate: new Date("2024-09-10"), rating: 800, gamesPlayed: 0, gamesWon: 0, gamesLost: 0, gamesDraw: 0 },
-    { name: "Akash", displayName: "Akash", email: "", photoURL: "/images/dp 7.svg", joinDate: new Date("2024-09-10"), rating: 800, gamesPlayed: 0, gamesWon: 0, gamesLost: 0, gamesDraw: 0 },
-    { name: "Akhil", displayName: "Akhil", email: "", photoURL: "/images/dp 8.svg", joinDate: new Date("2024-09-10"), rating: 800, gamesPlayed: 0, gamesWon: 0, gamesLost: 0, gamesDraw: 0 },
-    { name: "Safwan", displayName: "Safwan", email: "", photoURL: "/images/dp 9.svg", joinDate: new Date("2024-09-10"), rating: 800, gamesPlayed: 0, gamesWon: 0, gamesLost: 0, gamesDraw: 0 },
-  ];
-
-  const isFriendProfile = from === "friends" && userParam;
-  const isOwnProfile = !isFriendProfile;
   useEffect(() => {
-    if (isFriendProfile) {
+    if (from === "friends" && userParam) {
       // Find friend by name (case-insensitive)
       const friend = FRIENDS_MOCK.find(f => f.name.toLowerCase() === userParam?.toLowerCase());
       if (friend) {
@@ -169,7 +182,7 @@ export default function UserProfile() {
     } else {
       setIsLoading(false);
     }
-  }, [user, isFriendProfile, userParam]);
+  }, [user, from, userParam]);
 
   // Fetch user profile from backend
   const fetchUserProfile = async () => {
@@ -248,20 +261,23 @@ export default function UserProfile() {
         <div className="flex-1 flex justify-center">
           <span className="text-[#FAF3DD] text-[22px] font-semibold font-poppins">Profile</span>
         </div>
-        {/* Only show edit button for own profile */}
-        {isOwnProfile && (
+        {/* Only show edit button for own profile (not for add friend or challenge screens) */}
+        {from !== "friends" && (
           <button className="ml-2" onClick={() => router.push('/user_profile/edit')}>
             <Image src="/icons/edit-icon.svg" alt="Edit" width={25} height={25} />
           </button>
         )}
         {/* 3-dots menu for friend profile only (with menu options) */}
-        {isFriendProfile && (
+        {from === "friends" && userParam && (
           <div className="relative ml-2">
             <button onClick={() => setShowMenu(v => !v)}>
               <VerticalMenuIcon />
             </button>
             {showMenu && (
-              <div ref={menuRef} className="absolute right-0 mt-2 w-40 bg-[#232728] rounded-lg shadow-lg z-[100] flex flex-col py-2" style={{ minWidth: 140 }}>
+              <div
+                ref={menuRef}
+                className="absolute right-0 mt-2 min-w-max bg-[#232728] rounded-lg shadow-lg z-[100] flex flex-col py-1"
+              >
                 <button className="text-white text-[15px] px-4 py-2 text-left hover:bg-[#333939]" style={{fontWeight:400}}>Remove friend</button>
                 <button className="text-white text-[15px] px-4 py-2 text-left hover:bg-[#333939]" style={{fontWeight:400}}>Challenge</button>
               </div>
@@ -286,13 +302,13 @@ export default function UserProfile() {
             {userData.displayName || "Chess Player"}
           </span>
           {/* Show join date for both */}
-          {!isFriendProfile && (
+          {from !== "friends" && (
             <span className="text-[#8FC0A9] text-[12px] font-medium font-roboto mt-2">
               {formatJoinDate(userData.joinDate)}
             </span>
           )}
           {/* Show country flag and Clubmaster badge for friend profile as in screenshot */}
-          {isFriendProfile && (
+          {from === "friends" && (
             <>
               <span className="text-[#8FC0A9] text-[12px] font-medium font-roboto mt-2">
                 {formatJoinDate(userData.joinDate)}
@@ -307,15 +323,24 @@ export default function UserProfile() {
                   <span className="text-[#FAF3DD] text-[20px] font-semibold font-roboto">{userData.rating}</span>
                 </div>
               </div>
+              <div className="flex gap-4 mt-6">
+                {!isFriend && (
+                  <button
+                    className="px-6 py-2 rounded-lg border border-[#E9CB6B] bg-[#4A7C59] text-[#FAF3DD] text-[16px] font-semibold flex items-center gap-2"
+                    onClick={() => setIsFriend(true)}
+                  >
+                    Add Friend
+                  </button>
+                )}
+                <button
+                  className="px-6 py-2 rounded-lg border border-[#E9CB6B] bg-[#4A7C59] text-[#FAF3DD] text-[16px] font-semibold flex items-center gap-2"
+                >
+                  <Image src="/icons/challenge button icon.svg" alt="Challenge" width={26} height={27} />
+                  Challenge
+                </button>
+              </div>
             </>
           )}
-          {/* Show Challenge button for friend, Edit for self */}
-          {isFriendProfile ? (
-            <button className="mt-4 px-8 py-2 rounded-lg bg-[#4A7C59] text-[#FAF3DD] text-[16px] font-semibold flex items-center justify-center gap-2 border border-solid" style={{ borderColor: '#E9CB6B' }}>
-              <Image src="/icons/challenge button icon.svg" alt="Challenge" width={26} height={27} />
-              Challenge
-            </button>
-          ) : null}
         </div>
       </div>
       {/* Game History Section */}
