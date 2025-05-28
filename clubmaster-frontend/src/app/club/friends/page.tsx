@@ -97,21 +97,19 @@ export default function BetFriendsListPage() {
   if (mode === "play") {
     // Play-a-friend UI (matching screenshot)
     return (
-      <div className="min-h-screen flex flex-col bg-[#333939] max-w-[430px] mx-auto pb-4">
+      <div className="min-h-screen flex flex-col bg-[#333939] max-w-[430px] mx-auto pb-4 px-[21px]">
         {/* Header */}
-        <div className="w-full flex items-center px-4 pt-4 pb-4 relative z-10" style={{ maxWidth: 430 }}>
-          <button onClick={() => router.back()} className="mr-2">
-            <svg width="25" height="25" viewBox="0 0 21 21" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M13.5 16L8.5 11L13.5 6" stroke="#FAF3DD" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
+        <div className="w-full flex items-center pt-4 pb-4 relative z-10">
+          <button onClick={() => router.back()} className="flex items-center justify-center" style={{ width: 40, height: 40, background: 'transparent', borderRadius: 0, padding: 0, border: 'none' }}>
+            <Image src="/icons/back arrow option.svg" alt="Back" width={18} height={18} />
           </button>
           <div className="flex-1 flex justify-center">
             <span className="text-[#FAF3DD] text-[22px] font-semibold">Friends</span>
           </div>
         </div>
         {/* Search Bar */}
-        <div className="px-4 mb-3">
-          <div className="flex items-center bg-[#444948] rounded-md px-3 py-2">
+        <div className="mb-3">
+          <div className="flex items-center bg-[#444948] rounded-[10px] px-3 py-2">
             <input
               type="text"
               placeholder="Search..."
@@ -125,22 +123,37 @@ export default function BetFriendsListPage() {
           </div>
         </div>
         {/* Friends List */}
-        <div className="flex-1 overflow-y-auto px-2">
-          {filtered.map((friend, idx) => (
-            <div key={idx} className="flex items-center bg-[#444948] rounded-md px-4 py-3 mb-3">
-              <div className="w-10 h-10 rounded-full bg-[#A0A0A0] flex items-center justify-center mr-4">
-                <svg width="28" height="28" fill="none" viewBox="0 0 28 28">
-                  <circle cx="14" cy="14" r="14" fill="#A0A0A0" />
-                  <path d="M14 14C16.2091 14 18 12.2091 18 10C18 7.79086 16.2091 6 14 6C11.7909 6 10 7.79086 10 10C10 12.2091 11.7909 14 14 14Z" fill="#E6E6E6"/>
-                  <path d="M7 22C7 18.6863 9.68629 16 13 16H15C18.3137 16 21 18.6863 21 22" fill="#E6E6E6"/>
-                </svg>
+        <div className="flex-1 overflow-y-auto">
+          {filtered.map((friend, idx) => {
+            const isActive = friend.active;
+            return (
+              <div
+                key={idx}
+                className="flex items-center bg-[#4C5454] rounded-[10px] px-4 py-3 mb-3 relative cursor-pointer"
+                onClick={() => router.push(`/user_profile?user=${encodeURIComponent(friend.name)}&from=friends`)}
+              >
+                <div className="relative w-10 h-10 flex items-center justify-center mr-4">
+                  <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="20" cy="20" r="20" fill="#A0A0A0" />
+                    <path d="M20 22c3.314 0 6-2.686 6-6s-2.686-6-6-6-6 2.686-6 6 2.686 6 6 6z" fill="#E6E6E6"/>
+                    <path d="M10 32c0-4.418 3.582-8 8-8h4c4.418 0 8 3.582 8 8" fill="#E6E6E6"/>
+                  </svg>
+                  <span
+                    className="absolute w-3.5 h-3.5 rounded-full border-2 border-[#333939]"
+                    style={{
+                      background: isActive ? '#8FC0A9' : '#E9CB6B',
+                      right: 0,
+                      bottom: 0,
+                    }}
+                  />
+                </div>
+                <div className="flex-1">
+                  <div className="text-[#FAF3DD] text-base font-medium">{friend.name}</div>
+                  <div className={isActive ? "text-[#8FC0A9] text-sm" : "text-[#E9CB6B] text-sm"}>{isActive ? 'Active now' : friend.lastActive}</div>
+                </div>
               </div>
-              <div className="flex-1">
-                <div className="text-[#FAF3DD] text-base font-medium">{friend.name}</div>
-                <div className="text-[#A0A0A0] text-sm">{friend.active ? 'Active now' : friend.lastActive}</div>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     );
@@ -186,7 +199,9 @@ export default function BetFriendsListPage() {
           <div className="text-center text-[#B0B0B0] mt-8">No friends found.</div>
         ) : (
           filtered.map((friend, idx) => (
-            <FriendListItem friend={friend} key={friend.name + idx} onInvite={() => setShowShareModal(true)} />
+            <div key={friend.name + idx} onClick={() => router.push(`/user_profile?user=${encodeURIComponent(friend.name)}&from=friends`)} style={{ cursor: 'pointer' }}>
+              <FriendListItem friend={friend} onInvite={() => setShowShareModal(true)} />
+            </div>
           ))
         )}
       </div>

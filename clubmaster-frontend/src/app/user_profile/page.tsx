@@ -1,7 +1,7 @@
 "use client";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
-import React, { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import React, { useEffect, useState, useRef } from "react";
 import { useAuth } from "../../context/AuthContext";
 import profileDataService, { FormattedGameEntry } from "../../utils/ProfileDataService";
 
@@ -62,8 +62,20 @@ const FRIENDS = [
   { name: "Salih", img: "/images/dp 5.svg" },
 ];
 
+// Vertical 3-dots SVG for menu
+const VerticalMenuIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="12" cy="5" r="2" fill="#D9D9D9"/>
+    <circle cx="12" cy="12" r="2" fill="#D9D9D9"/>
+    <circle cx="12" cy="19" r="2" fill="#D9D9D9"/>
+  </svg>
+);
+
 export default function UserProfile() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const from = searchParams.get("from");
+  const userParam = searchParams.get("user");
   const { user } = useAuth();
   const [userData, setUserData] = useState({
     displayName: '',
@@ -79,10 +91,64 @@ export default function UserProfile() {
   const [gameHistory, setGameHistory] = useState<FormattedGameEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+  const [showMenu, setShowMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
-  // Fetch user profile data when component mounts
+  // Close menu on outside click
   useEffect(() => {
-    if (user) {
+    function handleClickOutside(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setShowMenu(false);
+      }
+    }
+    if (showMenu) {
+      document.addEventListener("mousedown", handleClickOutside);
+    } else {
+      document.removeEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [showMenu]);
+
+  // Mock friends data for profile lookup
+  const FRIENDS_MOCK = [
+    { name: "QueenKnight_22", displayName: "QueenKnight_22", email: "", photoURL: "/images/dp 1.svg", joinDate: new Date("2024-09-10"), rating: 800, gamesPlayed: 0, gamesWon: 0, gamesLost: 0, gamesDraw: 0 },
+    { name: "Abhishek", displayName: "Abhishek", email: "", photoURL: "/images/dp 2.svg", joinDate: new Date("2024-09-10"), rating: 800, gamesPlayed: 0, gamesWon: 0, gamesLost: 0, gamesDraw: 0 },
+    { name: "Asif", displayName: "Asif", email: "", photoURL: "/images/dp 3.svg", joinDate: new Date("2024-09-10"), rating: 800, gamesPlayed: 0, gamesWon: 0, gamesLost: 0, gamesDraw: 0 },
+    { name: "Basith", displayName: "Basith", email: "", photoURL: "/images/dp 4.svg", joinDate: new Date("2024-09-10"), rating: 800, gamesPlayed: 0, gamesWon: 0, gamesLost: 0, gamesDraw: 0 },
+    { name: "Junaid", displayName: "Junaid", email: "", photoURL: "/images/dp 5.svg", joinDate: new Date("2024-09-10"), rating: 800, gamesPlayed: 0, gamesWon: 0, gamesLost: 0, gamesDraw: 0 },
+    { name: "Ramees", displayName: "Ramees", email: "", photoURL: "/images/dp 6.svg", joinDate: new Date("2024-09-10"), rating: 800, gamesPlayed: 0, gamesWon: 0, gamesLost: 0, gamesDraw: 0 },
+    { name: "Akash", displayName: "Akash", email: "", photoURL: "/images/dp 7.svg", joinDate: new Date("2024-09-10"), rating: 800, gamesPlayed: 0, gamesWon: 0, gamesLost: 0, gamesDraw: 0 },
+    { name: "Akhil", displayName: "Akhil", email: "", photoURL: "/images/dp 8.svg", joinDate: new Date("2024-09-10"), rating: 800, gamesPlayed: 0, gamesWon: 0, gamesLost: 0, gamesDraw: 0 },
+    { name: "Safwan", displayName: "Safwan", email: "", photoURL: "/images/dp 9.svg", joinDate: new Date("2024-09-10"), rating: 800, gamesPlayed: 0, gamesWon: 0, gamesLost: 0, gamesDraw: 0 },
+  ];
+
+  const isFriendProfile = from === "friends" && userParam;
+  const isOwnProfile = !isFriendProfile;
+  useEffect(() => {
+    if (isFriendProfile) {
+      // Find friend by name (case-insensitive)
+      const friend = FRIENDS_MOCK.find(f => f.name.toLowerCase() === userParam?.toLowerCase());
+      if (friend) {
+        setUserData(friend);
+      } else {
+        // fallback: show unknown friend
+        setUserData({
+          displayName: userParam,
+          email: '',
+          photoURL: '/images/dp 1.svg',
+          joinDate: new Date(),
+          rating: 800,
+          gamesPlayed: 0,
+          gamesWon: 0,
+          gamesLost: 0,
+          gamesDraw: 0
+        });
+      }
+      setIsLoading(false);
+      setIsLoadingHistory(false);
+    } else if (user) {
       // Get user data from Firebase auth
       setUserData({
         displayName: user.displayName || 'Chess Player',
@@ -103,7 +169,7 @@ export default function UserProfile() {
     } else {
       setIsLoading(false);
     }
-  }, [user]);
+  }, [user, isFriendProfile, userParam]);
 
   // Fetch user profile from backend
   const fetchUserProfile = async () => {
@@ -177,20 +243,36 @@ export default function UserProfile() {
       {/* Header */}
       <div className="w-full flex items-center px-4 pt-4 pb-4 relative z-10" style={{ maxWidth: 430 }}>
         <button onClick={() => router.back()} className="mr-2">
-          <svg width="25" height="25" viewBox="0 0 21 21" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M13.5 16L8.5 11L13.5 6" stroke="#FAF3DD" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
+          <Image src="/icons/back arrow option.svg" alt="Back" width={25} height={25} />
         </button>
         <div className="flex-1 flex justify-center">
           <span className="text-[#FAF3DD] text-[22px] font-semibold font-poppins">Profile</span>
         </div>
-        <button className="ml-2" onClick={() => router.push('/user_profile/edit')}>
-          <Image src="/icons/edit-icon.svg" alt="Edit" width={25} height={25} />
-        </button>
+        {/* Only show edit button for own profile */}
+        {isOwnProfile && (
+          <button className="ml-2" onClick={() => router.push('/user_profile/edit')}>
+            <Image src="/icons/edit-icon.svg" alt="Edit" width={25} height={25} />
+          </button>
+        )}
+        {/* 3-dots menu for friend profile only (with menu options) */}
+        {isFriendProfile && (
+          <div className="relative ml-2">
+            <button onClick={() => setShowMenu(v => !v)}>
+              <VerticalMenuIcon />
+            </button>
+            {showMenu && (
+              <div ref={menuRef} className="absolute right-0 mt-2 w-40 bg-[#232728] rounded-lg shadow-lg z-[100] flex flex-col py-2" style={{ minWidth: 140 }}>
+                <button className="text-white text-[15px] px-4 py-2 text-left hover:bg-[#333939]" style={{fontWeight:400}}>Remove friend</button>
+                <button className="text-white text-[15px] px-4 py-2 text-left hover:bg-[#333939]" style={{fontWeight:400}}>Challenge</button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
       {/* Profile Section */}
       <div className="flex flex-col items-center w-full mt-12 relative z-10" style={{ maxWidth: 430 }}>
         <div className="relative w-full flex flex-col items-center mb-4 ">
+          {/* Always show profile image for both own and friend profile */}
           <div className="w-[100px] h-[100px] rounded-full overflow-hidden border-4 border-[#8FC0A9] bg-[#333939] -mt-8">
             <Image 
               src={userData.photoURL || "/images/dp 1.svg"} 
@@ -203,31 +285,37 @@ export default function UserProfile() {
           <span className="mt-4 text-[#FAF3DD] text-[20px] font-medium font-poppins">
             {userData.displayName || "Chess Player"}
           </span>
-          <span className="text-[#8FC0A9] text-[12px] font-medium font-roboto mt-2">
-            {formatJoinDate(userData.joinDate)}
-          </span>
-          <div className="flex items-center gap-2 mt-2">
-            <span className="text-[#E9CB6B] text-[15px] font-medium font-roboto">Rating</span>
-            <span className="text-[#FAF3DD] text-[20px] font-semibold font-roboto">{userData.rating}</span>
-          </div>
-          <div className="flex items-center gap-4 mt-2">
-            <div className="flex flex-col items-center">
-              <span className="text-[#FAF3DD] text-[16px] font-semibold font-roboto">{userData.gamesPlayed}</span>
-              <span className="text-[#8FC0A9] text-[12px] font-medium font-roboto">Games</span>
-            </div>
-            <div className="flex flex-col items-center">
-              <span className="text-[#FAF3DD] text-[16px] font-semibold font-roboto">{userData.gamesWon}</span>
-              <span className="text-[#8FC0A9] text-[12px] font-medium font-roboto">Wins</span>
-            </div>
-            <div className="flex flex-col items-center">
-              <span className="text-[#FAF3DD] text-[16px] font-semibold font-roboto">{userData.gamesLost}</span>
-              <span className="text-[#8FC0A9] text-[12px] font-medium font-roboto">Losses</span>
-            </div>
-            <div className="flex flex-col items-center">
-              <span className="text-[#FAF3DD] text-[16px] font-semibold font-roboto">{userData.gamesDraw}</span>
-              <span className="text-[#8FC0A9] text-[12px] font-medium font-roboto">Draws</span>
-            </div>
-          </div>
+          {/* Show join date for both */}
+          {!isFriendProfile && (
+            <span className="text-[#8FC0A9] text-[12px] font-medium font-roboto mt-2">
+              {formatJoinDate(userData.joinDate)}
+            </span>
+          )}
+          {/* Show country flag and Clubmaster badge for friend profile as in screenshot */}
+          {isFriendProfile && (
+            <>
+              <span className="text-[#8FC0A9] text-[12px] font-medium font-roboto mt-2">
+                {formatJoinDate(userData.joinDate)}
+              </span>
+              <div className="flex items-center gap-x-8 mt-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-[#FAF3DD] text-[15px] font-roboto">Clubmaster</span>
+                  <Image src="/icons/golden cup.svg" alt="Clubmaster" width={19} height={18} />
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[#E9CB6B] text-[15px] font-roboto">Rating</span>
+                  <span className="text-[#FAF3DD] text-[20px] font-semibold font-roboto">{userData.rating}</span>
+                </div>
+              </div>
+            </>
+          )}
+          {/* Show Challenge button for friend, Edit for self */}
+          {isFriendProfile ? (
+            <button className="mt-4 px-8 py-2 rounded-lg bg-[#4A7C59] text-[#FAF3DD] text-[16px] font-semibold flex items-center justify-center gap-2 border border-solid" style={{ borderColor: '#E9CB6B' }}>
+              <Image src="/icons/challenge button icon.svg" alt="Challenge" width={26} height={27} />
+              Challenge
+            </button>
+          ) : null}
         </div>
       </div>
       {/* Game History Section */}
