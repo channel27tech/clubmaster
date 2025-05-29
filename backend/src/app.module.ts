@@ -30,7 +30,7 @@ import { ProfileModule } from './profile/profile.module';
         password: process.env.DB_PASSWORD,
         database: process.env.DB_DATABASE,
         entities: [__dirname + '/**/*.entity{.ts,.js}'],
-        synchronize: true, // Only for development!
+        synchronize: false, // Temporarily disable schema synchronization
         logging: true,
       }),
       async dataSourceFactory(options) {

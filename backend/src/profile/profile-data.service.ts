@@ -1,8 +1,18 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../users/entities/user.entity';
 import { Game } from '../game/entities/game.entity';
+import { processBase64Image } from '../utils/imageProcessor';
+
+// Define DTO for profile update
+export interface UpdateProfileDto {
+  username?: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  location?: string | null;
+  custom_photo_base64?: string | null;
+}
 
 @Injectable()
 export class ProfileDataService {
@@ -37,6 +47,11 @@ export class ProfileDataService {
           'gamesWon',
           'gamesLost',
           'gamesDraw',
+          'username',
+          'first_name',
+          'last_name',
+          'location',
+          'custom_photo_base64',
         ],
       });
 
@@ -48,6 +63,9 @@ export class ProfileDataService {
       this.logger.log(`Successfully resolved Firebase UID ${firebaseUid} to user ID ${user.id}`);
       this.logger.log(`Fetched profile for user ${user.displayName} with rating ${user.rating}`);
       
+      // Create a property that combines custom_photo_base64 and photoURL
+      const effective_photo_url = user.custom_photo_base64 || user.photoURL;
+      
       return {
         id: user.id,
         displayName: user.displayName,
@@ -58,6 +76,12 @@ export class ProfileDataService {
         gamesLost: user.gamesLost,
         gamesDraw: user.gamesDraw,
         firebaseUid: firebaseUid,
+        username: user.username || user.displayName, // Fallback to displayName if username is not set
+        first_name: user.first_name,
+        last_name: user.last_name,
+        location: user.location,
+        custom_photo_base64: user.custom_photo_base64,
+        effective_photo_url: effective_photo_url, // Combined field for UI to use
       };
     } catch (error) {
       if (error instanceof NotFoundException) {
@@ -66,6 +90,90 @@ export class ProfileDataService {
       this.logger.error(`Error fetching user profile: ${error.message}`, error.stack);
       throw error;
     }
+  }
+
+  /**
+   * Update user profile
+   * @param firebaseUid Firebase User ID
+   * @param updateData Profile data to update
+   * @returns Updated user profile
+   */
+  async updateUserProfile(firebaseUid: string, updateData: UpdateProfileDto) {
+    this.logger.log(`Updating profile for Firebase UID: ${firebaseUid}`);
+    
+    try {
+      // Find user by Firebase UID
+      const user = await this.usersRepository.findOne({
+        where: { firebaseUid },
+      });
+
+      if (!user) {
+        this.logger.warn(`User with Firebase UID ${firebaseUid} not found`);
+        throw new NotFoundException(`User not found for Firebase UID: ${firebaseUid}`);
+      }
+
+      // Check username availability if it's being updated
+      if (updateData.username && updateData.username !== user.username) {
+        const isUsernameAvailable = await this.isUsernameAvailable(updateData.username);
+        if (!isUsernameAvailable) {
+          throw new ConflictException(`Username "${updateData.username}" is already taken`);
+        }
+      }
+
+      // Process the profile picture if provided
+      if (updateData.custom_photo_base64) {
+        const processedImage = processBase64Image(updateData.custom_photo_base64);
+        if (!processedImage) {
+          throw new BadRequestException('Invalid image format. Please provide a valid image.');
+        }
+        updateData.custom_photo_base64 = processedImage;
+      }
+
+      // Update user data
+      Object.assign(user, {
+        username: updateData.username || user.username || user.displayName,
+        first_name: updateData.first_name !== undefined ? updateData.first_name : user.first_name,
+        last_name: updateData.last_name !== undefined ? updateData.last_name : user.last_name,
+        location: updateData.location !== undefined ? updateData.location : user.location,
+        custom_photo_base64: updateData.custom_photo_base64 !== undefined ? updateData.custom_photo_base64 : user.custom_photo_base64,
+      });
+
+      // Save the updated user
+      await this.usersRepository.save(user);
+      this.logger.log(`Successfully updated profile for user ${user.id}`);
+
+      // Return the updated profile
+      return this.getUserProfile(firebaseUid);
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof ConflictException || error instanceof BadRequestException) {
+        throw error; // Re-throw specific exceptions to be handled by controller
+      }
+      this.logger.error(`Error updating user profile: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
+  /**
+   * Check if a username is available
+   * @param username The username to check
+   * @param excludeFirebaseUid Optionally exclude a user by Firebase UID (for self-updates)
+   * @returns Boolean indicating if the username is available
+   */
+  async isUsernameAvailable(username: string, excludeFirebaseUid?: string): Promise<boolean> {
+    this.logger.log(`Checking username availability: ${username}`);
+    
+    const query = this.usersRepository.createQueryBuilder('user')
+      .where('user.username = :username', { username });
+    
+    if (excludeFirebaseUid) {
+      query.andWhere('user.firebaseUid != :firebaseUid', { firebaseUid: excludeFirebaseUid });
+    }
+    
+    const count = await query.getCount();
+    const isAvailable = count === 0;
+    
+    this.logger.log(`Username "${username}" is ${isAvailable ? 'available' : 'not available'}`);
+    return isAvailable;
   }
 
   /**
