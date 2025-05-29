@@ -42,9 +42,9 @@ export class ClubMemberService {
     } else if (club.type === 'private_by_invite') {
       throw new BadRequestException('Invite required to join this club');
     } else if (club.type === 'private_by_rating') {
-      // Use actual user rating
-      if (user.rating < 1000) {
-        throw new BadRequestException('User rating too low to join this club');
+      const limit = club.ratingLimit ?? 1000;
+      if (user.rating < limit) {
+        throw new BadRequestException(`User rating too low to join this club (minimum: ${limit})`);
       }
     } else if (club.type === 'private_by_location') {
       // Use actual user location
@@ -69,6 +69,31 @@ export class ClubMemberService {
   }
 
   async getMembersByClub(clubId: number) {
-    return this.clubMemberRepository.find({ where: { clubId } });
+    // Join users table to get firebaseUid for each member
+    const members = await this.clubMemberRepository
+      .createQueryBuilder('clubMember')
+      .leftJoinAndSelect('clubMember.user', 'user')
+      .where('clubMember.clubId = :clubId', { clubId })
+      .select([
+        'clubMember.id',
+        'clubMember.role',
+        'clubMember.rating',
+        'user.id',
+        'user.displayName',
+        'user.photoURL',
+        'user.firebaseUid',
+      ])
+      .getMany();
+
+    return members
+      .filter(member => member.user)
+      .map(member => ({
+        id: member.user.id,
+        firebaseUid: member.user.firebaseUid,
+        displayName: member.user.displayName,
+        photoURL: member.user.photoURL || '/images/default-avatar.svg',
+        rating: member.rating,
+        role: member.role,
+      }));
   }
 } 
