@@ -249,7 +249,6 @@ export default function UserProfile() {
             </div>
           ) : gameHistory.length > 0 ? (
             <>
-              {console.log(`Rendering ${gameHistory.length} games in a scrollable container`)}
               {gameHistory.map((game, i) => (
                 <div key={game.id} className="flex flex-col px-4 py-3" style={{ background: i % 2 === 0 ? '#3A4141' : '#333939' }}>
                   <div className="flex items-center">

@@ -16,7 +16,7 @@ export default function CreateClubPage() {
     type: 'public', // Changed to match backend enum values
     description: '',
     logo: '/images/club-icon.svg', // Default logo
-    ratingLimit: 100
+    ratingLimit: 1000
   });
   const [errors, setErrors] = useState({
     name: false,
@@ -180,8 +180,12 @@ export default function CreateClubPage() {
         location: clubData.location,
         description: clubData.description || null,
         logo: clubData.logo,
-        type: clubData.type === 'public' ? 'public' : mapTypeToBackend(clubData.type)
+        type: clubData.type === 'public' ? 'public' : mapTypeToBackend(clubData.type),
+        ratingLimit: clubData.ratingLimit,
       };
+      
+      // Log the user-entered rating limit
+      console.log('User-entered rating limit:', clubData.ratingLimit);
       
       // Make the API call to create the club
       const responseData = await createClub(backendData, token);
@@ -192,7 +196,7 @@ export default function CreateClubPage() {
       setClubLink(`${window.location.origin}/club/join/${clubId}`);
       
       // Show success message
-      setShowSuccess(true);
+    setShowSuccess(true);
       
       // Reset form
       setClubData({
@@ -201,7 +205,7 @@ export default function CreateClubPage() {
         type: 'public',
         description: '',
         logo: '/images/club-icon.svg',
-        ratingLimit: 100
+        ratingLimit: 1000
       });
       
     } catch (error: any) {
