@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsIn, IsOptional } from 'class-validator';
+import { IsString, IsNotEmpty, IsIn, IsOptional, IsInt } from 'class-validator';
 
 export class CreateClubDto {
   @IsString()
@@ -20,4 +20,8 @@ export class CreateClubDto {
   @IsString()
   @IsIn(['public', 'private_by_invite', 'private_by_rating', 'private_by_location'])
   type: 'public' | 'private_by_invite' | 'private_by_rating' | 'private_by_location';
+
+  @IsOptional()
+  @IsInt()
+  ratingLimit?: number;
 } 

@@ -19,6 +19,16 @@ interface ClubData {
   superAdminId: number;
 }
 
+interface ClubMember {
+  id: string;
+  firebaseUid: string;
+  displayName: string;
+  photoURL: string;
+  rating: number;
+  role: string;
+  userId: string;
+}
+
 export default function ClubCreatedDetailPage() {
   const router = useRouter();
   const { user } = useAuth();
@@ -29,6 +39,7 @@ export default function ClubCreatedDetailPage() {
   const [showMenu, setShowMenu] = useState(false);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);  
+  const [members, setMembers] = useState<any[]>([]);
 
   const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -70,6 +81,26 @@ export default function ClubCreatedDetailPage() {
     }
   }, [club, user, authChecked, router]);
   
+  useEffect(() => {
+    if (!club) return;
+    fetch(`${backendUrl}/club/${club.id}`)
+      .then(res => res.json())
+      .then(data => {
+        setMembers(data.members || []);
+      });
+  }, [club]);
+
+  // Debug logs for role check
+  console.log('user?.uid:', user?.uid);
+  console.log('members:', members);
+  const myMembership = members.find(m => m.firebaseUid === user?.uid);
+  console.log('myMembership:', myMembership);
+  const isSuperAdmin = myMembership?.role === 'super_admin';
+  console.log('isSuperAdmin:', isSuperAdmin);
+
+  // Remove duplicate members by firebaseUid
+  const uniqueMembers = Array.from(new Map(members.map(m => [m.firebaseUid, m])).values());
+
   if (!authChecked) {
     return (
       <div className="min-h-screen bg-[#333939] flex items-center justify-center">
@@ -90,17 +121,6 @@ export default function ClubCreatedDetailPage() {
     return null;
   }
   
-  // List with the current user (club admin) as the only member initially
-  const players = [
-    { 
-      rank: 1,
-      name: user?.displayName || 'Club Owner',
-      avatar: user?.photoURL || '/images/default-avatar.svg',
-      rating: 2100 
-    },
-  ];
-
-
   // Function to handle menu item clicks
   const handleMenuClick = (action: string) => {
     setShowMenu(false);
@@ -144,14 +164,17 @@ export default function ClubCreatedDetailPage() {
             priority
           />
         </div>
-        <button 
-          className="text-[#BFC0C0]"
-          onClick={() => setShowMenu(!showMenu)}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z" />
-          </svg>
-        </button>
+        {/* Only render admin controls after user and members are loaded */}
+        {user && members.length > 0 && isSuperAdmin && (
+          <button 
+            className="text-[#BFC0C0]"
+            onClick={() => setShowMenu(!showMenu)}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z" />
+            </svg>
+          </button>
+        )}
       </div>
 
       {/* Club Info Card - Now with real club data */}
@@ -171,7 +194,7 @@ export default function ClubCreatedDetailPage() {
               <h2 className="text-[#E9CB6B] text-lg font-semibold">{club.name}</h2>
             </div>
             <div className="flex items-center text-[#D9D9D9] text-xs">
-              <span>1 member</span>
+              <span>{members.length} members</span>
               <div className="flex items-center mx-2">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="#8FC0A9" viewBox="0 0 24 24" className="w-3 h-3">
                   <path fillRule="evenodd" d="M11.54 22.351l.07.04.028.016a.76.76 0 00.723 0l.028-.015.071-.041a16.975 16.975 0 001.144-.742 19.58 19.58 0 002.683-2.282c1.944-1.99 3.963-4.98 3.963-8.827a8.25 8.25 0 00-16.5 0c0 3.846 2.02 6.837 3.963 8.827a19.58 19.58 0 002.682 2.282 16.975 16.975 0 001.145.742zM12 13.5a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
@@ -265,26 +288,17 @@ export default function ClubCreatedDetailPage() {
         {/* Player List */}
         {activeTab === 'players' && (
           <div className="mx-4 mb-4">
-            {players.map((player, index) => (
-              <div key={index} className="flex items-center py-2 bg-transparent">
-                {/* Rank column */}
-                <div className="w-16 text-[#D9D9D9] text-xs text-center">#{player.rank}</div>
-                
-                {/* Players column with fixed width for consistent layout */}
+            {uniqueMembers.map((member, idx) => (
+              <div key={member.firebaseUid} className="flex items-center py-2 bg-transparent">
+                <div className="w-16 text-[#D9D9D9] text-xs text-center">#{idx + 1}</div>
                 <div className="flex-1 flex items-center">
                   <div className="w-9 h-9 rounded-full bg-white overflow-hidden mr-3">
-                    <Image 
-                      src={player.avatar || "/images/default-avatar.svg"} 
-                      alt="Player Avatar" 
-                      width={36} 
-                      height={36} 
-                    />
+                    <Image src={member.photoURL || "/images/default-avatar.svg"} alt="Player Avatar" width={36} height={36} />
                   </div>
-                  <span className="text-[#D9D9D9] text-sm">{player.name}</span>
+                  <span className="text-[#D9D9D9] text-sm">{member.displayName}</span>
+                  {member.role === 'super_admin' && <span className="ml-2 text-[#E9CB6B] text-xs">(Admin)</span>}
                 </div>
-                
-                {/* Rating column */}
-                <div className="w-16 text-right text-[#D9D9D9] pr-4 text-sm">{player.rating}</div>
+                <div className="w-16 text-right text-[#D9D9D9] pr-4 text-sm">{member.rating || 0}</div>
               </div>
             ))}
           </div>
@@ -299,13 +313,15 @@ export default function ClubCreatedDetailPage() {
       </div>
 
       {/* Create Tournament Button */}
-      <div className="fixed bottom-16 left-1/2 -translate-x-1/2 w-full max-w-[400px] px-4 py-3 bg-[#333939]">
-        <button 
-          className="w-full py-3 rounded-lg bg-[#4A7C59] text-[#FAF3DD] font-medium border border-[#E9CB6B]"
-        >
-          Create Tournament
-        </button>
-      </div>
+      {isSuperAdmin && (
+        <div className="fixed bottom-16 left-1/2 -translate-x-1/2 w-full max-w-[400px] px-4 py-3 bg-[#333939]">
+          <button 
+            className="w-full py-3 rounded-lg bg-[#4A7C59] text-[#FAF3DD] font-medium border border-[#E9CB6B]"
+          >
+            Create Tournament
+          </button>
+        </div>
+      )}
       {/* Overlay to close menu when clicking outside */}
       {showMenu && (
         <div 
