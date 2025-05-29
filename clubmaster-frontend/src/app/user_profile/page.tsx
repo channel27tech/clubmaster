@@ -3,9 +3,9 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import React, { useEffect, useState } from "react";
 import { useAuth } from "../../context/AuthContext";
-import PlayerActivityStatus from "../../components/PlayerActivityStatus";
 import profileDataService, { FormattedGameEntry } from "../../utils/ProfileDataService";
-
+import type { UserProfile } from "../../utils/ProfileDataService";
+ 
 // Import formatJoinDate utility, with a fallback implementation
 let formatJoinDate: (date?: Date | null) => string;
 try {
@@ -24,7 +24,7 @@ try {
     return `Joined ${formatter.format(date)}`;
   };
 }
-
+ 
 // We'll keep the static data for recent games and friends for now
 const RECENT_GAMES = [
   {
@@ -62,7 +62,7 @@ const FRIENDS = [
   { name: "Junaid", img: "/images/dp 4.svg" },
   { name: "Salih", img: "/images/dp 5.svg" },
 ];
-
+ 
 export default function UserProfile() {
   const router = useRouter();
   const { user } = useAuth();
@@ -77,10 +77,24 @@ export default function UserProfile() {
     gamesLost: 0,
     gamesDraw: 0
   });
+  const [userProfileData, setUserProfileData] = useState<UserProfile | null>(null);
   const [gameHistory, setGameHistory] = useState<FormattedGameEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
-
+ 
+  // Debug useEffect - moved to top level, will run when userProfileData or userData.photoURL changes
+  useEffect(() => {
+    if (userProfileData) {
+      console.log('Rendering profile with data:', {
+        displayName: userProfileData.displayName,
+        username: userProfileData.username,
+        photoURL: userProfileData.photoURL,
+        effective_photo_url: userProfileData.effective_photo_url,
+        usedPhotoSrc: userProfileData.effective_photo_url || userProfileData.photoURL || userData.photoURL || "/images/dp 1.svg"
+      });
+    }
+  }, [userProfileData, userData.photoURL]);
+ 
   // Fetch user profile data when component mounts
   useEffect(() => {
     if (user) {
@@ -96,7 +110,7 @@ export default function UserProfile() {
         gamesLost: 0,
         gamesDraw: 0
       });
-      
+     
       // Fetch additional user data from backend
       fetchUserProfile();
       // Fetch game history
@@ -105,27 +119,40 @@ export default function UserProfile() {
       setIsLoading(false);
     }
   }, [user]);
-
+ 
   // Fetch user profile from backend
   const fetchUserProfile = async () => {
     if (!user?.uid) return;
-    
+   
     try {
       console.log('Fetching user profile...');
-      const userProfileData = await profileDataService.fetchUserProfile(user.uid);
-      
-      if (userProfileData) {
-        setUserData(prev => ({ 
-          ...prev, 
-          rating: userProfileData.rating || prev.rating,
-          displayName: userProfileData.displayName || prev.displayName,
-          photoURL: userProfileData.photoURL || prev.photoURL,
-          gamesPlayed: userProfileData.gamesPlayed || 0,
-          gamesWon: userProfileData.gamesWon || 0,
-          gamesLost: userProfileData.gamesLost || 0,
-          gamesDraw: userProfileData.gamesDraw || 0
+      const profileData = await profileDataService.fetchUserProfile(user.uid);
+     
+      if (profileData) {
+        // Store the complete profile data
+        setUserProfileData(profileData);
+        console.log('Full profile data received:', {
+          effective_photo_url: profileData.effective_photo_url,
+          photoURL: profileData.photoURL,
+          username: profileData.username,
+          displayName: profileData.displayName,
+          custom_photo_base64: profileData.custom_photo_base64 ? 'Present (not shown)' : 'Not present'
+        });
+       
+        // Update the UI state
+        setUserData(prev => ({
+          ...prev,
+          rating: profileData.rating || prev.rating,
+          // Use the username field if available, otherwise fall back to displayName
+          displayName: profileData.username || profileData.displayName || prev.displayName,
+          // Use the effective_photo_url which contains custom_photo_base64 if available, otherwise falls back to photoURL
+          photoURL: profileData.effective_photo_url || profileData.photoURL || prev.photoURL,
+          gamesPlayed: profileData.gamesPlayed || 0,
+          gamesWon: profileData.gamesWon || 0,
+          gamesLost: profileData.gamesLost || 0,
+          gamesDraw: profileData.gamesDraw || 0
         }));
-        console.log('User profile updated:', userProfileData);
+        console.log('User profile updated:', profileData);
       }
     } catch (error) {
       console.error('Error fetching user profile:', error);
@@ -133,15 +160,15 @@ export default function UserProfile() {
       setIsLoading(false);
     }
   };
-
+ 
   // Fetch game history from backend
   const fetchGameHistory = async () => {
     if (!user?.uid) return;
-    
+   
     try {
       console.log(`Fetching game history for Firebase UID: ${user.uid}`);
       const gameHistoryData = await profileDataService.fetchGameHistory(user.uid);
-      
+     
       if (gameHistoryData && gameHistoryData.length > 0) {
         const formattedHistory = profileDataService.formatGameHistory(gameHistoryData);
         setGameHistory(formattedHistory);
@@ -157,7 +184,7 @@ export default function UserProfile() {
       setIsLoadingHistory(false);
     }
   };
-
+ 
   // Show loading state
   if (isLoading) {
     return (
@@ -166,7 +193,7 @@ export default function UserProfile() {
       </div>
     );
   }
-
+ 
   return (
     <div className="min-h-screen w-full flex flex-col items-center" style={{ background: "#333939" }}>
       {/* Green Curved SVG Background */}
@@ -193,28 +220,20 @@ export default function UserProfile() {
       <div className="flex flex-col items-center w-full mt-12 relative z-10" style={{ maxWidth: 430 }}>
         <div className="relative w-full flex flex-col items-center mb-4 ">
           <div className="w-[100px] h-[100px] rounded-full overflow-hidden border-4 border-[#8FC0A9] bg-[#333939] -mt-8">
-            <Image 
-              src={userData.photoURL || "/images/dp 1.svg"} 
-              alt="Profile" 
-              width={100} 
-              height={100} 
+            <Image
+              src={userProfileData?.effective_photo_url || userProfileData?.photoURL || userData.photoURL || "/images/dp 1.svg"}
+              alt="Profile"
+              width={100}
+              height={100}
               className="object-cover w-full h-full"
             />
           </div>
           <span className="mt-4 text-[#FAF3DD] text-[20px] font-medium font-poppins">
-            {userData.displayName || "Chess Player"}
+            {userProfileData?.username || userProfileData?.displayName || userData.displayName || "Chess Player"}
           </span>
           <span className="text-[#8FC0A9] text-[12px] font-medium font-roboto mt-2">
             {formatJoinDate(userData.joinDate)}
           </span>
-          
-          {/* Activity Status */}
-          {user && (
-            <div className="mt-2">
-              <PlayerActivityStatus userId={user.uid} showDetails={true} />
-            </div>
-          )}
-          
           <div className="flex items-center gap-2 mt-2">
             <span className="text-[#E9CB6B] text-[15px] font-medium font-roboto">Rating</span>
             <span className="text-[#FAF3DD] text-[20px] font-semibold font-roboto">{userData.rating}</span>
@@ -229,7 +248,8 @@ export default function UserProfile() {
               <span className="text-[#8FC0A9] text-[12px] font-medium font-roboto">Wins</span>
             </div>
             <div className="flex flex-col items-center">
-              <span className="text-[#FAF3DD] text-[16px] font-semibold font-roboto">{userData.gamesLost}</span>
+ 
+  <span className="text-[#FAF3DD] text-[16px] font-semibold font-roboto">{userData.gamesLost}</span>
               <span className="text-[#8FC0A9] text-[12px] font-medium font-roboto">Losses</span>
             </div>
             <div className="flex flex-col items-center">
@@ -246,7 +266,7 @@ export default function UserProfile() {
           <Image src="/icons/forward_arrow.svg" alt="Arrow" width={15} height={15} style={{ width: 'auto', height: 'auto' }} />
         </div>
         {/* Scrollable container with fixed height for 5 rows */}
-        <div className="flex flex-col" style={{ 
+        <div className="flex flex-col" style={{
           height: '200px',  
           overflowY: 'auto',
           scrollbarWidth: 'thin',
@@ -258,18 +278,18 @@ export default function UserProfile() {
             </div>
           ) : gameHistory.length > 0 ? (
             <>
-              {console.log(`Rendering ${gameHistory.length} games in a scrollable container`)}
+              {/* Rendering game history */}
               {gameHistory.map((game, i) => (
                 <div key={game.id} className="flex flex-col px-4 py-3" style={{ background: i % 2 === 0 ? '#3A4141' : '#333939' }}>
                   <div className="flex items-center">
                     {/* Time Control Icon */}
                     <div className="mr-2 flex items-center justify-center">
-                      <Image 
-                        src={game.timeControlIcon} 
-                        alt={`${game.timeControlCategory} Icon`} 
-                        width={20} 
-                        height={20} 
-                        style={{ width: 'auto', height: '20px', marginRight: '8px' }} 
+                      <Image
+                        src={game.timeControlIcon}
+                        alt={`${game.timeControlCategory} Icon`}
+                        width={20}
+                        height={20}
+                        style={{ width: 'auto', height: '20px', marginRight: '8px' }}
                       />
                     </div>
                     <div className="flex flex-col flex-1">
@@ -280,8 +300,8 @@ export default function UserProfile() {
                         <span className="text-[#8FC0A9] text-[12px] font-roboto">{game.date}</span>
                       </div>
                       <div className="flex items-center justify-between w-full mt-1">
-                        <span 
-                          className={`text-[13px] font-roboto ${game.resultColor === 'green' ? 'text-[#8FC0A9]' : 
+                        <span
+                          className={`text-[13px] font-roboto ${game.resultColor === 'green' ? 'text-[#8FC0A9]' :
                             game.resultColor === 'red' ? 'text-[#E07A5F]' : 'text-[#E9CB6B]'}`}>
                           <span className="font-bold">{game.resultIcon}</span>
                           {game.result}
@@ -307,7 +327,14 @@ export default function UserProfile() {
         </div>
         <div className="flex items-center px-4 py-4  bg-[#333939]">
           <div className="w-[90px] h-[120px] rounded-[8px] overflow-hidden flex items-center justify-center">
-            <Image src="/images/mol_clubmaster_award.svg" alt="Achievement" width={90} height={140} style={{ width: 'auto', height: 'auto' }} />
+            <Image
+              src="/images/mol_clubmaster_award.svg"
+              alt="Achievement"
+              width={90}
+              height={140}
+              className="w-auto h-auto max-w-full max-h-full"
+              style={{ objectFit: 'contain' }}
+            />
           </div>
         </div>
       </div>
@@ -330,4 +357,5 @@ export default function UserProfile() {
       </div>
     </div>
   );
-} 
+}
+ 

@@ -28,4 +28,7 @@ export class Club {
 
   @Column({ nullable: true })
   superAdminId: string;
+
+  @Column({ type: 'int', default: 1000, nullable: true })
+  ratingLimit: number;
 } 

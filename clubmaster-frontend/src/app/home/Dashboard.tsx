@@ -247,7 +247,9 @@ export default function Dashboard() {
           )}
           
           {/* Play a friend Button */}
-          <button className="w-[302px] h-[57px] rounded-[10px] bg-[#1F2323] text-[#D9D9D9] text-base flex items-center justify-center border border-[#000000]">
+          <button className="w-[302px] h-[57px] rounded-[10px] bg-[#1F2323] text-[#D9D9D9] text-base flex items-center justify-center border border-[#000000]"
+            onClick={() => router.push('/club/friends?mode=play')}
+          >
             <span className="mr-3">
               <Image 
                 src="/images/ply frnd btn icon.svg" 

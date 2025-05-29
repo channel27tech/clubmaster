@@ -94,6 +94,7 @@ export class ClubService {
       points: 300,
       credits: 50,
       superAdminId: user.id, // Use actual user ID, not Firebase UID
+      ratingLimit: createClubDto.ratingLimit ?? 1000,
     });
     const savedClub = await this.clubRepository.save(club);
 
@@ -149,6 +150,7 @@ export class ClubService {
         'user.id',
         'user.displayName',
         'user.photoURL',
+        'user.firebaseUid',
       ])
       .getMany();
 
@@ -157,6 +159,7 @@ export class ClubService {
       .filter(member => member.user)
       .map(member => ({
         id: member.user.id,
+        firebaseUid: member.user.firebaseUid,
         displayName: member.user.displayName,
         photoURL: member.user.photoURL || '/images/default-avatar.svg',
         rating: member.rating,

@@ -21,6 +21,7 @@ import { UsersService } from '../users/users.service';
 import { GameRepositoryService } from '../game/game-repository.service';
 import { UserActivityService } from '../users/user-activity.service';
 
+// Define an interface for the matchmaking options
 interface MatchmakingOptions {
   gameMode?: string;
   timeControl?: string;
@@ -44,7 +45,7 @@ interface MoveMadePayload {
   moveHistory?: string[]; // Move history for verification
 }
 
-// Add this mapping
+// Add this mapping   of piece types to their corresponding chess.js notation
 const pieceTypeToChessJs: Record<string, string | undefined> = {
   'queen': 'q',
   'rook': 'r',
@@ -52,6 +53,7 @@ const pieceTypeToChessJs: Record<string, string | undefined> = {
   'knight': 'n',
 };
 
+// Define the WebSocketGateway for the game
 @WebSocketGateway({
   cors: {
     origin: true, // Allow all origins in development
@@ -61,6 +63,8 @@ const pieceTypeToChessJs: Record<string, string | undefined> = {
   namespace: 'chess',
   transports: ['websocket'],
 })
+
+// Define the GameGateway class that implements the OnGatewayInit, OnGatewayConnection, and OnGatewayDisconnect interfaces
 export class GameGateway
   implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
 {
@@ -2153,6 +2157,7 @@ export class GameGateway
     }
   }
 
+  // Handle game abort requests
   @SubscribeMessage('game_abort_request')
   async handleGameAbortRequest(
     @ConnectedSocket() client: Socket,

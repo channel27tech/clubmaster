@@ -5,8 +5,13 @@ import * as fs from 'fs';
 
 @Global()
 @Module({
-  providers: [],
-  exports: [],
+  providers: [
+    {
+      provide: 'FIREBASE_ADMIN',
+      useValue: admin
+    }
+  ],
+  exports: ['FIREBASE_ADMIN'],
 })
 export class FirebaseModule implements OnModuleInit {
   private readonly logger = new Logger(FirebaseModule.name);

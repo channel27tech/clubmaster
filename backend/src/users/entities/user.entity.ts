@@ -38,6 +38,15 @@ export class User {
   @Column({ default: 0 })
   gamesDraw: number;
 
+  @Column({ nullable: true, unique: true })
+  username: string;
+
+  @Column({ nullable: true })
+  first_name: string;
+
+  @Column({ nullable: true })
+  last_name: string;
+
   @Column({ nullable: true })
   location?: string;
 
@@ -52,6 +61,8 @@ export class User {
 
   @Column({ nullable: true })
   profileLockExpiry?: Date;
+  @Column({ nullable: true, type: 'text' })
+  custom_photo_base64: string;
 
   @CreateDateColumn()
   createdAt: Date;

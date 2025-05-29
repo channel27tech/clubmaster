@@ -12,6 +12,13 @@ export interface UserProfile {
   gamesWon: number;
   gamesLost: number;
   gamesDraw: number;
+  // Additional fields from updated profile
+  username?: string;
+  effective_photo_url?: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  location?: string | null;
+  custom_photo_base64?: string | null;
 }
 
 /**
@@ -97,6 +104,41 @@ export class ProfileDataService {
   async fetchUserProfile(userId: string): Promise<UserProfile | null> {
     try {
       console.log(`Fetching profile data for Firebase UID: ${userId}`);
+      
+      // Use browser-side API route when running in browser
+      if (typeof window !== 'undefined') {
+        try {
+          // Import Firebase auth on demand (only client-side)
+          const { getAuth } = await import('firebase/auth');
+          const auth = getAuth();
+          
+          if (!auth.currentUser) {
+            throw new Error('User not authenticated');
+          }
+          
+          const token = await auth.currentUser.getIdToken();
+          
+          // Call the API route with the token
+          const response = await fetch('/api/profile', {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+            },
+          });
+          
+          if (!response.ok) {
+            throw new Error(`Failed to fetch user profile: ${response.statusText}`);
+          }
+          
+          const data = await response.json() as UserProfile;
+          console.log('Profile data fetched successfully:', data);
+          return data;
+        } catch (error) {
+          console.error('Error fetching from frontend API route:', error);
+          // Fall back to direct backend call
+        }
+      }
+      
+      // Server-side or fallback
       const response = await fetch(`${this.baseUrl}/profile/${userId}`);
       
       if (response.status === 404) {
