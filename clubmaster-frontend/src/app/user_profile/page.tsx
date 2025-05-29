@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import React, { useEffect, useState } from "react";
 import { useAuth } from "../../context/AuthContext";
 import profileDataService, { FormattedGameEntry } from "../../utils/ProfileDataService";
+import type { UserProfile } from "../../utils/ProfileDataService";
 
 // Import formatJoinDate utility, with a fallback implementation
 let formatJoinDate: (date?: Date | null) => string;
@@ -76,9 +77,23 @@ export default function UserProfile() {
     gamesLost: 0,
     gamesDraw: 0
   });
+  const [userProfileData, setUserProfileData] = useState<UserProfile | null>(null);
   const [gameHistory, setGameHistory] = useState<FormattedGameEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+
+  // Debug useEffect - moved to top level, will run when userProfileData or userData.photoURL changes
+  useEffect(() => {
+    if (userProfileData) {
+      console.log('Rendering profile with data:', {
+        displayName: userProfileData.displayName,
+        username: userProfileData.username,
+        photoURL: userProfileData.photoURL,
+        effective_photo_url: userProfileData.effective_photo_url,
+        usedPhotoSrc: userProfileData.effective_photo_url || userProfileData.photoURL || userData.photoURL || "/images/dp 1.svg"
+      });
+    }
+  }, [userProfileData, userData.photoURL]);
 
   // Fetch user profile data when component mounts
   useEffect(() => {
@@ -111,20 +126,33 @@ export default function UserProfile() {
     
     try {
       console.log('Fetching user profile...');
-      const userProfileData = await profileDataService.fetchUserProfile(user.uid);
+      const profileData = await profileDataService.fetchUserProfile(user.uid);
       
-      if (userProfileData) {
+      if (profileData) {
+        // Store the complete profile data
+        setUserProfileData(profileData);
+        console.log('Full profile data received:', {
+          effective_photo_url: profileData.effective_photo_url,
+          photoURL: profileData.photoURL,
+          username: profileData.username,
+          displayName: profileData.displayName,
+          custom_photo_base64: profileData.custom_photo_base64 ? 'Present (not shown)' : 'Not present'
+        });
+        
+        // Update the UI state
         setUserData(prev => ({ 
           ...prev, 
-          rating: userProfileData.rating || prev.rating,
-          displayName: userProfileData.displayName || prev.displayName,
-          photoURL: userProfileData.photoURL || prev.photoURL,
-          gamesPlayed: userProfileData.gamesPlayed || 0,
-          gamesWon: userProfileData.gamesWon || 0,
-          gamesLost: userProfileData.gamesLost || 0,
-          gamesDraw: userProfileData.gamesDraw || 0
+          rating: profileData.rating || prev.rating,
+          // Use the username field if available, otherwise fall back to displayName
+          displayName: profileData.username || profileData.displayName || prev.displayName,
+          // Use the effective_photo_url which contains custom_photo_base64 if available, otherwise falls back to photoURL
+          photoURL: profileData.effective_photo_url || profileData.photoURL || prev.photoURL,
+          gamesPlayed: profileData.gamesPlayed || 0,
+          gamesWon: profileData.gamesWon || 0,
+          gamesLost: profileData.gamesLost || 0,
+          gamesDraw: profileData.gamesDraw || 0
         }));
-        console.log('User profile updated:', userProfileData);
+        console.log('User profile updated:', profileData);
       }
     } catch (error) {
       console.error('Error fetching user profile:', error);
@@ -193,7 +221,7 @@ export default function UserProfile() {
         <div className="relative w-full flex flex-col items-center mb-4 ">
           <div className="w-[100px] h-[100px] rounded-full overflow-hidden border-4 border-[#8FC0A9] bg-[#333939] -mt-8">
             <Image 
-              src={userData.photoURL || "/images/dp 1.svg"} 
+              src={userProfileData?.effective_photo_url || userProfileData?.photoURL || userData.photoURL || "/images/dp 1.svg"} 
               alt="Profile" 
               width={100} 
               height={100} 
@@ -201,7 +229,7 @@ export default function UserProfile() {
             />
           </div>
           <span className="mt-4 text-[#FAF3DD] text-[20px] font-medium font-poppins">
-            {userData.displayName || "Chess Player"}
+            {userProfileData?.username || userProfileData?.displayName || userData.displayName || "Chess Player"}
           </span>
           <span className="text-[#8FC0A9] text-[12px] font-medium font-roboto mt-2">
             {formatJoinDate(userData.joinDate)}
@@ -249,7 +277,7 @@ export default function UserProfile() {
             </div>
           ) : gameHistory.length > 0 ? (
             <>
-              {console.log(`Rendering ${gameHistory.length} games in a scrollable container`)}
+              {/* Rendering game history */}
               {gameHistory.map((game, i) => (
                 <div key={game.id} className="flex flex-col px-4 py-3" style={{ background: i % 2 === 0 ? '#3A4141' : '#333939' }}>
                   <div className="flex items-center">
@@ -298,7 +326,14 @@ export default function UserProfile() {
         </div>
         <div className="flex items-center px-4 py-4  bg-[#333939]">
           <div className="w-[90px] h-[120px] rounded-[8px] overflow-hidden flex items-center justify-center">
-            <Image src="/images/mol_clubmaster_award.svg" alt="Achievement" width={90} height={140} style={{ width: 'auto', height: 'auto' }} />
+            <Image 
+              src="/images/mol_clubmaster_award.svg" 
+              alt="Achievement" 
+              width={90} 
+              height={140} 
+              className="w-auto h-auto max-w-full max-h-full"
+              style={{ objectFit: 'contain' }} 
+            />
           </div>
         </div>
       </div>

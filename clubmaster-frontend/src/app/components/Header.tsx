@@ -12,6 +12,8 @@ const Header = () => {
             alt="Club Master Logo" 
             width={118} 
             height={48} 
+            className="w-auto h-[48px]"
+            style={{ width: 'auto' }}
             priority
           />
         </div>
