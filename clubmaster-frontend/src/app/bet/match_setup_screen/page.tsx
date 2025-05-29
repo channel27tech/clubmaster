@@ -1,14 +1,17 @@
 "use client";
-import React, { useState, useMemo, useRef, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import BetMatchNotification from "../../components/BetMatchNotification";
+import { useSearchParams, useRouter } from "next/navigation";
+import BetChallengeNotification from "../../components/BetChallengeNotification";
+import * as betService from "@/services/betService";
+import * as socketService from "@/services/socketService";
+import { BetType } from "@/types/bet";
+import { useBet } from '@/context/BetContext';
 
 // Color codes
 const TITLE_COLOR = "#FAF3DD";
 const ACTIVE_COLOR = "#8FC0A9";
-const INACTIVE_COLOR = "#E9CB6B";
 const BG_COLOR = "#363B3B";
 const CARD_COLOR = "#4C5454";
 const BUTTON_DISABLED = "#2B3A31";
@@ -38,8 +41,6 @@ const bettingOptions = [
 ];
 
 const ratingStakeOptions = [20, 40, 60, 80];
-
-const mockAvatars = ["/white-profile.png", "/black-profile.png",];
 
 // Timer button colors
 const TIMER_ACTIVE = "#4A7C59";
@@ -97,12 +98,14 @@ const bettingPopups = [
 
 export default function MatchSetupScreen() {
   const searchParams = useSearchParams();
-  const friend = searchParams.get("friend");
-  const friendAvatar = friend ? mockAvatars[0] : null;
+  const router = useRouter();
+  const friend = searchParams.get("opponent");
+  const opponentId = searchParams.get("opponentId");
+  const opponentSocketId = searchParams.get("socketId");
 
   // Timer type and time selection
-  const [selectedTimerType, setSelectedTimerType] = useState(0); // 0: Bullet, 1: Blitz, 2: Rapid
-  const [selectedTimer, setSelectedTimer] = useState(0); // 0: 3min, 1: 5min, 2: 10min
+  const [selectedTimerType, setSelectedTimerType] = useState(2); // 0: Bullet, 1: Blitz, 2: Rapid
+  const [selectedTimer, setSelectedTimer] = useState(2); // 0: 3min, 1: 5min, 2: 10min
   const [selectedPlayAs, setSelectedPlayAs] = useState(1); // default random
   const [selectedBetting, setSelectedBetting] = useState<number | null>(null);
   const [selectedStake, setSelectedStake] = useState(ratingStakeOptions[0]);
@@ -121,6 +124,9 @@ export default function MatchSetupScreen() {
 
   // Add after other useState hooks
   const [notificationInfoPopup, setNotificationInfoPopup] = useState<null | 0 | 1 | 2>(null);
+  
+  // Add state for bet challenge
+  const [pendingBetId, setPendingBetId] = useState<string | null>(null);
 
   // Only show timer options relevant to timer type
   const timerTypeToOption = { 0: 0, 1: 1, 2: 2 } as const;
@@ -128,14 +134,108 @@ export default function MatchSetupScreen() {
     setSelectedTimer(timerTypeToOption[selectedTimerType as keyof typeof timerTypeToOption]);
   }, [selectedTimerType]);
 
-  // Add effect to show notification after 5 seconds in waiting screen
+  // Use BetContext
+  const { sendBetChallenge } = useBet();
+
+  // Set up socket event listeners
+  useEffect(() => {
+    // Initialize socket connection
+    const socket = socketService.getSocket();
+    
+    // Listen for bet challenge responses
+    betService.onBetChallengeResponse((response) => {
+      console.log('Bet challenge response received:', response);
+      
+      if (response.betId === pendingBetId) {
+        if (response.accepted) {
+          // If challenge was accepted, navigate to waiting screen
+          // The actual game start will be handled by the matchFound event in MatchmakingManager
+          setWaitingPopupOpen(false);
+          router.push('/play');
+        } else {
+          // If challenge was rejected, show error toast and close waiting screen
+          setWaitingPopupOpen(false);
+          // TODO: Add toast notification for rejection
+          console.log('Bet challenge rejected');
+        }
+      }
+    });
+    
+    // Listen for bet challenge expiration
+    betService.onBetChallengeExpired((data) => {
+      console.log('Bet challenge expired:', data);
+      
+      if (data.betId === pendingBetId) {
+        setWaitingPopupOpen(false);
+        // TODO: Add toast notification for expiration
+        console.log('Bet challenge expired');
+      }
+    });
+    
+    // Listen for bet challenge cancellation
+    betService.onBetChallengeCancelled((data) => {
+      console.log('Bet challenge cancelled:', data);
+      
+      // This would be received by the opponent
+      setShowBetNotification(false);
+      // TODO: Add toast notification for cancellation
+      console.log('Bet challenge cancelled by opponent');
+    });
+    
+    // Listen for bet challenge creation response
+    socket.on('bet_challenge_created', (data) => {
+      console.log('Bet challenge created:', data);
+      
+      if (data.data && data.data.success) {
+        // Store the bet ID for later reference
+        setPendingBetId(data.data.betId);
+      } else {
+        // If creation failed, show error and close waiting screen
+        setWaitingPopupOpen(false);
+        // TODO: Add toast notification for error
+        console.log('Error creating bet challenge');
+      }
+    });
+    
+    // Listen for bet challenge error
+    socket.on('bet_challenge_error', (data) => {
+      console.log('Bet challenge error:', data);
+      
+      // Show error and close waiting screen
+      setWaitingPopupOpen(false);
+      // TODO: Add toast notification for error
+      console.log('Error with bet challenge:', data.data?.message);
+    });
+    
+    // Listen for incoming bet challenges (should not happen in this screen but for completeness)
+    betService.onBetChallengeReceived((challenge) => {
+      console.log('Bet challenge received:', challenge);
+      // We'll handle this in the main play screen
+    });
+    
+    // Clean up listeners on unmount
+    return () => {
+      betService.offBetChallengeResponse();
+      betService.offBetChallengeExpired();
+      betService.offBetChallengeCancelled();
+      betService.offBetChallengeReceived();
+      socket.off('bet_challenge_created');
+      socket.off('bet_challenge_error');
+    };
+  }, [pendingBetId, router]);
+
+  // Add effect to show mock notification in waiting screen for demo purposes
+  // Note: In a real implementation, this would be triggered by socket events
   useEffect(() => {
     let notificationTimer: NodeJS.Timeout;
     
     if (waitingPopupOpen) {
       // Set timer to show notification after 5 seconds
       notificationTimer = setTimeout(() => {
-        setShowBetNotification(true);
+        // Only show in demo mode - in real app this would come from a socket event
+        if (!opponentSocketId) {
+          setShowBetNotification(true);
+        }
       }, 5000);
     } else {
       // Hide notification when waiting popup is closed
@@ -146,22 +246,37 @@ export default function MatchSetupScreen() {
     return () => {
       if (notificationTimer) clearTimeout(notificationTimer);
     };
-  }, [waitingPopupOpen]);
+  }, [waitingPopupOpen, opponentSocketId]);
 
   // Handle notification actions
   const handleAcceptBet = () => {
-    setShowBetNotification(false);
-    setWaitingPopupOpen(false);
-    // Here you would normally navigate to the game screen
-    // For now we'll just close the popups
+    // In a real app, this would come from the socket event
+    const challengeId = "demo-challenge-id";
+    
+    if (opponentSocketId) {
+      // This is a real challenge
+      betService.respondToBetChallenge(challengeId, true);
+    } else {
+      // Demo mode
+      setShowBetNotification(false);
+      setWaitingPopupOpen(false);
+      // For demo purposes, we'll just navigate to play
+      router.push('/play');
+    }
   };
 
   const handleRejectBet = () => {
+    // In a real app, this would come from the socket event
+    const challengeId = "demo-challenge-id";
+    
+    if (opponentSocketId) {
+      // This is a real challenge
+      betService.respondToBetChallenge(challengeId, false);
+    }
+    
     setShowBetNotification(false);
     setWaitingPopupOpen(false);
   };
-
-  const stakeSelectRef = useRef<HTMLSelectElement>(null);
 
   // Handler to show info popup from notification
   const handleShowNotificationInfo = () => {
@@ -170,9 +285,68 @@ export default function MatchSetupScreen() {
     else if (selectedBetting === 2) setNotificationInfoPopup(2);
   };
 
+  // Update the onClick handler for the "Send Request" button
+  const handleSendRequest = () => {
+    if (selectedBetting !== null) {
+      // Show waiting popup immediately
+      setWaitingPopupOpen(true);
+      
+      // Map UI bet type to API bet type
+      let betType: BetType;
+      switch (selectedBetting) {
+        case 0:
+          betType = BetType.PROFILE_CONTROL;
+          break;
+        case 1:
+          betType = BetType.PROFILE_LOCK;
+          break;
+        case 2:
+          betType = BetType.RATING_STAKE;
+          break;
+        default:
+          betType = BetType.PROFILE_CONTROL;
+      }
+      
+      // Map UI timer type to game mode
+      const gameMode = selectedTimerType === 0 ? 'Bullet' : selectedTimerType === 1 ? 'Blitz' : 'Rapid';
+      
+      // Map timer to time control string
+      const timeControl = selectedTimer === 0 ? '3+0' : selectedTimer === 1 ? '5+0' : '10+0';
+      
+      // Map play as to preferred side
+      const preferredSide = selectedPlayAs === 0 ? 'white' : selectedPlayAs === 1 ? 'random' : 'black';
+      
+      // If we have an opponent socket ID or opponent ID, send direct challenge
+      if (opponentSocketId) {
+        sendBetChallenge({
+          opponentSocketId,
+          betType,
+          stakeAmount: betType === BetType.RATING_STAKE ? selectedStake : undefined,
+          gameMode,
+          timeControl,
+          preferredSide,
+        });
+      } else if (opponentId) {
+        // If we have an opponent ID but no socket ID
+        sendBetChallenge({
+          opponentId,
+          betType,
+          stakeAmount: betType === BetType.RATING_STAKE ? selectedStake : undefined,
+          gameMode,
+          timeControl,
+          preferredSide,
+        });
+      } else {
+        // No valid opponent information
+        console.log('No valid opponent information provided');
+        // TODO: Add error handling or redirect
+      }
+    }
+  };
+
   return (
     <div className="min-h-screen w-full flex flex-col items-center justify-start" style={{ background: BG_COLOR }}>
-      {/* Add this just before rendering <BetMatchNotification /> */}
+      {/* Add this just before rendering <BetChallengeNotification /> */}
       {showBetNotification && (
         <div style={{
           position: 'fixed',
@@ -263,16 +437,13 @@ export default function MatchSetupScreen() {
           </div>
         </div>
       )}
-      {/* Bet Match Notification */}
-      <BetMatchNotification
+      {/* Bet Challenge Notification */}
+      <BetChallengeNotification
         isOpen={showBetNotification}
         onAccept={handleAcceptBet}
         onReject={handleRejectBet}
         onShowInfo={handleShowNotificationInfo}
         challengerName={friend || "Opponent"}
-        challengerRating={308}
-        challengerCountryCode="in"
-        challengerProfileImage="/images/profile_waiting_screen.png"
         bettingType={selectedBetting === 0 ? "Temporary Profile Control" : 
                     selectedBetting === 1 ? "Temporary Profile Lock" : 
                     "Rating Stake"}
@@ -411,7 +582,14 @@ export default function MatchSetupScreen() {
                 maxWidth:"410px",
                 transition: 'all 0.2s',
               }}
-              onClick={() => setWaitingPopupOpen(false)}
+              onClick={() => {
+                // Cancel bet challenge if there is one
+                if (pendingBetId) {
+                  betService.cancelBetChallenge(pendingBetId);
+                }
+                // Close waiting popup
+                setWaitingPopupOpen(false);
+              }}
             >
               Cancel
             </button>
@@ -731,9 +909,7 @@ export default function MatchSetupScreen() {
                 transition: "all 0.2s",
               }}
               disabled={selectedBetting === null}
-              onClick={() => {
-                if (selectedBetting !== null) setWaitingPopupOpen(true);
-              }}
+              onClick={handleSendRequest}
             >
               Send Request
             </button>

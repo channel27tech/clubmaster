@@ -18,8 +18,10 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 // If your application needs crypto functionality, create a utility instead
 // Example: create a cryptoUtils file or use the crypto module directly where needed
  
-async function bootstrap() {
-  const logger = new Logger('Bootstrap');
+// This is the main function that starts the server
+async function bootstrap() { 
+  const logger = new Logger('Bootstrap'); 
+  // Create the NestJS application
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
  
   // Enable validation
