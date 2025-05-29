@@ -6,6 +6,8 @@ import * as admin from 'firebase-admin';
   providers: [],
   exports: [],
 })
+
+// This is the module that is used to initialize the Firebase Admin SDK
 export class FirebaseModule implements OnModuleInit {
   private readonly logger = new Logger(FirebaseModule.name);
 

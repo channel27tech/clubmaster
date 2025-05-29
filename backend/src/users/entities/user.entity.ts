@@ -41,6 +41,18 @@ export class User {
   @Column({ nullable: true })
   location?: string;
 
+  @Column({ nullable: true })
+  profileControlledBy?: string;
+
+  @Column({ nullable: true })
+  profileControlExpiry?: Date;
+
+  @Column({ default: false })
+  profileLocked: boolean;
+
+  @Column({ nullable: true })
+  profileLockExpiry?: Date;
+
   @CreateDateColumn()
   createdAt: Date;
 

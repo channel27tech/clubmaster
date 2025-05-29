@@ -30,7 +30,7 @@ declare global {
  * to the game screen when a match is found
  */
 const MatchmakingManager = forwardRef<MatchmakingManagerHandle, MatchmakingManagerProps>(
-  ({ defaultGameMode = 'Blitz', defaultTimeControl = '5', defaultSide = 'white', onError, onGameFound }, ref) => {
+  ({ defaultGameMode = 'Rapid', defaultTimeControl = '10', defaultSide = 'white', onError, onGameFound }, ref) => {
     const router = useRouter();
     const [isMatchmaking, setIsMatchmaking] = useState(false);
     const [error, setError] = useState<string | null>(null);

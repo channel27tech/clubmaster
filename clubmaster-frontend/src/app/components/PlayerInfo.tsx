@@ -2,6 +2,7 @@
 
 import React from 'react';
 import ChessPiece from './ChessPiece';
+import PlayerActivityStatus from '../../components/PlayerActivityStatus';
 import { CapturedPiece } from '../utils/types';
 import Image from 'next/image';
 
@@ -21,6 +22,7 @@ const pieceValues: { [key in PieceType]: number } = {
 interface PlayerInfoProps {
   position: 'top' | 'bottom';
   username: string;
+  userId?: string; // User ID for activity status
   rating?: number; // Optional for guest users
   clubAffiliation?: string; // Optional for guest users
   isGuest: boolean;
@@ -32,6 +34,7 @@ interface PlayerInfoProps {
 const PlayerInfo: React.FC<PlayerInfoProps> = ({
   position,
   username,
+  userId,
   rating,
   capturedPieces,
   isActive = false, // Default to inactive
@@ -70,7 +73,7 @@ const PlayerInfo: React.FC<PlayerInfoProps> = ({
         <div className="flex items-start gap-3">
           {/* Profile Icon/Avatar with active indicator */}
           <div className="relative">
-            {/* Green dot indicator above profile */}
+            {/* Green dot indicator above profile for turn indicator */}
             {isActive && (
               <div className="absolute -top-1.5 left-1/2 transform -translate-x-1/2 w-3 h-3 rounded-full bg-green-500 animate-pulse z-10"></div>
             )}
@@ -87,11 +90,18 @@ const PlayerInfo: React.FC<PlayerInfoProps> = ({
           
           {/* Player Info - stacked vertically */}
           <div className="flex flex-col">
-            {/* Player name */}
-            <h3 className="font-roboto font-[500] text-[16px] tracking-[0.25%] text-[#FAF3DD]">
-              {username}
-              {rating && <span className="ml-1">({rating})</span>}
-            </h3>
+            {/* Player name and rating */}
+            <div className="flex items-center gap-2">
+              <h3 className="font-roboto font-[500] text-[16px] tracking-[0.25%] text-[#FAF3DD]">
+                {username}
+                {rating && <span className="ml-1">({rating})</span>}
+              </h3>
+              
+              {/* Activity status */}
+              {userId && (
+                <PlayerActivityStatus userId={userId} compact={true} />
+              )}
+            </div>
             
             {/* Captured Pieces - with 4px gap from name */}
             <div className="mt-[4px]">

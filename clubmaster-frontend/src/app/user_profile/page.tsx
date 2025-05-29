@@ -3,6 +3,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import React, { useEffect, useState } from "react";
 import { useAuth } from "../../context/AuthContext";
+import PlayerActivityStatus from "../../components/PlayerActivityStatus";
 import profileDataService, { FormattedGameEntry } from "../../utils/ProfileDataService";
 
 // Import formatJoinDate utility, with a fallback implementation
@@ -206,6 +207,14 @@ export default function UserProfile() {
           <span className="text-[#8FC0A9] text-[12px] font-medium font-roboto mt-2">
             {formatJoinDate(userData.joinDate)}
           </span>
+          
+          {/* Activity Status */}
+          {user && (
+            <div className="mt-2">
+              <PlayerActivityStatus userId={user.uid} showDetails={true} />
+            </div>
+          )}
+          
           <div className="flex items-center gap-2 mt-2">
             <span className="text-[#E9CB6B] text-[15px] font-medium font-roboto">Rating</span>
             <span className="text-[#FAF3DD] text-[20px] font-semibold font-roboto">{userData.rating}</span>

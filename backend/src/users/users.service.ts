@@ -237,4 +237,66 @@ export class UsersService {
       }
     });
   }
+
+  /**
+   * Sets the profile control status for a user
+   * @param userId The ID of the user whose profile is being controlled
+   * @param controlledByUserId The ID of the user who gained control
+   * @param expiryDate When the control expires
+   */
+  async setProfileControl(
+    userId: string, 
+    controlledByUserId: string, 
+    expiryDate: Date
+  ): Promise<User> {
+    try {
+      const updateData = {
+        profileControlledBy: controlledByUserId,
+        profileControlExpiry: expiryDate
+      };
+      
+      await this.usersRepository.update(userId, updateData);
+      const updatedUser = await this.findOne(userId);
+      
+      if (!updatedUser) {
+        throw new NotFoundException(`User with ID ${userId} not found`);
+      }
+      
+      this.logger.log(`Profile control set for user ${userId} by ${controlledByUserId} until ${expiryDate}`);
+      return updatedUser;
+    } catch (error) {
+      this.logger.error(`Error setting profile control: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Sets the profile lock status for a user
+   * @param userId The ID of the user whose profile is being locked
+   * @param expiryDate When the lock expires
+   */
+  async setProfileLock(
+    userId: string, 
+    expiryDate: Date
+  ): Promise<User> {
+    try {
+      const updateData = {
+        profileLocked: true,
+        profileLockExpiry: expiryDate
+      };
+      
+      await this.usersRepository.update(userId, updateData);
+      const updatedUser = await this.findOne(userId);
+      
+      if (!updatedUser) {
+        throw new NotFoundException(`User with ID ${userId} not found`);
+      }
+      
+      this.logger.log(`Profile lock set for user ${userId} until ${expiryDate}`);
+      return updatedUser;
+    } catch (error) {
+      this.logger.error(`Error setting profile lock: ${error.message}`);
+      throw error;
+    }
+  }
 } 

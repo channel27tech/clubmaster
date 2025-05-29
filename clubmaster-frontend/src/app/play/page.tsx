@@ -1,12 +1,17 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import MatchmakingManager, { MatchmakingManagerHandle } from '@/app/components/MatchmakingManager';
 import WaitingScreen from '../components/WaitingScreen';
+import BetChallengeNotification from '../components/BetChallengeNotification';
 import { FaArrowLeft } from 'react-icons/fa';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
+import * as betService from '@/services/betService';
+import { BetType, BetChallenge } from '@/types/bet';
+import { useAuth } from '../context/AuthContext';
+import { useSocket } from '@/contexts/SocketContext';
 
 // Define the window interface to properly type the window extensions
 declare global {
@@ -34,6 +39,14 @@ const PlayPage: React.FC = () => {
   const [playAs, setPlayAs] = useState<string>('white');
   const [isMatchmaking, setIsMatchmaking] = useState<boolean>(false);
   const router = useRouter();
+  const { user } = useAuth();
+  const { socket, isConnected } = useSocket();
+  
+  // Bet challenge states
+  const [betChallenge, setBetChallenge] = useState<BetChallenge | null>(null);
+  const [showBetChallenge, setShowBetChallenge] = useState<boolean>(false);
+  const [showBetInfoPopup, setShowBetInfoPopup] = useState<number | null>(null); // 0, 1, 2 for the three bet types
+  const [matchmakingError, setMatchmakingError] = useState<string | null>(null);
   
   // Function to get time value based on game mode
   const getTimeFromGameMode = (mode: string): number => {
@@ -62,6 +75,42 @@ const PlayPage: React.FC = () => {
     setActiveTab(getGameModeFromTime(time));
     console.log(`🔄 Time changed to ${time}, game mode set to: ${getGameModeFromTime(time)}`);
   };
+  
+  // Set up bet challenge listeners
+  useEffect(() => {
+    // Listen for incoming bet challenges
+    const handleBetChallengeReceived = (challenge: BetChallenge) => {
+      console.log('Bet challenge received:', challenge);
+      
+      // Set the challenge data and show the notification
+      setBetChallenge({
+        id: challenge.betId,
+        challengerId: challenge.challengerId,
+        challengerName: challenge.challengerName,
+        challengerRating: challenge.challengerRating,
+        betType: challenge.betType,
+        stakeAmount: challenge.stakeAmount,
+        gameMode: challenge.gameMode,
+        timeControl: challenge.timeControl,
+        expiresAt: new Date(challenge.expiresAt),
+      });
+      setShowBetChallenge(true);
+    };
+    
+    // Register the listener
+    betService.onBetChallengeReceived(handleBetChallengeReceived);
+    
+    // Get any pending bet challenges when the component mounts and socket is connected
+    if (user && isConnected) {
+        console.log('Fetching pending bet challenges in PlayPage...');
+        betService.getPendingBetChallenges();
+    }
+
+    // Clean up listeners on unmount
+    return () => {
+      betService.offBetChallengeReceived();
+    };
+  }, [user, isConnected]);
   
   const handleMatchmakingError = (error: string) => {
     console.error('Matchmaking error:', error);
@@ -116,8 +165,145 @@ const PlayPage: React.FC = () => {
     }
   };
   
+  // Handle accepting a bet challenge
+  const handleAcceptBetChallenge = () => {
+    if (betChallenge) {
+      console.log('Accepting bet challenge:', betChallenge.id);
+      betService.respondToBetChallenge(betChallenge.id, true);
+      setShowBetChallenge(false);
+      
+      // Show the matchmaking screen while the game is being set up
+      // The actual game starting will be handled by the matchFound event from MatchmakingManager
+      setIsMatchmaking(true);
+    }
+  };
+  
+  // Handle rejecting a bet challenge
+  const handleRejectBetChallenge = () => {
+    if (betChallenge) {
+      console.log('Rejecting bet challenge:', betChallenge.id);
+      betService.respondToBetChallenge(betChallenge.id, false);
+      setShowBetChallenge(false);
+    }
+  };
+  
+  // Handle showing bet information popup
+  const handleShowBetInfo = () => {
+    if (betChallenge) {
+      switch (betChallenge.betType) {
+        case BetType.PROFILE_CONTROL:
+          setShowBetInfoPopup(0);
+          break;
+        case BetType.PROFILE_LOCK:
+          setShowBetInfoPopup(1);
+          break;
+        case BetType.RATING_STAKE:
+          setShowBetInfoPopup(2);
+          break;
+      }
+    }
+  };
+  
+  // Content for bet information popup
+  const bettingPopups = [
+    {
+      title: "Temporary profile control",
+      description: "Win the game to gain temporary control over your opponent's profile for 24 hours.",
+      points: [
+        "What You Can Do:",
+        "Change Display Name: Choose from 6 predefined nicknames to update your opponent's display name.",
+        "Change Profile Picture: Select from 4 predefined avatars to change their profile picture.",
+        "Duration:",
+        "All changes are temporary and will automatically revert back to the original after 24 hours.",
+        "Conditions:",
+        "If You Win: You gain control over your opponent's profile as described.",
+        "If You Lose: Your opponent gains control over your profile with the same options.",
+        "If the Game is a Draw: No profile changes are made; both profiles remain unchanged.",
+      ],
+    },
+    {
+      title: "Temporary profile lock",
+      description: "Win the game to temporarily lock your opponent's profile for 24 hours.",
+      points: [
+        "What Happens:",
+        "Profile Lock: Your opponent cannot change their display name or profile picture.",
+        "Duration:",
+        "The lock remains in effect for 24 hours after the game ends.",
+        "Conditions:",
+        "If You Win: Your opponent's profile becomes locked as described.",
+        "If You Lose: Your profile becomes locked for 24 hours.",
+        "If the Game is a Draw: No profiles are locked; both remain unchanged.",
+      ],
+    },
+    {
+      title: "Rating Stakes",
+      description: "Win the game to deduct rating points from your opponent.",
+      points: [
+        "What Happens:",
+        "Reduce Opponent's Rating: Deduct the agreed-upon rating points from your opponent's total rating.",
+        "Standard Rating Gain: You only receive the standard rating increase for a normal game win.",
+        "Duration:",
+        "The rating deduction is applied immediately after the game ends and is reflected in the leaderboard rankings.",
+        "Conditions:",
+        "If You Win: Your opponent's rating decreases by the agreed points, and you gain the standard game rating increase.",
+        "If You Lose: Your rating decreases by the agreed points.",
+        "If the Game is a Draw: No changes are made to either player's rating; both remain unchanged.",
+      ],
+    },
+  ];
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-black">
+      {/* Bet Challenge Notification */}
+      {betChallenge && showBetChallenge && (
+        <BetChallengeNotification
+          isOpen={showBetChallenge}
+          onAccept={handleAcceptBetChallenge}
+          onReject={handleRejectBetChallenge}
+          onShowInfo={handleShowBetInfo}
+          challengerName={betChallenge.challengerName || 'Opponent'}
+          challengerRating={betChallenge.challengerRating || 1500}
+          challengerCountryCode="in" // Default country code
+          bettingType={
+            betChallenge.betType === BetType.PROFILE_CONTROL ? 'Temporary Profile Control' :
+            betChallenge.betType === BetType.PROFILE_LOCK ? 'Temporary Profile Lock' :
+            'Rating Stake'
+          }
+          ratingStake={betChallenge.stakeAmount}
+          timeRemaining={60} // Default 60 seconds or calculate based on expiresAt
+        />
+      )}
+      
+      {/* Bet Info Popup */}
+      {showBetInfoPopup !== null && (
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center px-4 bg-black/45">
+          <div className="bg-[#4C5454] rounded-2xl w-full max-w-[340px] overflow-hidden shadow-2xl">
+            {/* Header */}
+            <div className="bg-[#4A7C59] px-5 py-4 text-white flex justify-between items-center">
+              <h3 className="text-lg font-semibold">{bettingPopups[showBetInfoPopup].title}</h3>
+              <button 
+                onClick={() => setShowBetInfoPopup(null)}
+                className="text-2xl leading-none hover:opacity-75 transition-opacity"
+              >
+                &times;
+              </button>
+            </div>
+            
+            {/* Description */}
+            <div className="px-5 pt-4 text-white">
+              {bettingPopups[showBetInfoPopup].description}
+            </div>
+            
+            {/* Points */}
+            <ul className="px-8 pt-3 pb-6 text-white text-sm list-disc">
+              {bettingPopups[showBetInfoPopup].points.map((point, idx) => (
+                <li key={idx} className="mb-1.5">{point}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+      
       {isMatchmaking ? (
         <WaitingScreen 
           gameType={activeTab.toLowerCase()}
@@ -242,6 +428,13 @@ const PlayPage: React.FC = () => {
                 className="h-[57px] bg-[#4C5454] hover:bg-[#3d4343] rounded-[10px] font-semibold transition-colors w-full text-[#FAF3DD] text-[18px] font-poppins"
               >
                 Create Link
+              </button>
+              
+              <button
+                onClick={() => router.push('/bet/match_setup_screen')}
+                className="h-[57px] bg-[#4C5454] hover:bg-[#3d4343] rounded-[10px] font-semibold transition-colors w-full text-[#FAF3DD] text-[18px] font-poppins"
+              >
+                Create Bet Challenge
               </button>
             </div>
           </div>
