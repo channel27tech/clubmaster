@@ -19,6 +19,7 @@ import { DisconnectionService } from '../game/disconnection.service';
 import { JoinGameDto } from '../game/dto/join-game.dto';
 import { UsersService } from '../users/users.service';
 import { GameRepositoryService } from '../game/game-repository.service';
+import { UserActivityService } from '../users/user-activity.service';
 
 // Define an interface for the matchmaking options
 interface MatchmakingOptions {
@@ -79,7 +80,8 @@ export class GameGateway
     private readonly ratingService: RatingService,
     private readonly disconnectionService: DisconnectionService,
     private readonly usersService: UsersService,
-    private readonly gameRepositoryService: GameRepositoryService
+    private readonly gameRepositoryService: GameRepositoryService,
+    private readonly userActivityService: UserActivityService
   ) {}
 
   /**
@@ -88,6 +90,10 @@ export class GameGateway
   afterInit() {
     this.logger.log('Chess Game WebSocket Gateway Initialized');
     this.logger.warn('⚠ GAME STATE WARNING: All game state is stored in-memory only. Restarting the server will clear all active games.');
+    
+    // Set the server instance in the GameManagerService
+    this.gameManagerService.setServer(this.server);
+    this.logger.log('Server instance passed to GameManagerService');
   }
 
   /**
@@ -95,6 +101,13 @@ export class GameGateway
    */
   handleConnection(client: Socket, ...args: any[]) {
     this.logger.log(`Client connected: ${client.id}`);
+    
+    // Check if user is authenticated
+    if (client.handshake?.auth?.uid) {
+      // We don't mark as in-game yet, just register connection
+      this.userActivityService.registerConnection(client.handshake.auth.uid, client.id);
+    }
+    
     // Check if this is a reconnecting player
     this.matchmakingService.handlePlayerReconnect(client.id);
     // Send a welcome message to the connected client
@@ -109,6 +122,12 @@ export class GameGateway
    */
   handleDisconnect(client: Socket) {
     this.logger.log(`Client disconnected: ${client.id}`);
+    
+    // Update user activity status if authenticated
+    if (client.handshake?.auth?.uid) {
+      this.userActivityService.registerDisconnection(client.id);
+    }
+    
     // Mark player as disconnected but give them time to reconnect
     this.matchmakingService.removePlayerFromQueue(client.id, true);
     // Give the client some time to reconnect before removing from queue
@@ -157,6 +176,12 @@ export class GameGateway
         rated: payload.rated !== undefined ? payload.rated : true,
         preferredSide: payload.preferredSide || 'random'
       });
+
+      // Track user activity if auth is available
+      if (client.handshake?.auth?.uid) {
+        // Not in game yet, but update activity timestamp
+        this.userActivityService.registerActivity(client.handshake.auth.uid);
+      }
       
       // Always return success if no exception was thrown
       return {
@@ -186,6 +211,11 @@ export class GameGateway
     
     // Get the game state
     const game = this.gameManagerService.getGame(payload.gameId);
+    
+    // Track player activity if user auth is available
+    if (client.handshake?.auth?.uid) {
+      this.userActivityService.registerInGame(client.handshake.auth.uid, payload.gameId);
+    }
     
     if (!game) {
       this.logger.warn(`Game ${payload.gameId} not found in gameManagerService - Games registry might be broken.`);
@@ -1819,6 +1849,21 @@ export class GameGateway
           event: 'error',
           data: { success: false, message: 'Game not found' }
         };
+      }
+      
+      // Update user activity status to no longer in game for both players
+      if (game.whitePlayer?.socketId) {
+        const whiteSocket = this.server.sockets.sockets.get(game.whitePlayer.socketId);
+        if (whiteSocket?.handshake?.auth?.uid) {
+          this.userActivityService.registerLeftGame(whiteSocket.handshake.auth.uid);
+        }
+      }
+      
+      if (game.blackPlayer?.socketId) {
+        const blackSocket = this.server.sockets.sockets.get(game.blackPlayer.socketId);
+        if (blackSocket?.handshake?.auth?.uid) {
+          this.userActivityService.registerLeftGame(blackSocket.handshake.auth.uid);
+        }
       }
       
       // Check if the game is already over

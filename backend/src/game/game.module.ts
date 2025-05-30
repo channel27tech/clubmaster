@@ -10,12 +10,14 @@ import { Game } from './entities/game.entity';
 import { GameRepositoryService } from './game-repository.service';
 import { UsersModule } from '../users/users.module';
 import { GameController } from './game.controller';
+import { BetModule } from '../bet/bet.module';
 
 @Module({
   imports: [
     TimerModule,
     TypeOrmModule.forFeature([Game]),
     forwardRef(() => UsersModule),
+    forwardRef(() => BetModule),
   ],
   controllers: [GameController],
   providers: [

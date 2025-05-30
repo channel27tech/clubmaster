@@ -3,6 +3,7 @@ import { Socket } from 'socket.io';
 import { GameManagerService } from './game-manager.service';
 import { GameRepositoryService } from './game-repository.service';
 import { UsersService } from '../users/users.service';
+import { BetService } from '../bet/bet.service';
 import { v4 as uuidv4 } from 'uuid';
 
 interface Player {
@@ -18,6 +19,7 @@ interface Player {
   username?: string;
   isGuest?: boolean;
   gamesPlayed?: number;
+  betChallengeId?: string; // ID of associated bet challenge
 }
 
 interface GameOptions {
@@ -41,6 +43,7 @@ export class MatchmakingService {
     private readonly gameManagerService: GameManagerService,
     private readonly gameRepositoryService: GameRepositoryService,
     private readonly usersService: UsersService,
+    private readonly betService: BetService,
   ) {
     this.startMatchmakingProcess();
     
@@ -338,6 +341,22 @@ export class MatchmakingService {
 
     // Store the database UUID in the game state
     newGame.dbGameId = dbGameId;
+
+    // Handle bet challenge if it exists
+    const betChallengeId = whitePlayer.betChallengeId || blackPlayer.betChallengeId;
+    if (betChallengeId) {
+      try {
+        // Link the bet challenge to the game
+        const success = await this.betService.linkBetToGame(betChallengeId, gameId);
+        if (success) {
+          this.logger.log(`Linked bet challenge ${betChallengeId} to game ${gameId}`);
+        } else {
+          this.logger.warn(`Failed to link bet challenge ${betChallengeId} to game ${gameId}`);
+        }
+      } catch (error) {
+        this.logger.error(`Error linking bet challenge to game: ${error.message}`, error.stack);
+      }
+    }
 
     // Create a database record if at least one player is registered
     const bothPlayersAreRegistered = !whitePlayer.isGuest && !blackPlayer.isGuest && whitePlayerId && blackPlayerId;

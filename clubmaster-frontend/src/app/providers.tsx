@@ -4,6 +4,8 @@ import React, { useState, useEffect } from 'react';
 import { SocketProvider } from '../contexts/SocketContext';
 import { SoundProvider } from '../contexts/SoundContext';
 import { AuthProvider } from '../context/AuthContext';
+import { BetProvider } from '../context/BetContext';
+import { ActivityProvider } from '../context/ActivityContext';
 import RouteGuard from '../components/RouteGuard';
 
 interface ProvidersProps {
@@ -77,9 +79,13 @@ export const Providers: React.FC<ProvidersProps> = ({ children }) => {
     <AuthProvider>
       <RouteGuard>
         <SocketProvider>
+          <ActivityProvider>
           <SoundProvider userId={userId}>
+              <BetProvider>
             {children}
+              </BetProvider>
           </SoundProvider>
+          </ActivityProvider>
         </SocketProvider>
       </RouteGuard>
     </AuthProvider>

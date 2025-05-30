@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 
-interface BetMatchNotificationProps {
+interface BetChallengeNotificationProps {
   isOpen: boolean;
   onAccept: () => void;
   onReject: () => void;
@@ -17,7 +17,7 @@ interface BetMatchNotificationProps {
   timeRemaining?: number;
 }
 
-const BetMatchNotification: React.FC<BetMatchNotificationProps> = ({
+const BetChallengeNotification: React.FC<BetChallengeNotificationProps> = ({
   isOpen,
   onAccept,
   onReject,
@@ -187,4 +187,4 @@ const BetMatchNotification: React.FC<BetMatchNotificationProps> = ({
   );
 };
 
-export default BetMatchNotification; 
+export default BetChallengeNotification; 
