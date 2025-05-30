@@ -3,18 +3,7 @@ const nextConfig = {
   reactStrictMode: true,
   transpilePackages: ['firebase'],
   images: {
-    remotePatterns: [
-      {
-        protocol: 'https',
-        hostname: 'lh3.googleusercontent.com',
-        pathname: '**',
-      },
-      {
-        protocol: 'http',
-        hostname: 'localhost',
-        pathname: '**',
-      },
-    ],
+    domains: ['lh3.googleusercontent.com', 'localhost'],
   },
   webpack: (config) => {
     // This is required for Firebase to work properly

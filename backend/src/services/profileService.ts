@@ -10,6 +10,7 @@ const pool = new Pool({
   port: parseInt(process.env.DB_PORT || '5432', 10),
 });
 
+// Define the UserProfileUpdateData interface
 export interface UserProfileUpdateData {
   firebase_uid: string;
   username?: string;
@@ -19,6 +20,7 @@ export interface UserProfileUpdateData {
   custom_photo_base64?: string | null;
 }
 
+// Check if a username is available
 export const checkUsernameAvailability = async (username: string, currentUserId?: string): Promise<boolean> => {
   try {
     let query = 'SELECT id FROM users WHERE username = $1';
@@ -37,6 +39,7 @@ export const checkUsernameAvailability = async (username: string, currentUserId?
   }
 };
 
+// Update a user's profile
 export const updateUserProfile = async (data: UserProfileUpdateData): Promise<any> => {
   const { firebase_uid, username, first_name, last_name, location, custom_photo_base64 } = data;
 
@@ -47,6 +50,8 @@ export const updateUserProfile = async (data: UserProfileUpdateData): Promise<an
       throw new Error('Username is already taken.');
     }
   }
+
+  // Check if custom photo is provided and if it's a valid base64 image
 
   const updates: string[] = [];
   const values: any[] = [];
@@ -70,9 +75,12 @@ export const updateUserProfile = async (data: UserProfileUpdateData): Promise<an
   }
 
   updates.push(`updated_at = NOW()`);
+  
+  // Check if custom photo is provided and if it's a valid base64 image
 
   const query = `UPDATE users SET ${updates.join(', ')} WHERE firebase_uid = $${paramIndex} RETURNING *`;
   values.push(firebase_uid);
+  
 
   try {
     const result = await pool.query(query, values);
@@ -88,6 +96,8 @@ export const updateUserProfile = async (data: UserProfileUpdateData): Promise<an
     throw new Error('Database error during profile update.');
   }
 };
+
+// Get a user's profile by their Firebase UID
 
 export const getUserProfileByFirebaseUID = async (firebase_uid: string): Promise<any> => {
     try {

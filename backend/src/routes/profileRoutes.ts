@@ -69,6 +69,8 @@ router.post('/update', verifyToken, async (req: Request, res: Response): Promise
         }
       }
     }
+    
+    
 
     const updatedProfile = await updateUserProfile(updateData);
     res.status(200).json({ message: 'Profile updated successfully.', user: updatedProfile });
