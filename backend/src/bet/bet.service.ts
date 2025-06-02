@@ -5,6 +5,17 @@ import { BetChallenge, BetStatus, BetType, BetChallengeResponse, BetResult } fro
 import { UsersService } from '../users/users.service';
 import { GameManagerService } from '../game/game-manager.service';
 
+// Define the missing interface
+export interface CreateBetChallengeOptions {
+  opponentId?: string;
+  opponentSocketId?: string;
+  betType: BetType;
+  stakeAmount?: number;
+  gameMode: string;
+  timeControl: string;
+  preferredSide: string;
+}
+
 @Injectable()
 //
 export class BetService {
@@ -24,48 +35,54 @@ export class BetService {
    * Create a new bet challenge
    */
   createBetChallenge(
-    challengerSocket: Socket,
+    client: Socket,
     challengerId: string,
-    options: {
-      opponentId?: string;
-      opponentSocketId?: string;
-      betType: BetType;
-      stakeAmount?: number;
-      gameMode: string;
-      timeControl: string;
-      preferredSide: string;
-    },
+    options: CreateBetChallengeOptions,
   ): BetChallenge {
-    const betId = uuidv4();
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + this.CHALLENGE_EXPIRY_MS);
-
-    const betChallenge: BetChallenge = {
-      id: betId,
-      challengerId,
-      challengerSocketId: challengerSocket.id,
-      opponentId: options.opponentId,
-      opponentSocketId: options.opponentSocketId,
-      betType: options.betType,
-      stakeAmount: options.betType === BetType.RATING_STAKE ? options.stakeAmount : undefined,
-      gameMode: options.gameMode,
-      timeControl: options.timeControl,
-      preferredSide: options.preferredSide,
-      status: BetStatus.PENDING,
-      createdAt: now,
-      expiresAt,
-      resultApplied: false,
-    };
-
-    this.activeBetChallenges.set(betId, betChallenge);
-    
-    // Set up expiration timer for this challenge
-    setTimeout(() => {
-      this.expireBetChallenge(betId);
-    }, this.CHALLENGE_EXPIRY_MS);
-
-    this.logger.log(`Created bet challenge ${betId} from ${challengerId}`);
-    return betChallenge;
+    try {
+      // Log incoming challenge request
+      this.logger.log(`Creating bet challenge from ${challengerId.substring(0, 6)}... with options: ${JSON.stringify(options)}`);
+      
+      // Generate a unique ID for the challenge
+      const betId = uuidv4();
+      
+      // Calculate expiry time (default: 60 seconds from now)
+      const expiresAt = new Date(Date.now() + this.CHALLENGE_EXPIRY_MS);
+      
+      // Create new challenge object
+      const betChallenge: BetChallenge = {
+        id: betId,
+        challengerId: challengerId,
+        challengerSocketId: client.id,
+        opponentId: options.opponentId,
+        opponentSocketId: options.opponentSocketId,
+        betType: options.betType,
+        stakeAmount: options.betType === BetType.RATING_STAKE ? options.stakeAmount : undefined,
+        gameMode: options.gameMode,
+        timeControl: options.timeControl,
+        preferredSide: options.preferredSide,
+        createdAt: new Date(),
+        expiresAt: expiresAt,
+        status: BetStatus.PENDING,
+        resultApplied: false,
+      };
+      
+      // Add challenge to active challenges
+      this.activeBetChallenges.set(betId, betChallenge);
+      
+      // Log successful creation
+      this.logger.log(`Created bet challenge ${betId} from ${challengerId.substring(0, 6)}...`);
+      
+      // Set up expiry timeout for this challenge
+      setTimeout(() => {
+        this.expireBetChallenge(betId);
+      }, this.CHALLENGE_EXPIRY_MS);
+      
+      return betChallenge;
+    } catch (error) {
+      this.logger.error(`Error creating bet challenge from ${challengerId.substring(0, 6)}...: ${error.message}`, error.stack);
+      throw new Error(`Failed to create bet challenge: ${error.message}`);
+    }
   }
 
   /**

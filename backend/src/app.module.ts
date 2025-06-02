@@ -1,8 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
 import { TimerModule } from './game/timer/timer.module';
 import { GameModule } from './game/game.module';
 import { WebsocketModule } from './websocket/websocket.module';
@@ -24,7 +22,7 @@ import { BetModule } from './bet/bet.module';
       envFilePath: '.env',
     }),
     TypeOrmModule.forRootAsync({
-      useFactory: async () => ({
+      useFactory: async () => Promise.resolve({
         type: 'postgres',
         host: process.env.DB_HOST,
         port: parseInt(process.env.DB_PORT || '5432', 10),
@@ -35,7 +33,7 @@ import { BetModule } from './bet/bet.module';
         synchronize: false, // Temporarily disable schema synchronization
         logging: true,
       }),
-      async dataSourceFactory(options) {
+      dataSourceFactory: async (options) => {
         const dataSource = new DataSource(options as any);
         await dataSource.initialize();
         console.log('[Nest] Connected to the database...');
@@ -54,7 +52,5 @@ import { BetModule } from './bet/bet.module';
     ProfileModule,
     BetModule,
   ],
-  controllers: [AppController],
-  providers: [AppService],
 })
 export class AppModule {}

@@ -1,5 +1,5 @@
 import { useEffect, useCallback } from 'react';
-import { useSocket } from '../../contexts/SocketContext';
+import { useSocket } from '../../context/SocketContext';
 import { MoveHistoryState, BoardState, PieceType, PieceColor } from '../utils/moveHistory';
 import { getFen } from '../utils/chessEngine';
 import { extractPieceInfoFromNotation, findMovingPiece } from '../utils/boardHelpers';

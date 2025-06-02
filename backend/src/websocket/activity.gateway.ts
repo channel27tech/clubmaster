@@ -156,7 +156,7 @@ export class ActivityGateway
           this.logger.log(`Client ${clientId} heartbeat timeout, marking as disconnected`);
           
           // Find the socket by ID
-          const socket = this.server.sockets.sockets.get(clientId);
+          const socket = this.server?.sockets?.sockets?.get?.(clientId);
           if (socket) {
             // Disconnect the socket
             socket.disconnect(true);

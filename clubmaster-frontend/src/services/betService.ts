@@ -1,9 +1,10 @@
 import * as socketService from './socketService';
-import { BetType } from '@/types/bet';
+import { BetType, BetChallenge } from '@/types/bet';
 import { Socket } from 'socket.io-client';
 
 /**
  * Send a bet challenge to another player
+ * @returns Promise that resolves with the result of the bet challenge creation
  */
 export const sendBetChallenge = (options: {
   opponentId?: string;
@@ -13,13 +14,51 @@ export const sendBetChallenge = (options: {
   gameMode: string;
   timeControl: string;
   preferredSide: string;
-}): void => {
-  const socket = socketService.getSocket();
-  if (socket?.connected) {
-    socket.emit('create_bet_challenge', options);
-  } else {
-    console.error('Cannot send bet challenge: Socket not connected');
-  }
+}): Promise<{ success: boolean; betId?: string; expiresAt?: string; message?: string }> => {
+  return new Promise((resolve, reject) => {
+    const socket = socketService.getSocket();
+    if (socket?.connected) {
+      console.log('Attempting to send create_bet_challenge event with options:', options);
+      
+      // Add a flag to track if the promise was resolved
+      let isResolved = false;
+      
+      // Send with acknowledgment callback
+      socket.emit('create_bet_challenge', options, (response: any) => {
+        // Only resolve if we haven't already
+        if (!isResolved) {
+          isResolved = true;
+          if (response && response.success) {
+            console.log('Bet challenge created successfully:', response);
+            resolve({ 
+              success: true, 
+              betId: response.betId || response.data?.betId, 
+              expiresAt: response.expiresAt || response.data?.expiresAt 
+            });
+          } else {
+            console.error('Failed to create bet challenge:', response);
+            resolve({ 
+              success: false, 
+              message: response?.message || response?.data?.message || 'Failed to create bet challenge' 
+            });
+          }
+        }
+      });
+      
+      // Add a timeout in case the server never responds
+      setTimeout(() => {
+        // Only resolve if we haven't already
+        if (!isResolved) {
+          isResolved = true;
+          console.warn('Bet challenge creation timeout - assuming failed');
+          resolve({ success: false, message: 'Timeout waiting for server response' });
+        }
+      }, 10000); // 10 second timeout
+    } else {
+      console.error('Cannot send bet challenge: Socket not connected');
+      resolve({ success: false, message: 'Socket not connected' });
+    }
+  });
 };
 
 /**
@@ -61,17 +100,71 @@ export const getPendingBetChallenges = (): void => {
 /**
  * Add a listener for incoming bet challenges
  */
-export const onBetChallengeReceived = (callback: (challenge: any) => void): void => {
+export const onBetChallengeReceived = (callback: (challenge: BetChallenge) => void): void => {
   const socket = socketService.getSocket();
   if (socket) {
-    socket.on('bet_challenge_received', callback);
+    // Remove any existing listeners to prevent duplicates
+    socket.off('bet_challenge_received');
+    
+    // Add the new listener with clear logging
+    socket.on('bet_challenge_received', (data: any) => {
+      console.log('[betService] Bet challenge received event:', data);
+      try {
+        // Validate essential data is present
+        if (!data || !data.id) {
+          console.error('[betService] Invalid bet challenge data received:', data);
+          return;
+        }
+
+        // Detailed logging of incoming data fields
+        console.log('[betService] Incoming data fields:', {
+          id: data.id,
+          senderId: data.senderId,
+          senderUsername: data.senderUsername,
+          senderRating: data.senderRating,
+          senderPhotoURL: data.senderPhotoURL,
+          betType: data.betType
+        });
+
+        // Create a properly formatted challenge object
+        const challenge: BetChallenge = {
+          id: data.id,
+          challengerId: data.senderId,
+          // Enhanced name resolution with multiple fallbacks
+          challengerName: data.senderUsername || data.challengerName || data.displayName || data.name || 'Unknown Challenger',
+          challengerRating: data.senderRating,
+          // Add profile photo URL with fallbacks
+          challengerPhotoURL: data.senderPhotoURL || data.photoURL || data.profileImage || data.avatarUrl || null,
+          betType: data.betType,
+          stakeAmount: data.stakeAmount,
+          gameMode: data.gameMode || 'Rapid',
+          timeControl: data.timeControl || '10+0',
+          expiresAt: data.expiresAt ? new Date(data.expiresAt) : new Date(Date.now() + 60000),
+          // Keep original fields for backward compatibility
+          senderId: data.senderId,
+          senderUsername: data.senderUsername
+        };
+        
+        console.log('[betService] Formatted challenge for callback:', challenge);
+        console.log('[betService] Challenger name set to:', challenge.challengerName);
+        
+        // Call the callback with the processed challenge data
+        callback(challenge);
+      } catch (error) {
+        console.error('[betService] Error handling bet challenge received:', error);
+      }
+    });
+    
+    console.log('[betService] Registered bet_challenge_received listener');
+  } else {
+    console.warn('[betService] Cannot register bet_challenge_received listener: Socket not available');
   }
 };
 
 /**
  * Remove the bet challenge received listener
  */
-export const offBetChallengeReceived = (callback?: (challenge: any) => void): void => {
+export const offBetChallengeReceived = (callback?: (challenge: BetChallenge) => void): void => {
   const socket = socketService.getSocket();
   if (socket) {
     if (callback) {
@@ -79,6 +172,7 @@ export const offBetChallengeReceived = (callback?: (challenge: any) => void): vo
     } else {
       socket.off('bet_challenge_received');
     }
+    console.log('[betService] Removed bet_challenge_received listener');
   }
 };
 
