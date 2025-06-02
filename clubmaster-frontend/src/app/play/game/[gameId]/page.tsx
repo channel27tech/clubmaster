@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import Header from "@/app/components/Header";
 import MoveTracker from "@/app/components/MoveTracker";
 import ChessBoardWrapper from "@/app/components/ChessBoardWrapper";
-import { useSocket } from "@/contexts/SocketContext";
+import { useSocket } from "@/context/SocketContext";
 
 // Helper function to validate and format time control
 const validateTimeControl = (timeControlStr: string | null): string => {

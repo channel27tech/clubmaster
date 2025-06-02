@@ -5,8 +5,8 @@ import GameOptionsDialog from './GameOptionsDialog';
 import ResignConfirmationDialog from './ResignConfirmationDialog';
 import AbortConfirmationDialog from './AbortConfirmationDialog';
 import DrawConfirmationDialog from './DrawConfirmationDialog';
-import { useSocket } from '../../contexts/SocketContext';
-import { useSound } from '../../contexts/SoundContext';
+import { useSocket } from '../../context/SocketContext';
+import { useSound } from '../../context/SoundContext';
 import { playSound } from '../utils/soundEffects';
 
 // Utility function to determine if game can be aborted

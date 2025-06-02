@@ -21,11 +21,14 @@ export interface BetChallenge {
   challengerId: string;       // User ID of the challenger
   challengerName?: string;    // Name of the challenger
   challengerRating?: number;  // Rating of the challenger
+  challengerPhotoURL?: string; // Profile photo URL of the challenger
   betType: BetType;           // Type of bet
   stakeAmount?: number;       // Amount of rating points at stake (for RATING_STAKE)
   gameMode: string;           // Game mode (Bullet, Blitz, Rapid)
   timeControl: string;        // Time control (e.g. "3+0", "5+0", "10+0")
   expiresAt: Date;            // When the bet challenge expires
+  senderId?: string;          // User ID of the sender (same as challengerId, used for compatibility)
+  senderUsername?: string;    // Username of the sender (same as challengerName, used for compatibility)
 }
 
 // Response to a bet challenge

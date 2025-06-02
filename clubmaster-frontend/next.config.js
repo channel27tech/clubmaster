@@ -16,6 +16,16 @@ const nextConfig = {
       },
     ],
   },
+  // Add redirects to replace the functionality of middleware.ts
+  async redirects() {
+    return [
+      {
+        source: '/clubs',
+        destination: '/club/clubs',
+        permanent: true,
+      },
+    ];
+  },
   webpack: (config) => {
     // This is required for Firebase to work properly
     config.resolve.alias = {

@@ -23,6 +23,7 @@ export interface PlayerType {
   lastActive?: string;
   photoURL?: string;
   rating?: number;
+  socketId?: string;
 }
 
 // This component is used to display a status dot
