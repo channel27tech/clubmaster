@@ -5,6 +5,7 @@ import { GameRepositoryService } from './game-repository.service';
 import { UsersService } from '../users/users.service';
 import { BetService } from '../bet/bet.service';
 import { v4 as uuidv4 } from 'uuid';
+import { GameNotificationHelper } from './game-notification.helper';
 
 interface Player {
   socketId: string;
@@ -44,6 +45,7 @@ export class MatchmakingService {
     private readonly gameRepositoryService: GameRepositoryService,
     private readonly usersService: UsersService,
     private readonly betService: BetService,
+    private readonly gameNotificationHelper: GameNotificationHelper,
   ) {
     this.startMatchmakingProcess();
     
@@ -247,7 +249,7 @@ export class MatchmakingService {
   }
 
   /**
-   * Create a match between two players
+   * Private method to create a match between two players
    */
   private async createMatch(player1: Player, player2: Player): Promise<void> {
     // Determine the player colors (white/black)
@@ -403,6 +405,31 @@ export class MatchmakingService {
       blackPlayerSocketId,
       gameId
     );
+
+    // When match is created, send notifications to both players if they are registered users
+    try {
+      // For player1 (match invite received)
+      if (player1.userId && player2.userId) {
+        await this.gameNotificationHelper.sendGameInviteNotification(
+          player1.userId,
+          player2.userId,
+          gameId,
+          player1.timeControl,
+        );
+      }
+
+      // For player2 (match invite accepted)
+      if (player1.userId && player2.userId) {
+        await this.gameNotificationHelper.sendGameInviteAcceptedNotification(
+          player2.userId,
+          player1.userId,
+          gameId,
+        );
+      }
+    } catch (error) {
+      this.logger.error(`Failed to send match notifications: ${error.message}`);
+      // Non-blocking - continue even if notifications fail
+    }
   }
 
   /**

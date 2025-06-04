@@ -3,18 +3,7 @@ const nextConfig = {
   reactStrictMode: true,
   transpilePackages: ['firebase'],
   images: {
-    remotePatterns: [
-      {
-        protocol: 'https',
-        hostname: 'lh3.googleusercontent.com',
-        pathname: '**',
-      },
-      {
-        protocol: 'http',
-        hostname: 'localhost',
-        pathname: '**',
-      },
-    ],
+    domains: ['lh3.googleusercontent.com', 'localhost'],
   },
   // Add redirects to replace the functionality of middleware.ts
   async redirects() {

@@ -51,6 +51,24 @@ export class BetGateway implements OnGatewayConnection {
     private readonly usersService: UsersService,
   ) {}
 
+  /**
+   * Helper method to safely get a socket by ID
+   * @param socketId The socket ID to find
+   * @returns The socket if found, null otherwise
+   */
+  private safeGetSocket(socketId: string): Socket | null {
+    try {
+      if (this.server && this.server.sockets && this.server.sockets.sockets) {
+        return this.server.sockets.sockets.get(socketId) || null;
+      }
+      this.logger.warn(`Cannot access socket collection when looking for socket ${socketId}`);
+      return null;
+    } catch (error) {
+      this.logger.error(`Error accessing socket ${socketId}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      return null;
+    }
+  }
+
   // This is the method that is used to handle the bet challenge requests
   @UseGuards(SocketAuthGuard)
   @SubscribeMessage('create_bet_challenge')
@@ -350,7 +368,7 @@ export class BetGateway implements OnGatewayConnection {
         this.logger.log(`Starting matchmaking for bet challenge ${challenge.id}`);
 
         // Start matchmaking for both players
-        const challengerSocket = this.server.sockets.sockets.get(challenge.challengerSocketId);
+        const challengerSocket = this.safeGetSocket(challenge.challengerSocketId);
         if (!challengerSocket) {
           this.logger.warn(`Challenger socket ${challenge.challengerSocketId} not found`);
           return {

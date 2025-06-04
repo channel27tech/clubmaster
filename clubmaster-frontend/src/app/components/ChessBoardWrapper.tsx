@@ -14,6 +14,7 @@ import { playSound, preloadSoundEffects } from '../utils/soundEffects';
 import { CapturedPiece, GameResultType, GameEndReason, GameResult } from '../utils/types';
 import DisconnectionNotification from './DisconnectionNotification';
 import { fetchGamePlayers } from '../api/gameApi';
+import { Chess } from 'chess.js';
 
 // Use dynamic import in a client component
 const ChessBoard = dynamic(() => import('./ChessBoard'), {
@@ -1279,8 +1280,38 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
           const result = chess.move(move);
           if (!result) {
             console.error(`Failed to apply move ${i+1}: ${move}`);
-            allMovesApplied = false;
-            break;
+            // Try to apply the move using more flexible parsing
+            try {
+              // Try with a more flexible approach - create a move object if the string looks like coordinates
+              if (move.match(/^[a-h][1-8][a-h][1-8][qrbnQRBN]?$/)) {
+                const from = move.substring(0, 2);
+                const to = move.substring(2, 4);
+                const promotion = move.length > 4 ? move.substring(4, 5).toLowerCase() : undefined;
+                
+                console.log(`Trying alternative move format: from=${from}, to=${to}, promotion=${promotion}`);
+                const altResult = chess.move({
+                  from,
+                  to,
+                  promotion
+                });
+                
+                if (!altResult) {
+                  console.error(`Alternative move format also failed`);
+                  allMovesApplied = false;
+                  break;
+                } else {
+                  console.log(`Alternative move format succeeded`);
+                  continue; // Move to the next move in the history
+                }
+              }
+              
+              allMovesApplied = false;
+              break;
+            } catch (altError) {
+              console.error(`Error applying alternative move format: ${altError instanceof Error ? altError.message : 'Unknown error'}`);
+              allMovesApplied = false;
+              break;
+            }
           }
         } catch (moveError) {
           console.error(`Error applying move ${i+1}: ${move}. Error: ${moveError instanceof Error ? moveError.message : 'Unknown error'}`);
@@ -1371,7 +1402,65 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         // If we have a move history, rebuild the board state first to ensure consistency
         if (sanMoveList.length > 0) {
           console.log(`Verifying chess engine state with ${sanMoveList.length} moves in history`);
-          synchronizeBoardFromMoveHistory(sanMoveList);
+          // Make sure synchronization is successful
+          const syncSuccess = synchronizeBoardFromMoveHistory(sanMoveList);
+          if (!syncSuccess) {
+            console.warn('Failed to synchronize board state from move history, attempting fallback');
+            // Try to reset the chess engine to a fresh state and apply the move history
+            const tempChess = resetChessEngine();
+            let allMovesApplied = true;
+            
+            for (const historyMove of sanMoveList) {
+              try {
+                const result = tempChess.move(historyMove);
+                if (!result) {
+                  console.error(`Failed to apply move: ${historyMove} during fallback synchronization`);
+                  // Try with coordinate notation if SAN fails
+                  if (historyMove.match(/^[a-h][1-8][a-h][1-8][qrbnQRBN]?$/)) {
+                    const from = historyMove.substring(0, 2);
+                    const to = historyMove.substring(2, 4);
+                    const promotion = historyMove.length > 4 ? historyMove.substring(4, 5).toLowerCase() : undefined;
+                    
+                    const altResult = tempChess.move({
+                      from,
+                      to,
+                      promotion
+                    });
+                    
+                    if (!altResult) {
+                      allMovesApplied = false;
+                      break;
+                    }
+                    // If we succeeded with coordinate notation, continue to next move
+                    continue;
+                  }
+                  
+                  allMovesApplied = false;
+                  break;
+                }
+              } catch (moveError) {
+                console.error(`Error applying move: ${historyMove} during fallback synchronization`, moveError);
+                allMovesApplied = false;
+                break;
+              }
+            }
+            
+            if (!allMovesApplied) {
+              console.error('Critical error: Failed to rebuild board state, move may be invalid');
+              // Request a board sync from the server
+              if (currentSocket && gameRoomId) {
+                console.log('Requesting emergency board sync from server');
+                currentSocket.emit('request_board_sync', {
+                  gameId: gameRoomId,
+                  reason: 'critical_state_error',
+                  clientState: chess.fen()
+                });
+              }
+              // Remove this move from the queue and return
+              setMoveQueue(prev => prev.slice(1));
+              return;
+            }
+          }
         }
         
         // Get the current FEN position before making the move
@@ -1380,27 +1469,95 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         // Apply the move to get the SAN notation and resulting state
         try {
           // Make a copy of the current position to avoid modifying the actual game state
-          const tempChess = resetChessEngine();
+          const tempChess = new Chess();
           
-          // If we have a move history, apply it to the temporary chess instance
-          if (sanMoveList.length > 0) {
-            for (const historyMove of sanMoveList) {
-              tempChess.move(historyMove);
-            }
-          } else {
-            // Otherwise, load the current FEN
+          // Load the current FEN into the temporary chess instance
+          try {
             tempChess.load(currentFen);
+          } catch (fenError) {
+            console.error('Error loading current FEN into temporary chess instance:', fenError);
+            // Try using move history instead
+            if (sanMoveList.length > 0) {
+              resetChessEngine(); // Start fresh
+              for (const historyMove of sanMoveList) {
+                try {
+                  tempChess.move(historyMove);
+                } catch (historyError) {
+                  console.error(`Error applying history move: ${historyMove}`, historyError);
+                  // Try with coordinate notation
+                  if (historyMove.match(/^[a-h][1-8][a-h][1-8][qrbnQRBN]?$/)) {
+                    const from = historyMove.substring(0, 2);
+                    const to = historyMove.substring(2, 4);
+                    const promotion = historyMove.length > 4 ? historyMove.substring(4, 5).toLowerCase() : undefined;
+                    
+                    tempChess.move({
+                      from,
+                      to,
+                      promotion
+                    });
+                  }
+                }
+              }
+            } else {
+              throw new Error('Failed to initialize temp chess engine');
+            }
           }
           
-          // Apply the move to the temporary chess instance
-          const moveResult = tempChess.move({
+          // Apply the move to the temporary chess instance with verbose output for detailed debugging
+          const moveOptions = {
             from: move.from,
             to: move.to,
             promotion: move.promotion
-          });
+          };
+          
+          console.log('Attempting move with options:', moveOptions);
+          console.log('Current position before move:', tempChess.fen());
+          
+          // Get all legal moves from current position
+          const legalMoves = tempChess.moves({ verbose: true });
+          console.log('Legal moves available:', legalMoves.length);
+          
+          // Check if the move is legal by directly validating with chess.js
+          const isLegalMove = legalMoves.some((m: { from: string; to: string; promotion?: string }) => 
+            m.from === move.from && 
+            m.to === move.to && 
+            (!move.promotion || m.promotion === move.promotion)
+          );
+          
+          if (!isLegalMove) {
+            console.error(`Move validation failed: ${move.from} to ${move.to} is not a legal move`);
+            console.log('Legal moves:', legalMoves.map((m: any) => `${m.from}-${m.to}${m.promotion ? `-${m.promotion}` : ''}`));
+            
+            // Log the current turn and board state for debugging
+            console.log(`Current turn: ${tempChess.turn() === 'w' ? 'white' : 'black'}`);
+            console.log(`Game state white turn: ${gameState.isWhiteTurn ? 'white' : 'black'}`);
+            
+            // Check if we're trying to move the wrong color piece
+            const pieceAtSource = tempChess.get(move.from as any);
+            if (pieceAtSource) {
+              console.log(`Piece at ${move.from}: ${pieceAtSource.color === 'w' ? 'white' : 'black'} ${pieceAtSource.type}`);
+              console.log(`Current player: ${currentPlayerColor}`);
+              
+              // Check if the piece color matches the current player's turn
+              const pieceColorStr = pieceAtSource.color === 'w' ? 'white' : 'black';
+              if (pieceColorStr !== currentPlayerColor) {
+                console.error(`Trying to move ${pieceColorStr} piece on ${currentPlayerColor}'s turn!`);
+                // This indicates a turn synchronization issue
+              }
+            } else {
+              console.error(`No piece at position ${move.from}`);
+            }
+            
+            // Remove this move from the queue and return
+            setMoveQueue(prev => prev.slice(1));
+            return;
+          }
+          
+          // Apply the move now that we've verified it's legal
+          const moveResult = tempChess.move(moveOptions);
           
           if (!moveResult) {
-            console.error(`Invalid move: ${move.from} to ${move.to}`);
+            console.error(`Invalid move: ${move.from} to ${move.to} despite passing legal move check`);
             // Remove this move from the queue and continue
             setMoveQueue(prev => prev.slice(1));
             return;
@@ -1441,17 +1598,43 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         } catch (moveError) {
           console.error(`Error processing move: ${moveError instanceof Error ? moveError.message : 'Unknown error'}`);
           
-          // Fall back to sending just the from/to coordinates
-          currentSocket.emit('move_made', {
-            gameId: gameRoomId,
-            from: move.from,
-            to: move.to,
-            player: currentPlayerColor,
-            promotion: move.promotion,
-            currentFen: currentFen // Include current FEN for validation
-          });
-          
-          console.log(`Fallback move emitted to server: ${move.from}-${move.to}`);
+          // Since we had an error but still want to try sending the move, use a more robust approach
+          // Attempt to directly validate the move with the current chess instance
+          try {
+            const legalMoves = chess.moves({ verbose: true });
+            const isLegalMove = legalMoves.some((m: { from: string; to: string; promotion?: string }) => 
+              m.from === move.from && 
+              m.to === move.to && 
+              (!move.promotion || m.promotion === move.promotion)
+            );
+            
+            if (isLegalMove) {
+              console.log('Move appears legal despite processing error, sending basic move data');
+              // Fall back to sending just the from/to coordinates
+              currentSocket.emit('move_made', {
+                gameId: gameRoomId,
+                from: move.from,
+                to: move.to,
+                player: currentPlayerColor,
+                promotion: move.promotion,
+                currentFen: currentFen // Include current FEN for validation
+              });
+              
+              console.log(`Fallback move emitted to server: ${move.from}-${move.to}`);
+            } else {
+              console.error('Move is not legal according to current board state, aborting');
+              // Request a board sync since our state might be corrupt
+              if (currentSocket && gameRoomId) {
+                currentSocket.emit('request_board_sync', {
+                  gameId: gameRoomId,
+                  reason: 'move_validation_failed',
+                  clientState: chess.fen()
+                });
+              }
+            }
+          } catch (validationError) {
+            console.error('Critical error validating move:', validationError);
+          }
         }
         
         // Remove this move from the queue
@@ -1608,6 +1791,14 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   useEffect(() => {
     if (!socket) return;
     
+    // Create a gameStateTracker for this specific handler
+    const gameStateTracker = {
+      isWhiteTurn: true,
+      activePlayer: 'white' as 'white' | 'black' | null,
+      lastUpdateTime: Date.now(),
+      hasStarted: false
+    };
+
     const handleBoardUpdated = (data: { 
       gameId: string, 
       moveHistory: string[], // Primary source of truth
@@ -1638,6 +1829,26 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         console.log(`Last move: ${data.lastMove}, isCapture: ${data.isCapture}, isCheck: ${data.isCheck}`);
       }
       
+      // Compare current move history with received move history
+      const moveHistoryChanged = JSON.stringify(sanMoveList) !== JSON.stringify(data.moveHistory);
+      if (!moveHistoryChanged && sanMoveList.length > 0) {
+        console.log('Move history unchanged, skipping full board synchronization');
+        
+        // Still update turn information if provided
+        if (data.whiteTurn !== undefined) {
+          setActivePlayer(data.whiteTurn ? 'white' : 'black');
+          
+          // Also update game state
+          setGameState(prev => ({
+            ...prev,
+            isWhiteTurn: data.whiteTurn === true, // Ensure boolean type
+            hasWhiteMoved: data.moveHistory.length > 0
+          }));
+        }
+        
+        return;
+      }
+      
       // Synchronize the board using move history as the primary source of truth
       const syncResult = synchronizeBoardFromMoveHistory(data.moveHistory);
       
@@ -1658,6 +1869,33 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
           
           if (serverPosition !== localPosition) {
             console.warn(`FEN position mismatch after synchronization. Server: ${serverPosition}, Local: ${localPosition}`);
+            console.warn('Attempting to resynchronize with server FEN');
+            
+            // Try to force the FEN position directly
+            const fenSyncSuccess = setChessPosition(data.fen, gameRoomId);
+            if (fenSyncSuccess) {
+              console.log('Successfully forced FEN synchronization');
+              
+              // Update the SAN move list to match server
+              setSanMoveList(data.moveHistory);
+              
+              // Notify parent about SAN move list changes if callback exists
+              if (onSanMoveListChange) {
+                onSanMoveListChange(data.moveHistory);
+              }
+            } else {
+              console.error('Failed to force FEN synchronization');
+              
+              // Request a full board sync as a last resort
+              if (socket && gameRoomId) {
+                console.log('Requesting emergency board sync after FEN synchronization failure');
+                socket.emit('request_board_sync', {
+                  gameId: gameRoomId,
+                  reason: 'fen_sync_failed',
+                  clientState: localFen
+                });
+              }
+            }
           } else {
             console.log(`FEN position matches after synchronization`);
             
@@ -1669,6 +1907,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
             
             if (serverHalfMove !== localHalfMove || serverFullMove !== localFullMove) {
               console.warn(`Move count mismatch. Server: ${serverHalfMove}/${serverFullMove}, Local: ${localHalfMove}/${localFullMove}`);
+              // This is not critical but we should log it
             }
           }
         }
@@ -1683,13 +1922,40 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
             isWhiteTurn: data.whiteTurn === true, // Ensure boolean type
             hasWhiteMoved: data.moveHistory.length > 0
           }));
+          
+          // Update game state tracker for continuous clock synchronization
+          gameStateTracker.isWhiteTurn = data.whiteTurn;
+          gameStateTracker.activePlayer = data.whiteTurn ? 'white' : 'black';
+          gameStateTracker.lastUpdateTime = Date.now();
         }
       } else {
         console.error(`Failed to synchronize board from move history, falling back to FEN if available`);
         
         // Fall back to FEN synchronization if move history synchronization failed
         if (data.fen) {
-          synchronizeBoardFromFen(data.fen, data.moveHistory);
+          const fenSyncSuccess = synchronizeBoardFromFen(data.fen, data.moveHistory);
+          
+          if (!fenSyncSuccess && socket && gameRoomId) {
+            console.error('Critical: Both move history and FEN synchronization failed');
+            
+            // As a last resort, request a clean board sync from the server
+            socket.emit('request_board_sync', {
+              gameId: gameRoomId,
+              reason: 'critical_sync_failure',
+              clientState: getChessEngine().fen()
+            });
+          }
+        } else {
+          console.error('Critical: No FEN available for fallback synchronization');
+          
+          // Request a clean board sync from the server
+          if (socket && gameRoomId) {
+            socket.emit('request_board_sync', {
+              gameId: gameRoomId,
+              reason: 'no_fallback_available',
+              clientState: getChessEngine().fen()
+            });
+          }
         }
       }
       
@@ -1705,6 +1971,10 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         
         // Stop the clocks
         setActivePlayer(null);
+        
+        // Update game state tracker
+        gameStateTracker.activePlayer = null;
+        gameStateTracker.isWhiteTurn = false;
       }
     };
     
