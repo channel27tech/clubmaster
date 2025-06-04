@@ -1,25 +1,21 @@
-'use client';
+"use client";
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import MatchmakingManager, { MatchmakingManagerHandle } from '@/app/components/MatchmakingManager';
 import WaitingScreen from '../components/WaitingScreen';
-import BetChallengeNotification from '../components/BetChallengeNotification';
 import { FaArrowLeft } from 'react-icons/fa';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import * as betService from '@/services/betService';
-import { BetType, BetChallenge } from '@/types/bet';
-import { useAuth } from '../../context/AuthContext';
-import { useSocket } from '@/context/SocketContext';
+import Head from "next/head";
 
 // Define the window interface to properly type the window extensions
-declare global {
-  interface Window {
-    startMatchmakingDebug?: () => void;
-    cancelMatchmakingDebug?: () => void;
-  }
+interface ExtendedWindow extends Window {
+  initTwilio?: () => void;
+  twilioInitialized?: boolean;
 }
+
+declare let window: ExtendedWindow;
 
 // Map time values to game modes for consistency
 const getGameModeFromTime = (timeInMinutes: number): string => {
@@ -39,15 +35,10 @@ const PlayPage: React.FC = () => {
   const [playAs, setPlayAs] = useState<string>('white');
   const [isMatchmaking, setIsMatchmaking] = useState<boolean>(false);
   const router = useRouter();
-  const { user } = useAuth();
-  const { socket, isConnected } = useSocket();
   
-  // Bet challenge states
-  const [betChallenge, setBetChallenge] = useState<BetChallenge | null>(null);
-  const [showBetChallenge, setShowBetChallenge] = useState<boolean>(false);
-  const [showBetInfoPopup, setShowBetInfoPopup] = useState<number | null>(null); // 0, 1, 2 for the three bet types
-  const [matchmakingError, setMatchmakingError] = useState<string | null>(null);
-  
+  // State for the notification info popup
+  const [notificationInfoPopup, setNotificationInfoPopup] = useState<null | 0 | 1 | 2>(null);
+
   // Function to get time value based on game mode
   const getTimeFromGameMode = (mode: string): number => {
     switch (mode.toLowerCase()) {
@@ -76,42 +67,6 @@ const PlayPage: React.FC = () => {
     console.log(`🔄 Time changed to ${time}, game mode set to: ${getGameModeFromTime(time)}`);
   };
   
-  // Set up bet challenge listeners
-  useEffect(() => {
-    // Listen for incoming bet challenges
-    const handleBetChallengeReceived = (challenge: BetChallenge) => {
-      console.log('Bet challenge received:', challenge);
-      
-      // Set the challenge data and show the notification
-      setBetChallenge({
-        id: challenge.betId,
-        challengerId: challenge.challengerId,
-        challengerName: challenge.challengerName,
-        challengerRating: challenge.challengerRating,
-        betType: challenge.betType,
-        stakeAmount: challenge.stakeAmount,
-        gameMode: challenge.gameMode,
-        timeControl: challenge.timeControl,
-        expiresAt: new Date(challenge.expiresAt),
-      });
-      setShowBetChallenge(true);
-    };
-    
-    // Register the listener
-    betService.onBetChallengeReceived(handleBetChallengeReceived);
-    
-    // Get any pending bet challenges when the component mounts and socket is connected
-    if (user && isConnected) {
-        console.log('Fetching pending bet challenges in PlayPage...');
-        betService.getPendingBetChallenges();
-    }
-
-    // Clean up listeners on unmount
-    return () => {
-      betService.offBetChallengeReceived();
-    };
-  }, [user, isConnected]);
-  
   const handleMatchmakingError = (error: string) => {
     console.error('Matchmaking error:', error);
     setIsMatchmaking(false);
@@ -125,22 +80,18 @@ const PlayPage: React.FC = () => {
   const handleStartMatchmaking = () => {
     console.log('Play Random clicked with:', { activeTab, selectedTime, playAs });
     
-    // Get the correct time based on game mode
     const timeForMode = getTimeFromGameMode(activeTab);
     console.log('Time for selected game mode:', timeForMode);
     
-    // Format time control string properly
     const timeControlStr = `${timeForMode}+0`;
     localStorage.setItem('timeControl', timeControlStr);
     console.log('📝 Stored time control in localStorage:', timeControlStr);
     
-    // Also store the game mode (Bullet, Blitz, Rapid)
     localStorage.setItem('gameMode', activeTab);
     console.log('📝 Stored game mode in localStorage:', activeTab);
     
     setIsMatchmaking(true);
     
-    // Pass the correct time control to MatchmakingManager
     if (matchmakingRef.current) {
       matchmakingRef.current.startMatchmaking(activeTab, String(timeForMode), playAs);
     } else {
@@ -150,7 +101,6 @@ const PlayPage: React.FC = () => {
 
   const handleCancelMatchmaking = () => {
     setIsMatchmaking(false);
-    // Method 1: Try to find and click the cancel button directly
     const cancelButton = document.getElementById('cancel-matchmaking-button');
     if (cancelButton) {
       console.log('Found cancel button, clicking it');
@@ -158,49 +108,9 @@ const PlayPage: React.FC = () => {
       return;
     }
     
-    // Method 2: Call the debug method directly
     if (typeof window !== 'undefined' && window.cancelMatchmakingDebug) {
       console.log('Using debug method');
       window.cancelMatchmakingDebug();
-    }
-  };
-  
-  // Handle accepting a bet challenge
-  const handleAcceptBetChallenge = () => {
-    if (betChallenge) {
-      console.log('Accepting bet challenge:', betChallenge.id);
-      betService.respondToBetChallenge(betChallenge.id, true);
-      setShowBetChallenge(false);
-      
-      // Show the matchmaking screen while the game is being set up
-      // The actual game starting will be handled by the matchFound event from MatchmakingManager
-      setIsMatchmaking(true);
-    }
-  };
-  
-  // Handle rejecting a bet challenge
-  const handleRejectBetChallenge = () => {
-    if (betChallenge) {
-      console.log('Rejecting bet challenge:', betChallenge.id);
-      betService.respondToBetChallenge(betChallenge.id, false);
-      setShowBetChallenge(false);
-    }
-  };
-  
-  // Handle showing bet information popup
-  const handleShowBetInfo = () => {
-    if (betChallenge) {
-      switch (betChallenge.betType) {
-        case BetType.PROFILE_CONTROL:
-          setShowBetInfoPopup(0);
-          break;
-        case BetType.PROFILE_LOCK:
-          setShowBetInfoPopup(1);
-          break;
-        case BetType.RATING_STAKE:
-          setShowBetInfoPopup(2);
-          break;
-      }
     }
   };
   
@@ -254,50 +164,85 @@ const PlayPage: React.FC = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-black">
-      {/* Bet Challenge Notification */}
-      {betChallenge && showBetChallenge && (
-        <BetChallengeNotification
-          isOpen={showBetChallenge}
-          onAccept={handleAcceptBetChallenge}
-          onReject={handleRejectBetChallenge}
-          onShowInfo={handleShowBetInfo}
-          challengerName={betChallenge.challengerName || 'Opponent'}
-          challengerRating={betChallenge.challengerRating || 1500}
-          challengerCountryCode="in" // Default country code
-          bettingType={
-            betChallenge.betType === BetType.PROFILE_CONTROL ? 'Temporary Profile Control' :
-            betChallenge.betType === BetType.PROFILE_LOCK ? 'Temporary Profile Lock' :
-            'Rating Stake'
-          }
-          ratingStake={betChallenge.stakeAmount}
-          timeRemaining={60} // Default 60 seconds or calculate based on expiresAt
-        />
-      )}
-      
-      {/* Bet Info Popup */}
-      {showBetInfoPopup !== null && (
-        <div className="fixed inset-0 z-[10000] flex items-center justify-center px-4 bg-black/45">
-          <div className="bg-[#4C5454] rounded-2xl w-full max-w-[340px] overflow-hidden shadow-2xl">
+      <Head>
+        <title>Play Chess</title>
+        <meta name="description" content="Play chess online" />
+        <link rel="icon" href="/favicon.ico" />
+      </Head>
+
+      {/* Notification Info Popup */}
+      {notificationInfoPopup !== null && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          background: 'rgba(0,0,0,0.45)',
+          zIndex: 10000,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}>
+          <div style={{
+            background: '#4C5454',
+            borderRadius: 14,
+            maxWidth: 340,
+            width: '90vw',
+            boxShadow: '0 4px 32px rgba(0,0,0,0.18)',
+            overflow: 'hidden',
+            position: 'relative',
+          }}>
             {/* Header */}
-            <div className="bg-[#4A7C59] px-5 py-4 text-white flex justify-between items-center">
-              <h3 className="text-lg font-semibold">{bettingPopups[showBetInfoPopup].title}</h3>
-              <button 
-                onClick={() => setShowBetInfoPopup(null)}
-                className="text-2xl leading-none hover:opacity-75 transition-opacity"
+            <div style={{
+              background: '#4A7C59',
+              color: '#fff',
+              padding: '16px 24px 12px 24px',
+              fontWeight: 700,
+              fontSize: 18,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: "flex-end",
+            }}>
+              <button
+                onClick={() => setNotificationInfoPopup(null)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#fff',
+                  fontSize: 22,
+                  cursor: 'pointer',
+                  marginLeft: 12,
+                  lineHeight: 1,
+                }}
+                aria-label="Close"
               >
-                &times;
+                ×
               </button>
             </div>
-            
             {/* Description */}
-            <div className="px-5 pt-4 text-white">
-              {bettingPopups[showBetInfoPopup].description}
-            </div>
-            
+            <span className="flex justify-center items-center mt-3 front-roboto text-semibold text-[16px] text-white">{bettingPopups[notificationInfoPopup].title}</span>
+            <div style={{
+              color: '#ffffff',
+              fontWeight: "regular",
+              fontSize: 16,
+              fontFamily:"roboto",
+              padding: '18px 20px 0 20px',
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+            }}>{bettingPopups[notificationInfoPopup].description}</div>
             {/* Points */}
-            <ul className="px-8 pt-3 pb-6 text-white text-sm list-disc">
-              {bettingPopups[showBetInfoPopup].points.map((point, idx) => (
-                <li key={idx} className="mb-1.5">{point}</li>
+            <ul style={{
+              color: '#ffffff',
+              fontWeight: 400,
+              fontSize: 14,
+              padding: '12px 28px 24px 32px',
+              margin: 0,
+              listStyle: 'disc',
+            }}>
+              {bettingPopups[notificationInfoPopup].points.map((pt, i) => (
+                <li key={i} style={{ marginBottom: 6 }}>{pt}</li>
               ))}
             </ul>
           </div>
@@ -441,11 +386,11 @@ const PlayPage: React.FC = () => {
         </div>
       )}
       
-      {/* Hidden MatchmakingManager component */}
+      {/* Matchmaking Manager (hidden component) */}
       <MatchmakingManager
         ref={matchmakingRef}
-        onError={handleMatchmakingError}
         onGameFound={handleGameFound}
+        onError={handleMatchmakingError}
       />
     </div>
   );

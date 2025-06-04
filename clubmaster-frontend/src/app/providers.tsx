@@ -8,6 +8,7 @@ import { AuthProvider } from '../context/AuthContext';
 import { BetProvider } from '../context/BetContext';
 import { ActivityProvider } from '../context/ActivityContext';
 import RouteGuard from '../components/RouteGuard';
+import GlobalNotifications from './components/GlobalNotifications';
 
 interface ProvidersProps {
   children: React.ReactNode;
@@ -85,6 +86,7 @@ export const Providers: React.FC<ProvidersProps> = ({ children }) => {
               <SoundProvider userId={userId}>
                 <BetProvider>
                   {children}
+                  <GlobalNotifications />
                 </BetProvider>
               </SoundProvider>
             </ActivityProvider>

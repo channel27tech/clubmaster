@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from "@/context/AuthContext";
 import { fetchUsers } from "@/services/userService";
 import { useToast } from "@/hooks/useToast";
+import { useActivity } from "@/context/ActivityContext";
+import { UserActivityStatus } from "@/types/activity";
 
 // This page is used to select an opponent for a bet
 export default function BetOpponentsPage() {
@@ -12,60 +14,57 @@ export default function BetOpponentsPage() {
   const { user } = useAuth();
   const [players, setPlayers] = useState<PlayerType[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const toast = useToast();
+  const { error: showErrorToast } = useToast();
   const isMounted = useRef(true);
   const isLoadingRef = useRef(true);
   const playersRef = useRef<PlayerType[]>([]);
   
-  // Define getUsers as a useCallback to avoid recreating it on every render
+  const { getUserActivityById, getTimeElapsed } = useActivity();
+  
+  // Fetch initial list of users (potential opponents)
   const getUsers = useCallback(async () => {
-    // Skip if already loading or no user is logged in
-    if (!user || !isLoadingRef.current) return;
-    
+    setIsLoading(true);
     try {
-      isLoadingRef.current = true;
-      setIsLoading(true);
-      
       const users = await fetchUsers(user);
-      
-      // Only update state if component is still mounted
-      if (isMounted.current) {
-        // Map AppUser to PlayerType
-        const playersList: PlayerType[] = users.map(user => ({
+
+      // Use activity data to enrich players list with real-time status and socketId
+      const playersList: PlayerType[] = users.map(user => {
+        const activity = getUserActivityById(user.id);
+        const isTrulyActive = activity ? activity.status === UserActivityStatus.ONLINE || activity.status === UserActivityStatus.IN_GAME : false;
+
+        return {
           id: user.id,
           name: user.displayName,
-          // active and lastActive will now be derived from ActivityContext in PlayerListItem
-          // We initialize them here to satisfy the PlayerType interface
-          active: false,
-          lastActive: undefined,
+          active: isTrulyActive, // Use real-time activity status
+          lastActive: activity?.lastActive ? getTimeElapsed(new Date(activity.lastActive)) : user.lastActive, // Use real-time last active if available, fallback to fetched
           rating: user.rating,
-          photoURL: user.photoURL
-        }));
-        
-        setPlayers(playersList);
-        playersRef.current = playersList;
-      }
+          photoURL: user.photoURL,
+          socketId: activity?.socketId, // Add socketId from activity data
+          firebaseUid: user.firebaseUid, // Add firebaseUid if it's in the user object
+        };
+      });
+
+      setPlayers(playersList);
+      playersRef.current = playersList;
+      console.log('Fetched and processed players:', playersList);
     } catch (error) {
-      console.error("Error fetching users:", error);
-      // Show error toast if available
-      if (toast?.error && isMounted.current) {
-        toast.error("Failed to load users. Please try again.");
-      }
+      console.error("Failed to fetch users:", error);
+      showErrorToast("Failed to load players");
+      setPlayers([]);
+      playersRef.current = [];
     } finally {
-      if (isMounted.current) {
-        setIsLoading(false);
-        isLoadingRef.current = false;
-      }
+      setIsLoading(false);
+      isLoadingRef.current = false;
     }
-  }, [user]); // Only depend on user
+  }, [user, getUserActivityById, getTimeElapsed, showErrorToast]); // Keep dependencies for useCallback correctness
   
-  // Fetch users on component mount
+  // Fetch users on component mount or when user changes
   useEffect(() => {
     // Set isMounted to true when component mounts
     isMounted.current = true;
     
     if (user) {
-      getUsers();
+      getUsers(); // Call the memoized getUsers function
     } else {
       setIsLoading(false);
       isLoadingRef.current = false;
@@ -75,21 +74,20 @@ export default function BetOpponentsPage() {
     return () => {
       isMounted.current = false;
     };
-  }, [user, getUsers]); // getUsers is now memoized with useCallback
+  }, [user]); // Depend only on user
   
-  // Handle player selection - navigate to player profile
-  const handlePlayerSelect = (player: PlayerType) => {
-    if (player.id) {
-      router.push(`/player/${encodeURIComponent(player.id)}`);
-    }
-  };
+  // Handle player selection
+  const handleSelectOpponent = useCallback((player: PlayerType) => {
+    // Navigate to the match setup screen, passing opponent details including socketId
+    router.push(`/bet/match_setup_screen?opponent=${player.name}&opponentId=${player.id}${player.socketId ? `&socketId=${player.socketId}` : ''}`);
+  }, [router]);
 
   return (
     <PlayerSelectionList
       headerTitle="Select Opponent"
       showActionButton={false}
       buttonText="Select"
-      onPlayerAction={handlePlayerSelect}
+      onPlayerAction={handleSelectOpponent}
       mode="opponents"
       cardClickable={true}
       players={players}

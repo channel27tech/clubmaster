@@ -187,291 +187,398 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
   // Initialize socket connection
   const connect = () => {
     try {
+      console.log('SocketContext: connect function called.');
+      // Set connecting status initially
       setConnectionStatus('connecting');
-      const socketInstance = socketService.getSocket({
-        reconnectionAttempts: 10,
-        reconnectionDelay: 1000,
-        reconnectionDelayMax: 5000,
-        randomizationFactor: 0.5,
-        timeout: 20000
-      });
-      
-      setSocket(socketInstance);
-      
-      // Update connection states based on socket events
-      socketInstance.on('connect', () => {
-        setIsConnected(true);
-        setIsReconnecting(false);
-        setConnectionStatus('connected');
-        stopDisconnectionTimer();
-        resetReconnectionAttempts();
-      });
-      
-      socketInstance.on('disconnect', (reason) => {
-        setIsConnected(false);
-        setConnectionStatus('disconnected');
-        startDisconnectionTimer();
-        console.log(`Socket disconnected due to: ${reason}`);
-      });
-      
-      socketInstance.on('reconnect_attempt', (attemptNumber) => {
-        setIsReconnecting(true);
-        setConnectionStatus('connecting');
-        setReconnectionAttempts(attemptNumber);
-        console.log(`Reconnection attempt #${attemptNumber}`);
-      });
-      
-      socketInstance.on('reconnect', (attemptNumber) => {
-        setIsConnected(true);
-        setIsReconnecting(false);
-        setConnectionStatus('connected');
-        stopDisconnectionTimer();
-        resetReconnectionAttempts();
-        console.log(`Reconnected after ${attemptNumber} attempts`);
-      });
-      
-      socketInstance.on('reconnect_failed', () => {
-        setIsReconnecting(false);
-        setConnectionStatus('disconnected');
-        console.error('Reconnection failed after all attempts');
-      });
-      
-      socketInstance.on('reconnect_error', (error) => {
-        console.error('Reconnection error:', error);
-      });
+      // Set isConnected to false initially, will be true after auth
+      setIsConnected(false);
 
-      // Generic game end event
-      socketInstance.on('game_end', (data) => {
-        console.log('RECEIVED GENERIC game_end EVENT:', data);
+      // Get Firebase UID and ID token from AuthContext
+      import('firebase/auth').then(({ getAuth }) => {
+        const auth = getAuth();
+        const currentUser = auth.currentUser;
         
-        // Enhance with additional handling for resignation events
-        if (data.reason === 'resignation') {
-          // Check if we have explicit winner/loser IDs
-          const mySocketId = socketInstance.id;
-          const winnerSocketId = data.winnerSocketId || data.winnerId || data.winner;
-          const loserSocketId = data.loserSocketId || data.loserId || data.loser;
+        console.log('SocketContext: Firebase currentUser:', currentUser ? 'Exists' : 'Does not exist');
+
+        // Check if user is logged in and get ID token
+        if (!currentUser) {
+          console.warn('SocketContext: No authenticated user found. Socket will connect unauthenticated.');
+          // Proceed without auth, protected events will be blocked by backend guards
+          const socketInstance = socketService.getSocket({
+            reconnectionAttempts: 10,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            randomizationFactor: 0.5,
+            timeout: 20000,
+          });
+          setSocket(socketInstance);
+           // Update connection status based on the basic socket connection
+           socketInstance.on('connect', () => setConnectionStatus('connected'));
+           socketInstance.on('disconnect', () => setConnectionStatus('disconnected'));
+           socketInstance.on('reconnect_attempt', () => setConnectionStatus('connecting'));
+           socketInstance.on('reconnect', () => setConnectionStatus('connected'));
+           socketInstance.on('reconnect_failed', () => setConnectionStatus('disconnected'));
+           socketInstance.on('reconnect_error', () => setConnectionStatus('disconnected'));
+          return;
+        }
+
+        currentUser.getIdToken().then((idToken) => {
+          console.log('SocketContext: Obtained Firebase ID Token.');
           
-          console.log('SOCKET ID COMPARISON FOR RESIGNATION game_end:', {
-            mySocketId,
-            winnerSocketId,
-            loserSocketId,
-            explicitResult: data.result // Check for explicit result field
+          // Get the socket instance (don't pass token here for handshake)
+          const socketInstance = socketService.getSocket({
+            reconnectionAttempts: 10,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            randomizationFactor: 0.5,
+            timeout: 20000,
           });
           
-          // If we have an explicit result from the server, use it
-          if (data.result === 'win' || data.result === 'loss') {
-            console.log('Using server-provided explicit result:', data.result);
-            const winner = data.result === 'win' ? 'you' : 'opponent';
-            processGameEndEvent(data, 'resignation', winner);
-            return;
-          }
+          setSocket(socketInstance);
+
+          // Update connection states based on the basic socket connection
+          socketInstance.on('connect', async () => {
+            console.log('SocketContext: Basic socket connected. Attempting authentication...');
+            setConnectionStatus('connected'); // Socket is physically connected
+            try {
+              const authResult = await socketService.authenticateSocket(idToken);
+              if (authResult.success) {
+                setIsConnected(true); // Authenticated successfully
+                console.log(`SocketContext: Authentication successful. Socket ID: ${socketInstance.id}`, authResult);
+                
+                // Log socket ID for reference in debugging
+                console.log(`SocketContext: Connected with Socket ID: ${socketInstance.id}`);
+              } else {
+                setIsConnected(false); // Not authenticated
+                console.warn('SocketContext: Authentication failed.', authResult.message);
+              }
+            } catch (error) {
+              console.error('SocketContext: Error during authentication event:', error);
+              setIsConnected(false); // Authentication failed
+            }
+          });
           
-          // If we have valid socket IDs, use them to determine the winner
-          if (winnerSocketId && loserSocketId) {
-            const winner = mySocketId === winnerSocketId ? 'you' : 
-                          mySocketId === loserSocketId ? 'opponent' : 'draw';
-            processGameEndEvent(data, 'resignation', winner);
-            return;
-          }
-        }
-        
-        // Add specific handling for checkmate
-        if (data.reason === 'checkmate') {
-          console.log('RECEIVED CHECKMATE event:', data);
+          socketInstance.on('disconnect', (reason) => {
+            console.log(`SocketContext: Socket disconnected due to: ${reason}`);
+            setIsConnected(false); // Not connected/authenticated
+            setConnectionStatus('disconnected');
+            startDisconnectionTimer();
+          });
           
-          // Determine winner based on winnerColor/loserColor for player color matching
-          if (data.winnerColor && data.loserColor) {
-            // We'll need to get the player's color from the context - might require passing playerColor to the socket context
-            // For now, we'll continue using socketId comparison as fallback
-            console.log('CHECKMATE has winnerColor/loserColor data:', {
-              winnerColor: data.winnerColor,
-              loserColor: data.loserColor
+          socketInstance.on('reconnect_attempt', (attemptNumber) => {
+            console.log(`SocketContext: Reconnection attempt #${attemptNumber} - Socket ID: ${socketInstance.id || 'none'}`);
+            setIsReconnecting(true);
+            setConnectionStatus('connecting');
+            setIsConnected(false); // Not authenticated during reconnect
+          });
+          
+          socketInstance.on('reconnect', async (attemptNumber) => {
+            console.log(`SocketContext: Reconnected after ${attemptNumber} attempts. Attempting authentication...`);
+            setIsReconnecting(false);
+            setConnectionStatus('connected');
+            stopDisconnectionTimer();
+            resetReconnectionAttempts();
+            try {
+              const authResult = await socketService.authenticateSocket(idToken);
+              if (authResult.success) {
+                setIsConnected(true); // Authenticated successfully
+                console.log('SocketContext: Authentication successful after reconnect.', authResult);
+              } else {
+                setIsConnected(false); // Not authenticated
+                console.warn('SocketContext: Authentication failed after reconnect.', authResult.message);
+              }
+            } catch (error) {
+              console.error('SocketContext: Error during authentication event after reconnect:', error);
+              setIsConnected(false); // Authentication failed
+            }
+          });
+          
+          socketInstance.on('reconnect_failed', () => {
+            console.error('SocketContext: Reconnection failed after all attempts');
+            setIsReconnecting(false);
+            setConnectionStatus('disconnected');
+            setIsConnected(false); // Not connected/authenticated
+          });
+          
+          socketInstance.on('reconnect_error', (error) => {
+            console.error('SocketContext: Reconnection error:', error);
+            // Keep connectionStatus as is, isConnected becomes false
+            setIsConnected(false); // Not authenticated
+          });
+
+          // Generic game end event
+          socketInstance.on('game_end', (data) => {
+            console.log('RECEIVED GENERIC game_end EVENT:', data);
+            
+            // Enhance with additional handling for resignation events
+            if (data.reason === 'resignation') {
+              // Check if we have explicit winner/loser IDs
+              const mySocketId = socketInstance.id;
+              const winnerSocketId = data.winnerSocketId || data.winnerId || data.winner;
+              const loserSocketId = data.loserSocketId || data.loserId || data.loser;
+              
+              console.log('SOCKET ID COMPARISON FOR RESIGNATION game_end:', {
+                mySocketId,
+                winnerSocketId,
+                loserSocketId,
+                explicitResult: data.result // Check for explicit result field
+              });
+              
+              // If we have an explicit result from the server, use it
+              if (data.result === 'win' || data.result === 'loss') {
+                console.log('Using server-provided explicit result:', data.result);
+                const winner = data.result === 'win' ? 'you' : 'opponent';
+                processGameEndEvent(data, 'resignation', winner);
+                return;
+              }
+              
+              // If we have valid socket IDs, use them to determine the winner
+              if (winnerSocketId && loserSocketId) {
+                const winner = mySocketId === winnerSocketId ? 'you' : 
+                              mySocketId === loserSocketId ? 'opponent' : 'draw';
+                processGameEndEvent(data, 'resignation', winner);
+                return;
+              }
+            }
+            
+            // Add specific handling for checkmate
+            if (data.reason === 'checkmate') {
+              console.log('RECEIVED CHECKMATE event:', data);
+              
+              // Determine winner based on winnerColor/loserColor for player color matching
+              if (data.winnerColor && data.loserColor) {
+                // We'll need to get the player's color from the context - might require passing playerColor to the socket context
+                // For now, we'll continue using socketId comparison as fallback
+                console.log('CHECKMATE has winnerColor/loserColor data:', {
+                  winnerColor: data.winnerColor,
+                  loserColor: data.loserColor
+                });
+              }
+              
+              // Fallback to socket ID comparison if color approach isn't explicitly used by the component
+              const mySocketId = socketInstance.id;
+              const winnerSocketId = data.winnerSocketId || data.winnerId || data.winner;
+              const loserSocketId = data.loserSocketId || data.loserId || data.loser;
+              
+              console.log('SOCKET ID COMPARISON FOR CHECKMATE game_end:', {
+                mySocketId,
+                winnerSocketId,
+                loserSocketId
+              });
+              
+              // Determine winner based on socket IDs
+              if (winnerSocketId && loserSocketId) {
+                const winner = mySocketId === winnerSocketId ? 'you' : 
+                              mySocketId === loserSocketId ? 'opponent' : 'draw';
+                processGameEndEvent(data, 'checkmate', winner);
+                return;
+              }
+            }
+            
+            // Fall back to generic handling for other cases
+            const winner = data.winner === 'player' ? 'you' : 
+                          data.winner === 'opponent' ? 'opponent' : 'draw';
+            const reason = data.reason || 'checkmate';
+            processGameEndEvent(data, reason as GameEndReason, winner);
+          });
+          
+          // Specific game end events
+          socketInstance.on('checkmate', (data) => {
+            processGameEndEvent(data, 'checkmate', data.winner === 'player' ? 'you' : 'opponent');
+          });
+          
+          socketInstance.on('timeout', (data) => {
+            processGameEndEvent(data, 'timeout', data.winner === 'player' ? 'you' : 'opponent');
+          });
+          
+          socketInstance.on('resignation', (data) => {
+            processGameEndEvent(data, 'resignation', data.winner === 'player' ? 'you' : 'opponent');
+          });
+          
+          // Add gameResigned event handler
+          socketInstance.on('gameResigned', (data) => {
+            console.log('========= RECEIVED gameResigned EVENT =========');
+            console.log('Raw gameResigned payload:', JSON.stringify(data));
+            
+            // Determine winner/loser status using all available information
+            const mySocketId = socketInstance.id;
+            
+            // Check for explicit winner/loser IDs with multiple fallbacks
+            const winnerSocketId = data.winner || data.winnerSocketId || data.winnerId;
+            const loserSocketId = data.loser || data.loserSocketId || data.loserId;
+            
+            // Check for direct match with my socket ID
+            const isWinner = mySocketId === winnerSocketId;
+            const isLoser = mySocketId === loserSocketId;
+            
+            // Check explicit flags
+            const isResigning = data.resigning === true;
+            const explicitResult = data.result; // Check if server sent an explicit result
+            
+            console.log('Socket ID comparison for gameResigned:', {
+              mySocketId,
+              winnerSocketId,
+              loserSocketId,
+              isWinner,
+              isLoser,
+              isResigning,
+              explicitResult
             });
-          }
-          
-          // Fallback to socket ID comparison if color approach isn't explicitly used by the component
-          const mySocketId = socketInstance.id;
-          const winnerSocketId = data.winnerSocketId || data.winnerId || data.winner;
-          const loserSocketId = data.loserSocketId || data.loserId || data.loser;
-          
-          console.log('SOCKET ID COMPARISON FOR CHECKMATE game_end:', {
-            mySocketId,
-            winnerSocketId,
-            loserSocketId
+            
+            // Default result - will be overridden if we have better information
+            let finalResult: 'you' | 'opponent' | 'draw' = 'opponent'; // For resignations, default to loss
+            
+            // If we have an explicit result from the server, use it
+            if (explicitResult === 'win' || explicitResult === 'loss' || explicitResult === 'draw') {
+              console.log('Using server-provided explicit result:', explicitResult);
+              finalResult = explicitResult === 'win' ? 'you' : 
+                           explicitResult === 'loss' ? 'opponent' : 'draw';
+            }
+            // If socket IDs match, use that match
+            else if (isWinner || isLoser) {
+              console.log('Using socket ID match for winner/loser determination');
+              finalResult = isWinner ? 'you' : 'opponent';
+            }
+            // If this client is the resigning player, they always lose
+            else if (isResigning) {
+              console.log('This client is the resigning player - marking as loss');
+              finalResult = 'opponent'; // "opponent" means the opponent won, so the current player lost
+            }
+            // Last resort fallback with warning when we can't determine winner/loser
+            else {
+              console.warn('WARNING: Cannot reliably determine winner/loser from socket IDs', {
+                mySocketId,
+                winnerSocketId,
+                loserSocketId,
+                rawData: JSON.stringify(data)
+              });
+              
+              // For resignations, NEVER default to draw
+              // Instead, check if there's any indication this is the resigning player
+              if (data.isResigningPlayer || data.resigner === mySocketId) {
+                console.log('Detected resigning player from additional fields');
+                finalResult = 'opponent'; // Current player loses
+              } else {
+                // If we're still not sure, log an error but maintain the default "opponent" (loss)
+                console.error('CRITICAL ERROR: Cannot determine winner/loser reliably - defaulting to loss');
+              }
+            }
+            
+            // Process the game end event with our determined result
+            processGameEndEvent(data, 'resignation', finalResult);
+            
+            // Always force both players to show game result screen by dispatching an event
+            // This is crucial - even if the server event is correctly received but not processed,
+            // this will ensure the UI shows the result
+            if (typeof window !== 'undefined') {
+              console.log('FORCE DISPATCHING game_ended event for resignation');
+              try {
+                // Important: Never default to 'draw' for resignations
+                // Map our internal result to the game_ended event format
+                let resultType: GameResultType = 
+                  finalResult === 'you' ? 'win' : 
+                  finalResult === 'opponent' ? 'loss' : 'draw';
+                
+                // Log what we're dispatching
+                console.log(`Dispatching game_ended event with result: ${resultType}`);
+                
+                window.dispatchEvent(new CustomEvent('game_ended', { 
+                  detail: { 
+                    reason: 'resignation',
+                    result: resultType,
+                    timestamp: Date.now(), 
+                    source: 'socketContext',
+                    winnerSocketId, 
+                    loserSocketId
+                  } 
+                }));
+                
+                // Set a backup timer to ensure the result screen appears
+                setTimeout(() => {
+                  console.log('BACKUP: Dispatching secondary game_ended event after timeout');
+                  window.dispatchEvent(new CustomEvent('game_ended', { 
+                    detail: { 
+                      reason: 'resignation',
+                      result: resultType,
+                      timestamp: Date.now(),
+                      source: 'socketContext-backup',
+                      winnerSocketId, 
+                      loserSocketId
+                    } 
+                  }));
+                }, 1000);
+              } catch (error) {
+                console.error('Error dispatching game_ended event:', error);
+              }
+            }
           });
           
-          // Determine winner based on socket IDs
-          if (winnerSocketId && loserSocketId) {
-            const winner = mySocketId === winnerSocketId ? 'you' : 
-                          mySocketId === loserSocketId ? 'opponent' : 'draw';
-            processGameEndEvent(data, 'checkmate', winner);
-            return;
-          }
-        }
-        
-        // Fall back to generic handling for other cases
-        const winner = data.winner === 'player' ? 'you' : 
-                      data.winner === 'opponent' ? 'opponent' : 'draw';
-        const reason = data.reason || 'checkmate';
-        processGameEndEvent(data, reason as GameEndReason, winner);
-      });
-      
-      // Specific game end events
-      socketInstance.on('checkmate', (data) => {
-        processGameEndEvent(data, 'checkmate', data.winner === 'player' ? 'you' : 'opponent');
-      });
-      
-      socketInstance.on('timeout', (data) => {
-        processGameEndEvent(data, 'timeout', data.winner === 'player' ? 'you' : 'opponent');
-      });
-      
-      socketInstance.on('resignation', (data) => {
-        processGameEndEvent(data, 'resignation', data.winner === 'player' ? 'you' : 'opponent');
-      });
-      
-      // Add gameResigned event handler
-      socketInstance.on('gameResigned', (data) => {
-        console.log('========= RECEIVED gameResigned EVENT =========');
-        console.log('Raw gameResigned payload:', JSON.stringify(data));
-        
-        // Determine winner/loser status using all available information
-        const mySocketId = socketInstance.id;
-        
-        // Check for explicit winner/loser IDs with multiple fallbacks
-        const winnerSocketId = data.winner || data.winnerSocketId || data.winnerId;
-        const loserSocketId = data.loser || data.loserSocketId || data.loserId;
-        
-        // Check for direct match with my socket ID
-        const isWinner = mySocketId === winnerSocketId;
-        const isLoser = mySocketId === loserSocketId;
-        
-        // Check explicit flags
-        const isResigning = data.resigning === true;
-        const explicitResult = data.result; // Check if server sent an explicit result
-        
-        console.log('Socket ID comparison for gameResigned:', {
-          mySocketId,
-          winnerSocketId,
-          loserSocketId,
-          isWinner,
-          isLoser,
-          isResigning,
-          explicitResult
+          socketInstance.on('stalemate', (data) => {
+            processGameEndEvent(data, 'stalemate', 'draw');
+          });
+          
+          socketInstance.on('insufficient_material', (data) => {
+            processGameEndEvent(data, 'insufficient_material', 'draw');
+          });
+          
+          socketInstance.on('threefold_repetition', (data) => {
+            processGameEndEvent(data, 'threefold_repetition', 'draw');
+          });
+          
+          socketInstance.on('fifty_move_rule', (data) => {
+            processGameEndEvent(data, 'fifty_move_rule', 'draw');
+          });
+          
+          // Add explicit handler for game_aborted
+          socketInstance.on('game_aborted', (data) => {
+            console.log('⚠️ game_aborted event received directly in socket init:', data);
+            // The detailed handling is done in another useEffect, this is just for debugging
+          });
+          
+        }).catch((error) => {
+          console.error('SocketContext: Error getting Firebase ID token:', error);
+          // Proceed with unauthenticated socket
+           const socketInstance = socketService.getSocket({
+            reconnectionAttempts: 10,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            randomizationFactor: 0.5,
+            timeout: 20000,
+          });
+          setSocket(socketInstance);
+           // Update connection status based on the basic socket connection
+           socketInstance.on('connect', () => setConnectionStatus('connected'));
+           socketInstance.on('disconnect', () => setConnectionStatus('disconnected'));
+           socketInstance.on('reconnect_attempt', () => setConnectionStatus('connecting'));
+           socketInstance.on('reconnect', () => setConnectionStatus('connected'));
+           socketInstance.on('reconnect_failed', () => setConnectionStatus('disconnected'));
+           socketInstance.on('reconnect_error', () => setConnectionStatus('disconnected'));
         });
         
-        // Default result - will be overridden if we have better information
-        let finalResult: 'you' | 'opponent' | 'draw' = 'opponent'; // For resignations, default to loss
-        
-        // If we have an explicit result from the server, use it
-        if (explicitResult === 'win' || explicitResult === 'loss' || explicitResult === 'draw') {
-          console.log('Using server-provided explicit result:', explicitResult);
-          finalResult = explicitResult === 'win' ? 'you' : 
-                       explicitResult === 'loss' ? 'opponent' : 'draw';
-        }
-        // If socket IDs match, use that match
-        else if (isWinner || isLoser) {
-          console.log('Using socket ID match for winner/loser determination');
-          finalResult = isWinner ? 'you' : 'opponent';
-        }
-        // If this client is the resigning player, they always lose
-        else if (isResigning) {
-          console.log('This client is the resigning player - marking as loss');
-          finalResult = 'opponent'; // "opponent" means the opponent won, so the current player lost
-        }
-        // Last resort fallback with warning when we can't determine winner/loser
-        else {
-          console.warn('WARNING: Cannot reliably determine winner/loser from socket IDs', {
-            mySocketId,
-            winnerSocketId,
-            loserSocketId,
-            rawData: JSON.stringify(data)
-          });
-          
-          // For resignations, NEVER default to draw
-          // Instead, check if there's any indication this is the resigning player
-          if (data.isResigningPlayer || data.resigner === mySocketId) {
-            console.log('Detected resigning player from additional fields');
-            finalResult = 'opponent'; // Current player loses
-          } else {
-            // If we're still not sure, log an error but maintain the default "opponent" (loss)
-            console.error('CRITICAL ERROR: Cannot determine winner/loser reliably - defaulting to loss');
-          }
-        }
-        
-        // Process the game end event with our determined result
-        processGameEndEvent(data, 'resignation', finalResult);
-        
-        // Always force both players to show game result screen by dispatching an event
-        // This is crucial - even if the server event is correctly received but not processed,
-        // this will ensure the UI shows the result
-        if (typeof window !== 'undefined') {
-          console.log('FORCE DISPATCHING game_ended event for resignation');
-          try {
-            // Important: Never default to 'draw' for resignations
-            // Map our internal result to the game_ended event format
-            let resultType: GameResultType = 
-              finalResult === 'you' ? 'win' : 
-              finalResult === 'opponent' ? 'loss' : 'draw';
-            
-            // Log what we're dispatching
-            console.log(`Dispatching game_ended event with result: ${resultType}`);
-            
-            window.dispatchEvent(new CustomEvent('game_ended', { 
-              detail: { 
-                reason: 'resignation',
-                result: resultType,
-                timestamp: Date.now(), 
-                source: 'socketContext',
-                winnerSocketId, 
-                loserSocketId
-              } 
-            }));
-            
-            // Set a backup timer to ensure the result screen appears
-            setTimeout(() => {
-              console.log('BACKUP: Dispatching secondary game_ended event after timeout');
-              window.dispatchEvent(new CustomEvent('game_ended', { 
-                detail: { 
-                  reason: 'resignation',
-                  result: resultType,
-                  timestamp: Date.now(),
-                  source: 'socketContext-backup',
-                  winnerSocketId, 
-                  loserSocketId
-                } 
-              }));
-            }, 1000);
-          } catch (error) {
-            console.error('Error dispatching game_ended event:', error);
-          }
-        }
-      });
-      
-      socketInstance.on('stalemate', (data) => {
-        processGameEndEvent(data, 'stalemate', 'draw');
-      });
-      
-      socketInstance.on('insufficient_material', (data) => {
-        processGameEndEvent(data, 'insufficient_material', 'draw');
-      });
-      
-      socketInstance.on('threefold_repetition', (data) => {
-        processGameEndEvent(data, 'threefold_repetition', 'draw');
-      });
-      
-      socketInstance.on('fifty_move_rule', (data) => {
-        processGameEndEvent(data, 'fifty_move_rule', 'draw');
-      });
-      
-      // Add explicit handler for game_aborted
-      socketInstance.on('game_aborted', (data) => {
-        console.log('⚠️ game_aborted event received directly in socket init:', data);
-        // The detailed handling is done in another useEffect, this is just for debugging
+      }).catch((error) => {
+        console.error('SocketContext: Error importing Firebase Auth:', error);
+        // Proceed with unauthenticated socket
+         const socketInstance = socketService.getSocket({
+          reconnectionAttempts: 10,
+          reconnectionDelay: 1000,
+          reconnectionDelayMax: 5000,
+          randomizationFactor: 0.5,
+          timeout: 20000,
+        });
+        setSocket(socketInstance);
+         // Update connection status based on the basic socket connection
+         socketInstance.on('connect', () => setConnectionStatus('connected'));
+         socketInstance.on('disconnect', () => setConnectionStatus('disconnected'));
+         socketInstance.on('reconnect_attempt', () => setConnectionStatus('connecting'));
+         socketInstance.on('reconnect', () => setConnectionStatus('connected'));
+         socketInstance.on('reconnect_failed', () => setConnectionStatus('disconnected'));
+         socketInstance.on('reconnect_error', () => setConnectionStatus('disconnected'));
       });
       
     } catch (error) {
       console.error('Error connecting to socket server:', error);
       setConnectionStatus('disconnected');
+      setIsConnected(false); // Not connected/authenticated
     }
   };
 

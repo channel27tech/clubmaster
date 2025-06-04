@@ -36,14 +36,16 @@ const BetChallengeNotification: React.FC<BetChallengeNotificationProps> = ({
   // Optional: Play notification sound when opened
   useEffect(() => {
     if (isOpen) {
+      console.log('[BetChallengeNotification] Notification opened, playing sound');
       const audio = new Audio('/sounds/notification.mp3');
-      audio.play().catch(e => console.log('Error playing notification sound:', e));
+      audio.play().catch(e => console.log('[BetChallengeNotification] Error playing notification sound:', e));
     }
   }, [isOpen]);
 
   // Focus trap inside notification when open
   useEffect(() => {
     if (isOpen && notificationRef.current) {
+      console.log('[BetChallengeNotification] Setting focus in notification dialog');
       const focusableElements = notificationRef.current.querySelectorAll(
         'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
       );
@@ -61,7 +63,54 @@ const BetChallengeNotification: React.FC<BetChallengeNotificationProps> = ({
     }
   }, [isOpen, challengerCountryCode]);
 
+  // Log when notification should open or close
+  useEffect(() => {
+    console.log(`[BetChallengeNotification] Notification visibility changed to: ${isOpen ? 'visible' : 'hidden'}`);
+    console.log(`[BetChallengeNotification] Challenger: ${challengerName}, Bet type: ${bettingType}`);
+    // Add more detailed debugging
+    if (isOpen) {
+      console.log(`[BetChallengeNotification] ========== DETAILED DEBUG ==========`);
+      console.log(`[BetChallengeNotification] Challenger name received: "${challengerName}"`);
+      console.log(`[BetChallengeNotification] Challenger name length: ${challengerName ? challengerName.length : 0}`);
+      console.log(`[BetChallengeNotification] Challenger name type: ${typeof challengerName}`);
+      console.log(`[BetChallengeNotification] Is name undefined? ${challengerName === undefined}`);
+      console.log(`[BetChallengeNotification] Is name null? ${challengerName === null}`);
+      console.log(`[BetChallengeNotification] Is name empty string? ${challengerName === ""}`);
+      console.log(`[BetChallengeNotification] Profile image URL: ${challengerProfileImage}`);
+      console.log(`[BetChallengeNotification] Is using default image? ${challengerProfileImage === '/images/profile_waiting_screen.png'}`);
+      console.log(`[BetChallengeNotification] ======================================`);
+    }
+  }, [isOpen, challengerName, bettingType, challengerProfileImage]);
+
   if (!isOpen) return null;
+
+  // Safe wrapper for accept/reject to prevent errors
+  const handleAccept = () => {
+    console.log('[BetChallengeNotification] Accept button clicked');
+    try {
+      onAccept();
+    } catch (error) {
+      console.error('[BetChallengeNotification] Error in accept handler:', error);
+    }
+  };
+
+  const handleReject = () => {
+    console.log('[BetChallengeNotification] Reject button clicked');
+    try {
+      onReject();
+    } catch (error) {
+      console.error('[BetChallengeNotification] Error in reject handler:', error);
+    }
+  };
+
+  const handleShowInfo = () => {
+    console.log('[BetChallengeNotification] Show info button clicked');
+    try {
+      onShowInfo();
+    } catch (error) {
+      console.error('[BetChallengeNotification] Error in show info handler:', error);
+    }
+  };
 
   return (
     <div 
@@ -81,11 +130,12 @@ const BetChallengeNotification: React.FC<BetChallengeNotificationProps> = ({
                 width={64}
                 height={64}
                 style={{ borderRadius: '50%', border: '2px solid #fff' }}
+                onError={() => console.warn('[BetChallengeNotification] Profile image failed to load')}
               />
             </div>
             
             {/* Challenge info */}
-            <div className="flex-1">
+            <div>
               <h3 className="text-[16px] font-semibold font-poppins text-[#FAF3DD]">
                 {challengerName} is challenging to a bet match!
               </h3>
@@ -132,7 +182,7 @@ const BetChallengeNotification: React.FC<BetChallengeNotificationProps> = ({
                     cursor: 'pointer',
                   }}
                   aria-label={`Show info for ${bettingType}`}
-                  onClick={onShowInfo}
+                  onClick={handleShowInfo}
                 >
                   ?
                 </button>
@@ -152,7 +202,7 @@ const BetChallengeNotification: React.FC<BetChallengeNotificationProps> = ({
         </div>
         
         {/* Action buttons */}
-        <div className="flex gap-4 p-4">
+        <div className="flex p-4 space-x-4">
           <button 
             className="flex-1 py-4 font-semibold text-lg rounded-lg"
             style={{ 
@@ -163,7 +213,7 @@ const BetChallengeNotification: React.FC<BetChallengeNotificationProps> = ({
               cursor: 'pointer',
               transition: 'all 0.2s'
             }}
-            onClick={onAccept}
+            onClick={handleAccept}
           >
             Accept
           </button>
@@ -177,7 +227,7 @@ const BetChallengeNotification: React.FC<BetChallengeNotificationProps> = ({
               cursor: 'pointer',
               transition: 'all 0.2s'
             }}
-            onClick={onReject}
+            onClick={handleReject}
           >
             Reject
           </button>

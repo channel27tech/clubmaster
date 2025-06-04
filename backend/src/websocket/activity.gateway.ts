@@ -172,9 +172,9 @@ export class ActivityGateway
         // If heartbeat timeout exceeded, consider the client disconnected
         if (elapsed > this.heartbeatTimeout) {
           this.logger.log(`Client ${clientId} heartbeat timeout, marking as disconnected`);
-         
-          // Find the socket by ID using safe method
-          const socket = this.safeGetSocket(clientId);
+          
+          // Find the socket by ID
+          const socket = this.server?.sockets?.sockets?.get?.(clientId);
           if (socket) {
             // Disconnect the socket
             socket.disconnect(true);
