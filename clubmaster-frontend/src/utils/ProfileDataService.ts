@@ -330,6 +330,56 @@ export class ProfileDataService {
       };
     });
   }
+
+  /**
+   * Fetch another user's profile data by ID (for opponents, friends, etc.)
+   * @param userId User ID to fetch profile for
+   * @returns User profile data or default values if not found
+   */
+  async fetchOtherUserProfile(userId: string): Promise<UserProfile | null> {
+    try {
+      console.log(`Fetching other user profile data for ID: ${userId}`);
+      
+      // Direct backend call for other users' profiles
+      const response = await fetch(`${this.baseUrl}/profile/${userId}`);
+      
+      if (response.status === 404) {
+        console.warn(`User not found for ID: ${userId}`);
+        // Return default values when user not found
+        return {
+          id: userId,
+          displayName: 'Chess Player',
+          photoURL: '/images/dp 1.svg',
+          rating: 1500,
+          gamesPlayed: 0,
+          gamesWon: 0,
+          gamesLost: 0,
+          gamesDraw: 0
+        };
+      }
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch user profile: ${response.statusText}`);
+      }
+      
+      const data = await response.json() as UserProfile;
+      console.log('Other user profile data fetched successfully:', data);
+      return data;
+    } catch (error) {
+      console.error('Error fetching other user profile:', error);
+      // Return default values on error
+      return {
+        id: userId,
+        displayName: 'Chess Player',
+        photoURL: '/images/dp 1.svg',
+        rating: 1500,
+        gamesPlayed: 0,
+        gamesWon: 0,
+        gamesLost: 0,
+        gamesDraw: 0
+      };
+    }
+  }
 }
 
 // Create singleton instance

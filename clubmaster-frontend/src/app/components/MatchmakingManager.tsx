@@ -87,7 +87,23 @@ const MatchmakingManager = forwardRef<MatchmakingManagerHandle, MatchmakingManag
         
         // Navigate to the game screen with the game ID
         if (gameData && gameData.gameId) {
-          router.push(`/play/game/${gameData.gameId}`);
+          console.log(`[MatchmakingManager] Navigating to game: /play/game/${gameData.gameId}`);
+          
+          // Check if this is a bet game
+          if (gameData.betChallengeId) {
+            console.log(`[MatchmakingManager] This is a bet game with bet challenge ID: ${gameData.betChallengeId}`);
+          }
+          
+          // Notify parent component if callback is provided
+          if (onGameFound) {
+            console.log('[MatchmakingManager] Calling onGameFound callback');
+            onGameFound(gameData.gameId);
+          }
+          
+          // Use setTimeout to ensure the navigation happens after state updates
+          setTimeout(() => {
+            router.push(`/play/game/${gameData.gameId}`);
+          }, 100);
         }
       };
       

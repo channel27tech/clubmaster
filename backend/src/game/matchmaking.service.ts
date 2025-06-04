@@ -60,7 +60,8 @@ export class MatchmakingService {
     playerRating: number = 1500, // Default rating for new players
     userId?: string,            // Database UUID for registered users
     username?: string,          // Display name
-    isGuest: boolean = true     // Whether the player is a guest
+    isGuest: boolean = true,    // Whether the player is a guest
+    betChallengeId?: string     // ID of associated bet challenge
   ): void {
     const socketId = socket.id;
     
@@ -83,12 +84,18 @@ export class MatchmakingService {
       userId: userId,         // Database UUID
       username: username || `Player-${socketId.substring(0, 5)}`,
       isGuest: isGuest,
-      gamesPlayed: 0
+      gamesPlayed: 0,
+      betChallengeId: betChallengeId // Store bet challenge ID if provided
     });
     
-    this.logger.log(
-      `Player ${socketId}${userId ? ` (User: ${userId})` : ' (Guest)'} added to matchmaking queue. Queue size: ${this.matchmakingQueue.size}`
-    );
+    // Log additional info if bet challenge is present
+    if (betChallengeId) {
+      this.logger.log(`Player ${socketId} added to matchmaking queue with bet challenge ${betChallengeId}`);
+    } else {
+      this.logger.log(
+        `Player ${socketId}${userId ? ` (User: ${userId})` : ' (Guest)'} added to matchmaking queue. Queue size: ${this.matchmakingQueue.size}`
+      );
+    }
     
     // Send acknowledgment to player
     socket.emit('matchmakingStatus', {
@@ -250,159 +257,87 @@ export class MatchmakingService {
    * Create a match between two players
    */
   private async createMatch(player1: Player, player2: Player): Promise<void> {
-    // Determine the player colors (white/black)
-    const {
-      whitePlayer,
-      blackPlayer,
-      whitePlayerSocketId,
-      blackPlayerSocketId,
-    } = this.assignPlayerColors(player1, player2);
+    try {
+      // Get player colors based on preferences
+      const { whitePlayer, blackPlayer, whitePlayerSocketId, blackPlayerSocketId } = this.assignPlayerColors(player1, player2);
 
-    // Generate a UUID for database storage
-    const dbGameId = uuidv4();
-    
-    // Generate a user-friendly game ID for UI display
-    const timestamp = Date.now();
-    const randomSuffix = Math.random().toString(36).substring(2, 9);
-    const gameId = `game_${timestamp}_${randomSuffix}`;
-    
-    // Log the game IDs for debugging
-    this.logger.log(`Creating game with database UUID: ${dbGameId} and custom ID: ${gameId}`);
-
-    // Log detailed player information for debugging
-    this.logger.log(`White player: ${whitePlayer.username || 'Unknown'} (${whitePlayer.userId || 'No User ID'}) - Guest: ${whitePlayer.isGuest ? 'Yes' : 'No'}`);
-    this.logger.log(`Black player: ${blackPlayer.username || 'Unknown'} (${blackPlayer.userId || 'No User ID'}) - Guest: ${blackPlayer.isGuest ? 'Yes' : 'No'}`);
-
-    // Get user info for non-guest players (this should be redundant as we now have playerIds already)
-    let whitePlayerId = whitePlayer.userId;
-    let blackPlayerId = blackPlayer.userId;
-
-    // Verify that we can safely use these IDs (double-check) - Logging only
-    if (whitePlayerId && !whitePlayer.isGuest) {
-      try {
-        const whiteUser = await this.usersService.findOne(whitePlayerId);
-        if (whiteUser) {
-          this.logger.log(`Verified white player ID ${whitePlayerId} (${whiteUser.displayName || 'Unknown'})`);
-        } else {
-          this.logger.warn(`White player ID ${whitePlayerId} not found in database!`);
-        }
-      } catch (e) {
-        this.logger.error(`Error verifying white player: ${e.message}`);
+      // Check if this is a bet game
+      const betChallengeId = player1.betChallengeId || player2.betChallengeId;
+      if (betChallengeId) {
+        this.logger.log(`Creating match for bet challenge: ${betChallengeId}`);
       }
-    } else if (whitePlayer.isGuest) {
-      this.logger.log(`White player is a guest, no verification needed`);
-    }
 
-    if (blackPlayerId && !blackPlayer.isGuest) {
-      try {
-        const blackUser = await this.usersService.findOne(blackPlayerId);
-        if (blackUser) {
-          this.logger.log(`Verified black player ID ${blackPlayerId} (${blackUser.displayName || 'Unknown'})`);
-        } else {
-          this.logger.warn(`Black player ID ${blackPlayerId} not found in database!`);
-        }
-      } catch (e) {
-        this.logger.error(`Error verifying black player: ${e.message}`);
+      // Generate a unique game ID
+      const gameId = uuidv4();
+      
+      // Create white player object
+      const whiteGamePlayer = {
+        socketId: whitePlayerSocketId,
+        userId: whitePlayer.userId,
+        rating: whitePlayer.rating,
+        username: whitePlayer.username || `Player-${whitePlayerSocketId.substring(0, 5)}`,
+        isGuest: whitePlayer.isGuest || true,
+        connected: true,
+        gamesPlayed: whitePlayer.gamesPlayed || 0
+      };
+      
+      // Create black player object
+      const blackGamePlayer = {
+        socketId: blackPlayerSocketId,
+        userId: blackPlayer.userId,
+        rating: blackPlayer.rating,
+        username: blackPlayer.username || `Player-${blackPlayerSocketId.substring(0, 5)}`,
+        isGuest: blackPlayer.isGuest || true,
+        connected: true,
+        gamesPlayed: blackPlayer.gamesPlayed || 0
+      };
+      
+      // Create a new game with proper parameters
+      const gameState = this.gameManagerService.createGame(
+        gameId,
+        whiteGamePlayer,
+        blackGamePlayer,
+        whitePlayer.gameMode || 'Rapid',
+        whitePlayer.timeControl || '10+0',
+        whitePlayer.rated !== undefined ? whitePlayer.rated : true
+      );
+
+      if (!gameState) {
+        this.logger.error('Failed to create game');
+        return;
       }
-    } else if (blackPlayer.isGuest) {
-      this.logger.log(`Black player is a guest, no verification needed`);
-    }
 
-    // Create GamePlayer objects from our Player objects
-    const whiteGamePlayer = {
-      socketId: whitePlayer.socketId,
-      userId: whitePlayer.userId,
-      rating: whitePlayer.rating,
-      username: whitePlayer.username || `Player-${whitePlayer.socketId.substring(0, 5)}`,
-      isGuest: whitePlayer.isGuest === false ? false : true,
-      gamesPlayed: whitePlayer.gamesPlayed || 0,
-      connected: true
-    };
-
-    const blackGamePlayer = {
-      socketId: blackPlayer.socketId,
-      userId: blackPlayer.userId,
-      rating: blackPlayer.rating,
-      username: blackPlayer.username || `Player-${blackPlayer.socketId.substring(0, 5)}`,
-      isGuest: blackPlayer.isGuest === false ? false : true,
-      gamesPlayed: blackPlayer.gamesPlayed || 0,
-      connected: true
-    };
-
-    // Create the active game in GameManagerService
-    const newGame = this.gameManagerService.createGame(
-      gameId,
-      whiteGamePlayer,
-      blackGamePlayer,
-      player1.gameMode,
-      player1.timeControl,
-      player1.rated
-    );
-
-    // Store the database UUID in the game state
-    newGame.dbGameId = dbGameId;
-
-    // Handle bet challenge if it exists
-    const betChallengeId = whitePlayer.betChallengeId || blackPlayer.betChallengeId;
-    if (betChallengeId) {
-      try {
-        // Link the bet challenge to the game
-        const success = await this.betService.linkBetToGame(betChallengeId, gameId);
-        if (success) {
-          this.logger.log(`Linked bet challenge ${betChallengeId} to game ${gameId}`);
-        } else {
-          this.logger.warn(`Failed to link bet challenge ${betChallengeId} to game ${gameId}`);
+      // Handle bet challenge if it exists
+      if (betChallengeId) {
+        try {
+          // Link the bet challenge to the game
+          const success = await this.betService.linkBetToGame(betChallengeId, gameId);
+          if (success) {
+            this.logger.log(`Linked bet challenge ${betChallengeId} to game ${gameId}`);
+          } else {
+            this.logger.warn(`Failed to link bet challenge ${betChallengeId} to game ${gameId}`);
+          }
+        } catch (error) {
+          this.logger.error(`Error linking bet challenge to game: ${error.message}`, error.stack);
         }
-      } catch (error) {
-        this.logger.error(`Error linking bet challenge to game: ${error.message}`, error.stack);
+      } else {
+        // Check for bet challenges between these players
+        this.checkAndLinkBetChallenge(whitePlayer.userId, blackPlayer.userId, gameId);
       }
+
+      // Remove players from the queue
+      this.removePlayerFromQueue(whitePlayer.socketId);
+      this.removePlayerFromQueue(blackPlayer.socketId);
+
+      // Notify players about the match
+      this.notifyPlayersAboutMatch(whitePlayer, blackPlayer, whitePlayerSocketId, blackPlayerSocketId, gameId);
+    } catch (error) {
+      this.logger.error(`Error creating match: ${error.message}`, error.stack);
+      
+      // Notify players of the error
+      player1.socket.emit('matchmakingError', { message: 'Failed to create game. Please try again.' });
+      player2.socket.emit('matchmakingError', { message: 'Failed to create game. Please try again.' });
     }
-
-    // Create a database record if at least one player is registered
-    const bothPlayersAreRegistered = !whitePlayer.isGuest && !blackPlayer.isGuest && whitePlayerId && blackPlayerId;
-    const atLeastOnePlayerIsRegistered = (!whitePlayer.isGuest && whitePlayerId) || (!blackPlayer.isGuest && blackPlayerId);
-    
-    // Determine whether to save the game based on your business logic
-    // Here we're choosing to save if at least one player is registered
-    if (atLeastOnePlayerIsRegistered) {
-      try {
-        // Create a new game record with valid UUIDs
-        const gameData = {
-          id: dbGameId,  // This is our UUID for the database
-          customId: gameId, // Store the custom game ID for frontend reference
-          // Use the player UUIDs if they exist, otherwise use undefined
-          whitePlayerId: whitePlayerId || undefined,
-          blackPlayerId: blackPlayerId || undefined,
-          status: 'ongoing' as 'ongoing' | 'white_win' | 'black_win' | 'draw' | 'aborted',
-          rated: player1.rated,
-          whitePlayerRating: whitePlayer.rating,
-          blackPlayerRating: blackPlayer.rating,
-          timeControl: player1.timeControl,
-        };
-
-        const savedGame = await this.gameRepositoryService.create(gameData);
-        this.logger.log(`Created database record for game ${gameId} with UUID ${dbGameId} - Game DB record ID: ${savedGame.id}`);
-        
-        if (bothPlayersAreRegistered) {
-          this.logger.log(`Both players are registered users - Game will be rated: ${player1.rated}`);
-        } else {
-          this.logger.log(`At least one player is a guest - Game will NOT affect ratings regardless of 'rated' setting`);
-        }
-      } catch (error) {
-        this.logger.error(`Error creating game record: ${error.message}`, error.stack);
-      }
-    } else {
-      this.logger.log(`Skipping database record creation for game ${gameId} with UUID ${dbGameId} because both players are guests`);
-    }
-
-    // Emit events to clients
-    this.notifyPlayersAboutMatch(
-      whitePlayer,
-      blackPlayer,
-      whitePlayerSocketId,
-      blackPlayerSocketId,
-      gameId
-    );
   }
 
   /**
@@ -561,6 +496,9 @@ export class MatchmakingService {
     blackPlayerSocketId: string,
     gameId: string
   ): void {
+    // Check if this is a bet game
+    const betChallengeId = whitePlayer.betChallengeId || blackPlayer.betChallengeId;
+    
     // Create the game data object
     const gameData = {
       gameId,
@@ -577,10 +515,17 @@ export class MatchmakingService {
         socketId: blackPlayerSocketId,
         rating: blackPlayer.rating,
         username: blackPlayer.username || `Player-${blackPlayerSocketId.substring(0, 5)}`
-      }
+      },
+      // Add bet challenge ID if it exists
+      ...(betChallengeId && { betChallengeId })
     };
     
     this.logger.log(`Match created: ${gameId} between ${whitePlayer.socketId} (white) and ${blackPlayer.socketId} (black)`);
+    
+    // Log if this is a bet game
+    if (betChallengeId) {
+      this.logger.log(`This is a bet game with bet challenge ID: ${betChallengeId}`);
+    }
     
     // Send match data to white player
     whitePlayer.socket.emit('matchFound', { 
@@ -599,5 +544,156 @@ export class MatchmakingService {
     // Join both players to a game room for further communication
     whitePlayer.socket.join(gameId);
     blackPlayer.socket.join(gameId);
+  }
+
+  /**
+   * Check if there's a bet challenge between two players and link it to the game
+   * @param whitePlayerId User ID of the white player
+   * @param blackPlayerId User ID of the black player
+   * @param gameId Game ID to link the bet to
+   */
+  private async checkAndLinkBetChallenge(
+    whitePlayerId: string | undefined,
+    blackPlayerId: string | undefined,
+    gameId: string
+  ): Promise<void> {
+    if (!whitePlayerId || !blackPlayerId) {
+      this.logger.debug('Cannot check for bet challenges: Missing player IDs');
+      return;
+    }
+
+    try {
+      // Get all pending bet challenges for both players
+      const whitePlayerChallenges = this.betService.getPendingBetChallengesForUser(whitePlayerId);
+      const blackPlayerChallenges = this.betService.getPendingBetChallengesForUser(blackPlayerId);
+      
+      // Find a challenge between these two players with status ACCEPTED
+      const betChallenge = [...whitePlayerChallenges, ...blackPlayerChallenges].find(challenge => 
+        challenge.status === 'accepted' && 
+        ((challenge.challengerId === whitePlayerId && challenge.opponentId === blackPlayerId) || 
+         (challenge.challengerId === blackPlayerId && challenge.opponentId === whitePlayerId))
+      );
+      
+      if (betChallenge) {
+        this.logger.log(`Found bet challenge ${betChallenge.id} between players, linking to game ${gameId}`);
+        this.betService.linkBetToGame(betChallenge.id, gameId);
+      }
+    } catch (error) {
+      this.logger.error(`Error checking for bet challenges: ${error.message}`, error.stack);
+    }
+  }
+
+  /**
+   * Process matchmaking specifically for a bet challenge
+   * This method will immediately pair players with the same bet challenge ID
+   * @param betChallengeId The ID of the bet challenge
+   */
+  processMatchmakingForBetChallenge(betChallengeId: string): void {
+    this.logger.log(`Processing matchmaking specifically for bet challenge: ${betChallengeId}`);
+    
+    if (this.matchmakingQueue.size < 2) {
+      this.logger.warn(`Not enough players in queue to match for bet challenge: ${betChallengeId}. Queue size: ${this.matchmakingQueue.size}`);
+      // Log all players in queue for debugging
+      const allPlayers = Array.from(this.matchmakingQueue.values());
+      this.logger.log(`Current queue contains: ${allPlayers.map(p => `${p.socketId} (${p.userId || 'no-id'}${p.betChallengeId ? `, bet: ${p.betChallengeId}` : ''})`)}`);
+      return;
+    }
+    
+    // Find players with this bet challenge ID
+    const players = Array.from(this.matchmakingQueue.values());
+    const betPlayers = players.filter(player => player.betChallengeId === betChallengeId);
+    
+    this.logger.log(`Found ${betPlayers.length} players with bet challenge ID: ${betChallengeId}`);
+    
+    if (betPlayers.length < 2) {
+      this.logger.warn(`Could not find 2 players with bet challenge ID: ${betChallengeId}, found: ${betPlayers.length}`);
+      
+      // Log detailed info about all players in queue for debugging
+      players.forEach((player, index) => {
+        this.logger.log(`Player ${index + 1} in queue: socketId=${player.socketId}, userId=${player.userId || 'none'}, betChallengeId=${player.betChallengeId || 'none'}`);
+      });
+      
+      return;
+    }
+    
+    if (betPlayers.length > 2) {
+      this.logger.warn(`Found more than 2 players with bet challenge ID: ${betChallengeId}, using first 2`);
+    }
+    
+    // Get the first 2 players
+    const player1 = betPlayers[0];
+    const player2 = betPlayers[1];
+    
+    this.logger.log(`Creating match for bet challenge ${betChallengeId} between players: ${player1.socketId} (${player1.userId || 'no-id'}) and ${player2.socketId} (${player2.userId || 'no-id'})`);
+    
+    // Create a match between these two players
+    this.createMatch(player1, player2).catch(error => {
+      this.logger.error(`Error creating match for bet challenge ${betChallengeId}: ${error.message}`, error.stack);
+    });
+  }
+
+  /**
+   * Add a player to the matchmaking queue without a socket connection
+   * This is used for bet challenges where one player may have disconnected
+   * but we still want to create the match
+   */
+  addPlayerToQueueWithoutSocket(
+    userId: string,
+    options: GameOptions,
+    playerRating: number = 1500,
+    username?: string,
+    betChallengeId?: string
+  ): void {
+    this.logger.log(`Adding player ${userId} to matchmaking queue without socket (bet challenge: ${betChallengeId || 'none'})`);
+    
+    // Generate a virtual socket ID for this player
+    const virtualSocketId = `virtual_${userId}_${Date.now()}`;
+    
+    // Create a dummy socket object with the minimum required properties
+    const dummySocket = {
+      id: virtualSocketId,
+      emit: (event: string, data: any) => {
+        this.logger.log(`Virtual socket ${virtualSocketId} would emit ${event}`);
+        return true;
+      },
+      join: (room: string) => {
+        this.logger.log(`Virtual socket ${virtualSocketId} would join room ${room}`);
+        return {
+          emit: (event: string, data: any) => {
+            this.logger.log(`Virtual socket ${virtualSocketId} in room ${room} would emit ${event}`);
+            return true;
+          }
+        };
+      },
+      // Add any other required Socket.io methods as needed
+    } as unknown as Socket;
+    
+    // Create a player object
+    const player: Player = {
+      socketId: virtualSocketId,
+      userId: userId,
+      username: username || `Player_${userId.substring(0, 6)}`,
+      rating: playerRating,
+      isGuest: false,
+      joinedAt: new Date(),
+      socket: dummySocket,
+      gameMode: options.gameMode,
+      timeControl: options.timeControl,
+      rated: options.rated !== undefined ? options.rated : true,
+      preferredSide: options.preferredSide,
+      betChallengeId: betChallengeId,
+    };
+    
+    // Add to the queue
+    this.matchmakingQueue.set(virtualSocketId, player);
+    this.logger.log(`Added virtual player ${virtualSocketId} (${userId}) to matchmaking queue. Queue size: ${this.matchmakingQueue.size}`);
+    
+    // If this is a bet challenge, immediately try to process matchmaking
+    if (betChallengeId) {
+      setTimeout(() => {
+        this.logger.log(`Triggering immediate matchmaking check for virtual player with bet challenge ${betChallengeId}`);
+        this.processMatchmakingForBetChallenge(betChallengeId);
+      }, 500);
+    }
   }
 } 
