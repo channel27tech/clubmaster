@@ -13,6 +13,8 @@ export interface AppUser {
   uid?: string;
   username?: string;
   firebaseUid?: string;
+  custom_photo_base64?: string;
+  effective_photo_url?: string;
 }
 
 // Backend API URL
@@ -81,7 +83,9 @@ export const fetchUsers = async (currentUser: User | null): Promise<AppUser[]> =
           rating: user.rating || Math.floor(Math.random() * 1000) + 500, // Use rating from backend or generate one
           isAnonymous: user.isAnonymous,
           uid: user.uid, // Keep original uid if needed elsewhere
-          username: user.username
+          username: user.username,
+          custom_photo_base64: user.custom_photo_base64,
+          effective_photo_url: user.effective_photo_url
         }));
       
       return filteredUsers;
