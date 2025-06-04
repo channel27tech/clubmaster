@@ -10,8 +10,8 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import * as betService from '@/services/betService';
 import { BetType, BetChallenge } from '@/types/bet';
-import { useAuth } from '../context/AuthContext';
-import { useSocket } from '@/contexts/SocketContext';
+import { useAuth } from '../../context/AuthContext';
+import { useSocket } from '@/context/SocketContext';
 
 // Define the window interface to properly type the window extensions
 declare global {

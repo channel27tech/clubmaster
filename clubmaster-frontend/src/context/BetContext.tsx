@@ -5,7 +5,7 @@ import * as betService from '@/services/betService';
 import { BetChallenge, BetType } from '@/types/bet';
 import { useRouter } from 'next/navigation';
 import { useAuth } from './AuthContext';
-import { useSocket } from '../contexts/SocketContext';
+import { useSocket } from './SocketContext';
 
 interface BetContextType {
   pendingBetChallenges: BetChallenge[];

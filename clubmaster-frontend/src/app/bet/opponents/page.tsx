@@ -77,16 +77,11 @@ export default function BetOpponentsPage() {
     };
   }, [user, getUsers]); // getUsers is now memoized with useCallback
   
-  // Handle player selection
+  // Handle player selection - navigate to player profile
   const handlePlayerSelect = (player: PlayerType) => {
-    // Navigate to bet setup page with the selected player
-    setTimeout(() => {
-      if (player.id) {
-        router.push(`/bet/match_setup_screen?opponent=${encodeURIComponent(player.name)}&opponentId=${encodeURIComponent(player.id)}`);
-      } else {
-        router.push(`/bet/match_setup_screen?opponent=${encodeURIComponent(player.name)}`);
-      }
-    }, 300);
+    if (player.id) {
+      router.push(`/player/${encodeURIComponent(player.id)}`);
+    }
   };
 
   return (

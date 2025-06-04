@@ -1,6 +1,6 @@
 'use client'
 import React, { useState, useEffect } from 'react';
-import { useSocket } from '../../contexts/SocketContext';
+import { useSocket } from '../../context/SocketContext';
 import ChessBoard from './ChessBoard';
 import Image from 'next/image';
  

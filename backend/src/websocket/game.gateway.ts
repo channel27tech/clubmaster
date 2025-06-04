@@ -85,6 +85,24 @@ export class GameGateway
   ) {}
 
   /**
+   * Helper method to safely get a socket by ID
+   * @param socketId The socket ID to find
+   * @returns The socket if found, null otherwise
+   */
+  private safeGetSocket(socketId: string): Socket | null {
+    try {
+      if (this.server && this.server.sockets && this.server.sockets.sockets) {
+        return this.server.sockets.sockets.get(socketId) || null;
+      }
+      this.logger.warn(`Cannot access socket collection when looking for socket ${socketId}`);
+      return null;
+    } catch (error) {
+      this.logger.error(`Error accessing socket ${socketId}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      return null;
+    }
+  }
+
+  /**
    * This method runs when the gateway is initialized
    */
   afterInit() {
@@ -1091,6 +1109,15 @@ export class GameGateway
         };
       }
       
+      // Verify that game has a valid chessInstance
+      if (!game.chessInstance) {
+        this.logger.error(`Game ${payload.gameId} has no chess instance`);
+        
+        // Create a new chess instance for the game
+        game.chessInstance = new Chess();
+        this.logger.log(`Created new chess instance for game ${payload.gameId}`);
+      }
+      
       // Check if player is part of the game
       const isWhitePlayer = game.whitePlayer.socketId === client.id;
       const isBlackPlayer = game.blackPlayer.socketId === client.id;
@@ -1853,14 +1880,14 @@ export class GameGateway
       
       // Update user activity status to no longer in game for both players
       if (game.whitePlayer?.socketId) {
-        const whiteSocket = this.server.sockets.sockets.get(game.whitePlayer.socketId);
+        const whiteSocket = this.safeGetSocket(game.whitePlayer.socketId);
         if (whiteSocket?.handshake?.auth?.uid) {
           this.userActivityService.registerLeftGame(whiteSocket.handshake.auth.uid);
         }
       }
       
       if (game.blackPlayer?.socketId) {
-        const blackSocket = this.server.sockets.sockets.get(game.blackPlayer.socketId);
+        const blackSocket = this.safeGetSocket(game.blackPlayer.socketId);
         if (blackSocket?.handshake?.auth?.uid) {
           this.userActivityService.registerLeftGame(blackSocket.handshake.auth.uid);
         }

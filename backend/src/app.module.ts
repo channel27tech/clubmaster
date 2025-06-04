@@ -15,6 +15,7 @@ import { UsersModule } from './users/users.module';
 import { FirebaseModule } from './firebase/firebase.module';
 import { ProfileModule } from './profile/profile.module';
 import { BetModule } from './bet/bet.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 // This is the main module that starts the server
 @Module({
@@ -53,6 +54,7 @@ import { BetModule } from './bet/bet.module';
     ClubMemberModule,
     ProfileModule,
     BetModule,
+    NotificationsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

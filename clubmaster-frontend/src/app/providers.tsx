@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { SocketProvider } from '../contexts/SocketContext';
-import { SoundProvider } from '../contexts/SoundContext';
+import { SocketProvider } from '../context/SocketContext';
+import { SoundProvider } from '../context/SoundContext';
+import { NotificationsProvider } from '../context/NotificationsContext';
 import { AuthProvider } from '../context/AuthContext';
 import { BetProvider } from '../context/BetContext';
 import { ActivityProvider } from '../context/ActivityContext';
@@ -79,13 +80,15 @@ export const Providers: React.FC<ProvidersProps> = ({ children }) => {
     <AuthProvider>
       <RouteGuard>
         <SocketProvider>
-          <ActivityProvider>
-          <SoundProvider userId={userId}>
-              <BetProvider>
-            {children}
-              </BetProvider>
-          </SoundProvider>
-          </ActivityProvider>
+          <NotificationsProvider>
+            <ActivityProvider>
+              <SoundProvider userId={userId}>
+                <BetProvider>
+                  {children}
+                </BetProvider>
+              </SoundProvider>
+            </ActivityProvider>
+          </NotificationsProvider>
         </SocketProvider>
       </RouteGuard>
     </AuthProvider>
