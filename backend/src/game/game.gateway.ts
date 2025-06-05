@@ -1,19 +1,35 @@
-import { SubscribeMessage, MessageBody, ConnectedSocket, WebSocketGateway } from '@nestjs/websockets';
-import { Socket } from 'socket.io';
-import { Logger } from '@nestjs/common';
+import { SubscribeMessage, MessageBody, ConnectedSocket, WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
+import { Socket, Server } from 'socket.io';
+import { Logger, Injectable } from '@nestjs/common';
 import { GameEndService, GameEndReason, GameResult } from './game-end/game-end.service';
 import { Color } from 'chess.js';
+import { MatchmakingService } from './matchmaking.service';
+import { GameManagerService } from './game-manager.service';
+import { RatingService } from './rating/rating.service';
+import { DisconnectionService } from './disconnection.service';
+import { UsersService } from '../users/users.service';
+import { GameRepositoryService } from './game-repository.service';
+import { UserActivityService } from '../users/user-activity.service';
 
 @WebSocketGateway()
+@Injectable()
 export class GameGateway {
   private logger = new Logger(GameGateway.name);
   private games: Map<string, any> = new Map(); // Adjust type as per your game structure
-  private gameEndService: GameEndService; // Inject this service properly in constructor if needed
-  private server: any; // Adjust type as per your setup
 
-  constructor(gameEndService: GameEndService) {
-    this.gameEndService = gameEndService;
-  }
+  @WebSocketServer()
+  private server: Server;
+
+  constructor(
+    private readonly matchmakingService: MatchmakingService,
+    private readonly gameManagerService: GameManagerService,
+    private readonly gameEndService: GameEndService,
+    private readonly ratingService: RatingService,
+    private readonly disconnectionService: DisconnectionService,
+    private readonly usersService: UsersService,
+    private readonly gameRepositoryService: GameRepositoryService,
+    private readonly userActivityService: UserActivityService,
+  ) {}
 
   @SubscribeMessage('timeout_occurred')
   handleTimeoutOccurred(

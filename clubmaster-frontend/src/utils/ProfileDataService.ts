@@ -19,6 +19,8 @@ export interface UserProfile {
   last_name?: string | null;
   location?: string | null;
   custom_photo_base64?: string | null;
+  joinDate?: string | Date | null;
+  friends?: Array<{ id: string; displayName: string; photoURL?: string }>;
 }
 
 /**

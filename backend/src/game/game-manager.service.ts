@@ -11,6 +11,7 @@ import { RatingService, RatingChange, RatingResult as RatingServiceResult } from
 import { GameRepositoryService } from './game-repository.service';
 import { UsersService } from '../users/users.service';
 import { BetService } from '../bet/bet.service';
+import { GameNotificationHelper } from './game-notification.helper';
 
 // Player type for active games
 export interface GamePlayer {
@@ -100,6 +101,7 @@ export class GameManagerService {
     private readonly gameRepositoryService: GameRepositoryService,
     private readonly usersService: UsersService,
     private readonly betService: BetService,
+    private readonly gameNotificationHelper: GameNotificationHelper,
   ) {}
   
   /**
@@ -869,6 +871,33 @@ export class GameManagerService {
     }
 
     this.cleanupGame(gameId);
+
+    // Send game aborted notifications if appropriate
+    if (gameEndDetails.reason === GameEndReason.TIMEOUT || 
+        gameEndDetails.reason === GameEndReason.ABANDON ||
+        gameEndDetails.reason === GameEndReason.ABORT) {
+      try {
+        // Send notifications to both players if they're registered (not guests)
+        if (game.whitePlayer.userId) {
+          await this.gameNotificationHelper.sendGameAbortedNotification(
+            game.whitePlayer,
+            gameId,
+            gameEndDetails.reason,
+          );
+        }
+        
+        if (game.blackPlayer.userId) {
+          await this.gameNotificationHelper.sendGameAbortedNotification(
+            game.blackPlayer,
+            gameId,
+            gameEndDetails.reason,
+          );
+        }
+      } catch (error) {
+        this.logger.error(`Failed to send game aborted notifications: ${error.message}`);
+        // Non-blocking - continue even if notifications fail
+      }
+    }
 
     return finalResultData;
   }

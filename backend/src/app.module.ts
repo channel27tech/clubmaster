@@ -13,6 +13,7 @@ import { UsersModule } from './users/users.module';
 import { FirebaseModule } from './firebase/firebase.module';
 import { ProfileModule } from './profile/profile.module';
 import { BetModule } from './bet/bet.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 // This is the main module that starts the server
 @Module({
@@ -30,7 +31,7 @@ import { BetModule } from './bet/bet.module';
         password: process.env.DB_PASSWORD,
         database: process.env.DB_DATABASE,
         entities: [__dirname + '/**/*.entity{.ts,.js}'],
-        synchronize: false, // Temporarily disable schema synchronization
+        synchronize: true, // Only for development!
         logging: true,
       }),
       dataSourceFactory: async (options) => {
@@ -51,6 +52,7 @@ import { BetModule } from './bet/bet.module';
     ClubMemberModule,
     ProfileModule,
     BetModule,
+    NotificationsModule,
   ],
 })
 export class AppModule {}
