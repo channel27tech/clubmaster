@@ -17,26 +17,12 @@ const GlobalNotifications: React.FC = () => {
     rejectBetChallenge 
   } = useBet();
 
-  // State for the notification info popup - keeping the setter for handleShowNotificationInfo
-  const [, setNotificationInfoPopup] = React.useState<null | 0 | 1 | 2>(null);
-
-  // Handler to show info popup from notification
+  // Handler for the info button click - now handled within BetChallengeNotification
   const handleShowNotificationInfo = () => {
-    if (currentBetChallenge) {
-      switch (currentBetChallenge.betType) {
-        case BetType.PROFILE_CONTROL:
-          setNotificationInfoPopup(0);
-          break;
-        case BetType.PROFILE_LOCK:
-          setNotificationInfoPopup(1);
-          break;
-        case BetType.RATING_STAKE:
-          setNotificationInfoPopup(2);
-          break;
-        default:
-          setNotificationInfoPopup(null);
-      }
-    }
+    // This function is now just a placeholder to satisfy the interface
+    // The actual popup is handled within the BetChallengeNotification component
+    console.log('[GlobalNotifications] Info button clicked for bet type:', 
+      currentBetChallenge?.betType);
   };
 
   // Add debug logging when the notification should be shown
@@ -58,7 +44,11 @@ const GlobalNotifications: React.FC = () => {
           onShowInfo={handleShowNotificationInfo}
           challengerName={currentBetChallenge.challengerName || currentBetChallenge.senderUsername || "Unknown Player"}
           challengerRating={currentBetChallenge.challengerRating}
-          challengerProfileImage={currentBetChallenge.challengerPhotoURL || '/images/profile_waiting_screen.png'}
+          challengerProfileImage={
+            currentBetChallenge.challengerPhotoURL || 
+            currentBetChallenge.senderPhotoURL || 
+            undefined  // Let the component use its default fallback
+          }
           bettingType={currentBetChallenge.betType === BetType.PROFILE_CONTROL ? "Temporary Profile Control" :
                       currentBetChallenge.betType === BetType.PROFILE_LOCK ? "Temporary Profile Lock" :
                       "Rating Stake"}
