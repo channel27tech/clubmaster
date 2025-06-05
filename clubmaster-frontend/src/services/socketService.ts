@@ -3,7 +3,8 @@ import { io, Socket, ManagerOptions } from 'socket.io-client';
 let socket: Socket | null = null;
 
 // Update the socket URL to use port 3001
-const SOCKET_SERVER_URL = 'http://localhost:3001';
+// Fix: Use environment variable or fallback to localhost
+const SOCKET_SERVER_URL = process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || 'http://localhost:3001';
 
 // Default socket options
 const DEFAULT_OPTIONS: Partial<ManagerOptions> = {
@@ -39,11 +40,15 @@ export const getSocket = (options?: Partial<ManagerOptions> & { auth?: { [key: s
       };
     }
 
-    socket = io(`${SOCKET_SERVER_URL}/chess`, finalOptions);
+    // Fix: Ensure we have a valid URL and log it
+    const serverUrl = SOCKET_SERVER_URL || 'http://localhost:3001';
+    console.log('Connecting to socket server:', serverUrl);
+    
+    socket = io(`${serverUrl}/chess`, finalOptions);
     
     // Add connection debugging
     socket.on('connect', () => {
-      console.log('Socket connected successfully to', SOCKET_SERVER_URL);
+      console.log('Socket connected successfully to', serverUrl);
     });
     
     socket.on('connect_error', (error) => {

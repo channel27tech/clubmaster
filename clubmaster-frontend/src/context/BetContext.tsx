@@ -87,6 +87,7 @@ export const BetProvider: React.FC<BetProviderProps> = ({ children }) => {
 
     const handleBetChallengeResponse = (response: any) => {
       console.log('[BetContext] Bet challenge response received:', response);
+      
       if (response.accepted) {
         // If challenge was accepted, clear the current challenge and notification
         setCurrentBetChallenge(null);
@@ -105,8 +106,13 @@ export const BetProvider: React.FC<BetProviderProps> = ({ children }) => {
         // If challenge was rejected, clear the current challenge and notification
         setCurrentBetChallenge(null);
         setIsShowingBetNotification(false);
-        toast.info('Bet challenge rejected');
-        console.log('[BetContext] Bet challenge rejected');
+        
+        // Get responder name if available
+        const responderName = response.responderName || response.responderId || 'Opponent';
+        
+        // Show a more informative toast notification
+        toast.info(`${responderName} declined the bet challenge`);
+        console.log('[BetContext] Bet challenge rejected by:', responderName);
       }
     };
 
@@ -206,12 +212,21 @@ export const BetProvider: React.FC<BetProviderProps> = ({ children }) => {
 
   const rejectBetChallenge = (challengeId: string) => {
     console.log(`[BetContext] Rejecting bet challenge: ${challengeId}`);
+    
+    // Get challenger name for the notification
+    const challengerName = currentBetChallenge?.challengerName || 
+                           currentBetChallenge?.senderUsername || 
+                           'Challenger';
+    
+    // Send the rejection to the backend
     betService.respondToBetChallenge(challengeId, false);
+    
+    // Clear the notification state
     setIsShowingBetNotification(false);
     setCurrentBetChallenge(null);
     
-    // Show a toast
-    toast.info('Challenge rejected');
+    // Show a more informative toast notification
+    toast.info(`You declined ${challengerName}'s challenge`);
   };
 
   const cancelBetChallenge = (betId: string) => {

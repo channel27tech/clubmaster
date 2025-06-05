@@ -126,8 +126,22 @@ export const onBetChallengeReceived = (callback: (challenge: BetChallenge) => vo
           senderUsername: data.senderUsername,
           senderRating: data.senderRating,
           senderPhotoURL: data.senderPhotoURL,
+          profileImage: data.profileImage,
+          photoURL: data.photoURL,
+          avatarUrl: data.avatarUrl,
           betType: data.betType
         });
+
+        // Get the profile image URL with proper fallback chain
+        const profileImageUrl = data.senderPhotoURL || 
+                               data.photoURL || 
+                               data.profileImage || 
+                               data.avatarUrl || 
+                               data.challengerPhotoURL || 
+                               null;
+        
+        // Log the resolved profile image
+        console.log('[betService] Resolved profile image URL:', profileImageUrl);
 
         // Create a properly formatted challenge object
         const challenge: BetChallenge = {
@@ -137,7 +151,7 @@ export const onBetChallengeReceived = (callback: (challenge: BetChallenge) => vo
           challengerName: data.senderUsername || data.challengerName || data.displayName || data.name || 'Unknown Challenger',
           challengerRating: data.senderRating,
           // Add profile photo URL with fallbacks
-          challengerPhotoURL: data.senderPhotoURL || data.photoURL || data.profileImage || data.avatarUrl || null,
+          challengerPhotoURL: profileImageUrl,
           betType: data.betType,
           stakeAmount: data.stakeAmount,
           gameMode: data.gameMode || 'Rapid',
@@ -145,11 +159,13 @@ export const onBetChallengeReceived = (callback: (challenge: BetChallenge) => vo
           expiresAt: data.expiresAt ? new Date(data.expiresAt) : new Date(Date.now() + 60000),
           // Keep original fields for backward compatibility
           senderId: data.senderId,
-          senderUsername: data.senderUsername
+          senderUsername: data.senderUsername,
+          senderPhotoURL: data.senderPhotoURL || null
         };
         
         console.log('[betService] Formatted challenge for callback:', challenge);
         console.log('[betService] Challenger name set to:', challenge.challengerName);
+        console.log('[betService] Challenger photo URL set to:', challenge.challengerPhotoURL);
         
         // Call the callback with the processed challenge data
         callback(challenge);
@@ -185,7 +201,34 @@ export const offBetChallengeReceived = (callback?: (challenge: BetChallenge) => 
 export const onBetChallengeResponse = (callback: (response: any) => void): void => {
   const socket = socketService.getSocket();
   if (socket) {
-    socket.on('bet_challenge_response', callback);
+    // Remove any existing listeners to prevent duplicates
+    socket.off('bet_challenge_response');
+    
+    // Add the new listener with enhanced logging
+    socket.on('bet_challenge_response', (data: any) => {
+      console.log('[betService] Bet challenge response received:', data);
+      
+      // Ensure we have a valid response object
+      if (!data) {
+        console.error('[betService] Empty bet challenge response received');
+        return;
+      }
+      
+      // Log detailed information about the response for debugging
+      console.log('[betService] Response details:', {
+        betId: data.betId || 'Missing',
+        accepted: data.accepted,
+        responderName: data.responderName || data.responderId || 'Unknown',
+        gameId: data.gameId || 'Not yet created'
+      });
+      
+      // Call the callback with the response data
+      callback(data);
+    });
+    
+    console.log('[betService] Registered bet_challenge_response listener');
+  } else {
+    console.warn('[betService] Cannot register bet_challenge_response listener: Socket not available');
   }
 };
 

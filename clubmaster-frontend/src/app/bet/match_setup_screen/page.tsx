@@ -10,6 +10,7 @@ import { useBet } from '@/context/BetContext';
 import { useSocket } from '@/context/SocketContext';
 import { ProfileDataService } from '@/utils/ProfileDataService';
 import { useToast } from '@/hooks/useToast';
+import { bettingPopups } from "@/data/bettingPopups";
 
 // Color codes
 const TITLE_COLOR = "#FAF3DD";
@@ -48,56 +49,6 @@ const ratingStakeOptions = [20, 40, 60, 80];
 const TIMER_ACTIVE = "#4A7C59";
 const TIMER_INACTIVE = "#4C5454";
 
-// Add popup content data
-const bettingPopups = [
-  {
-    title: "Temporary profile control",
-    description: "Win the game to gain temporary control over your opponent's profile for 24 hours.",
-    points: [
-      "What You Can Do:",
-      "Change Display Name: Choose from 6 predefined nicknames to update your opponent's display name.",
-      "Change Profile Picture: Select from 4 predefined avatars to change their profile picture.",
-      "Duration:",
-      "All changes are temporary and will automatically revert back to the original after 24 hours.",
-      "Conditions:",
-      "If You Win: You gain control over your opponent's profile as described.",
-      "If You Lose: Your opponent gains control over your profile with the same options.",
-      "If the Game is a Draw: No profile changes are made; both profiles remain unchanged.",
-    ],
-  },
-  {
-    title: "Temporary profile lock",
-    description: "Win the game to gain temporary control over your opponent's profile for 24 hours.",
-    points: [
-      "What You Can Do:",
-      "Change Display Name: Choose from 6 predefined nicknames to update your opponent's display name.",
-      "Change Profile Picture: Select from 4 predefined avatars to change their profile picture.",
-      "Duration:",
-      "All changes are temporary and will automatically revert back to the original after 24 hours.",
-      "Conditions:",
-      "If You Win: You gain control over your opponent's profile as described.",
-      "If You Lose: Your opponent gains control over your profile with the same options.",
-      "If the Game is a Draw: No profile changes are made; both profiles remain unchanged.",
-    ],
-  },
-  
-  {
-    title: "Rating Stakes",
-    description: "Win the game to gain temporary control over your opponent's profile for 24 hours.",
-    points: [
-      "What Happens:",
-      "Reduce Opponent's Rating: Deduct the agreed-upon rating points from your opponent's total rating (default: 200 points, customizable).",
-      "Standard Rating Gain: You only receive the standard rating increase for a normal game win.",
-      "Duration:",
-      "The rating deduction is applied immediately after the game ends and is reflected in the leaderboard rankings.",
-      "Conditions:",
-      "If You Win: Your opponent's rating decreases by the agreed points, and you gain the standard game rating increase.",
-      "If You Lose: Your rating decreases by the agreed points..",
-      "If the Game is a Draw: No changes are made to either player's rating; both remain unchanged.",
-    ],
-  },
-];
-
 export default function MatchSetupScreen() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -128,6 +79,9 @@ export default function MatchSetupScreen() {
   // Add a state for opponent photo URL
   const [opponentPhotoURL, setOpponentPhotoURL] = useState<string | null>(null);
 
+  // Add a state to track rejection reason
+  const [rejectionMessage, setRejectionMessage] = useState<string | null>(null);
+
   // Only show timer options relevant to timer type
   const timerTypeToOption = { 0: 0, 1: 1, 2: 2 } as const;
   React.useEffect(() => {
@@ -140,6 +94,9 @@ export default function MatchSetupScreen() {
 
   // Create a ProfileDataService instance at the component level
   const profileDataService = new ProfileDataService();
+
+  // Add toast at the component level, not inside useEffect
+  const toast = useToast();
 
   // Update the useEffect to correctly fetch opponent profile data using the new method
   useEffect(() => {
@@ -180,18 +137,28 @@ export default function MatchSetupScreen() {
   useEffect(() => {
     // Initialize socket connection
     const socket = socketService.getSocket();
-    const toast = useToast();
     
     // Listen for bet challenge responses
     betService.onBetChallengeResponse((response) => {
       console.log('Bet challenge response received:', response);
       
-      if (response.betId === pendingBetId) {
+      // Fix: Always check if we're waiting for any bet response, not just for a specific betId
+      // This ensures we handle rejections even if the betId doesn't match exactly
+      if (waitingPopupOpen) {
+        // If we have a specific pending bet ID, check if it matches
+        if (pendingBetId && response.betId !== pendingBetId) {
+          console.log(`Ignoring response for different bet ID. Expected: ${pendingBetId}, Got: ${response.betId}`);
+          return;
+        }
+        
         if (response.accepted) {
           // If challenge was accepted, close the waiting screen
           // The matchFound event will handle navigation to the game
           setWaitingPopupOpen(false);
           console.log('Bet challenge accepted, waiting for matchmaking to complete...');
+          
+          // Clear any rejection message
+          setRejectionMessage(null);
           
           // Add a message to inform the user
           toast.success("Challenge accepted! Setting up the game...");
@@ -199,7 +166,20 @@ export default function MatchSetupScreen() {
           // If challenge was rejected, close the waiting screen
           setWaitingPopupOpen(false);
           
-          toast.error("Your opponent declined the challenge.");
+          // Clear the pending bet ID since it's no longer active
+          setPendingBetId(null);
+          
+          // Create a more informative rejection message
+          const opponentName = friend || 'Your opponent';
+          const rejectMessage = `${opponentName} declined your challenge`;
+          
+          // Set the rejection message for display in the UI
+          setRejectionMessage(rejectMessage);
+          
+          // Show toast notification
+          toast.error(rejectMessage);
+          
+          console.log('Bet challenge rejected by opponent');
         }
       }
     });
@@ -214,11 +194,54 @@ export default function MatchSetupScreen() {
         // Close the waiting popup if it's still open
         setWaitingPopupOpen(false);
         
+        // Clear any rejection message
+        setRejectionMessage(null);
+        
         // Show a success toast
         toast.success("Game ready! Redirecting to the game...");
         
         // Navigate to the game page
         router.push(`/play/game/${data.gameId}`);
+      }
+    });
+
+    // Add a listener for bet challenge expiration
+    betService.onBetChallengeExpired((data) => {
+      console.log('Bet challenge expired:', data);
+      
+      // Check if the expired challenge is the one we're waiting for
+      if (data.betId === pendingBetId) {
+        // Close the waiting popup
+        setWaitingPopupOpen(false);
+        
+        // Clear the pending bet ID
+        setPendingBetId(null);
+        
+        // Clear any rejection message and set an expiration message
+        setRejectionMessage("Your bet challenge has expired. The opponent didn't respond in time.");
+        
+        // Show a toast notification
+        toast.warning("Bet challenge expired. Your opponent didn't respond in time.");
+      }
+    });
+
+    // Listen for bet challenge cancellation (in case the server cancels it)
+    betService.onBetChallengeCancelled((data) => {
+      console.log('Bet challenge cancelled:', data);
+      
+      // Check if the cancelled challenge is the one we're waiting for
+      if (data.betId === pendingBetId) {
+        // Close the waiting popup
+        setWaitingPopupOpen(false);
+        
+        // Clear the pending bet ID
+        setPendingBetId(null);
+        
+        // Clear any rejection message and set a cancellation message
+        setRejectionMessage("Your bet challenge was cancelled.");
+        
+        // Show a toast notification
+        toast.warning("Bet challenge cancelled.");
       }
     });
 
@@ -229,12 +252,7 @@ export default function MatchSetupScreen() {
       if (waitingPopupOpen && pendingBetId) {
         // Check the status of the pending bet
         betService.checkBetChallengeStatus(pendingBetId)
-          .then((status: { 
-            status: 'pending' | 'accepted' | 'rejected' | 'cancelled' | 'expired' | 'completed';
-            betId: string;
-            message?: string;
-            gameId?: string;
-          }) => {
+          .then((status) => {
             console.log('Retrieved bet challenge status:', status);
             if (status && status.status !== 'pending') {
               // If the bet is no longer pending, update the UI
@@ -247,7 +265,7 @@ export default function MatchSetupScreen() {
               }
             }
           })
-          .catch((err: any) => {
+          .catch((err: Error) => {
             console.error('Error checking bet challenge status:', err);
             // Keep the waiting popup open, but show an error
             toast.warning("Unable to check challenge status. Please wait or try again.");
@@ -266,10 +284,12 @@ export default function MatchSetupScreen() {
     return () => {
       betService.offBetChallengeResponse();
       betService.offBetGameReady();
+      betService.offBetChallengeExpired();
+      betService.offBetChallengeCancelled();
       socket.off('connect');
       socket.off('bet_challenge_failed');
     };
-  }, [pendingBetId, waitingPopupOpen, router]);
+  }, [pendingBetId, waitingPopupOpen, router, toast, friend]);
 
   // Add a retry function
   const handleRetryBetChallenge = () => {
@@ -286,8 +306,10 @@ export default function MatchSetupScreen() {
       setBetError("Socket not authenticated. Please wait for connection.");
       return;
     }
-    // Clear any previous error
+    
+    // Clear any previous error or rejection message
     setBetError(null);
+    setRejectionMessage(null);
     
     // Determine bet type and parameters
     let betType: BetType;
@@ -440,6 +462,12 @@ export default function MatchSetupScreen() {
               ))}
             </ul>
           </div>
+        </div>
+      )}
+      {/* Show rejection message when there's a bet rejection */}
+      {rejectionMessage && (
+        <div className="fixed top-16 left-0 right-0 mx-auto w-4/5 max-w-md bg-red-500 text-white p-3 rounded-md text-center z-50">
+          <p>{rejectionMessage}</p>
         </div>
       )}
       {/* Show error message when there's a bet error */}
