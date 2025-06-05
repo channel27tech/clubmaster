@@ -170,7 +170,52 @@ export class GameManagerService {
     
     this.logger.log(`Game created: ${gameId}`);
     
+    // Immediately persist the game to the database
+    this.persistGameToDatabase(gameState).catch(error => {
+      this.logger.error(`Failed to persist game to database: ${error.message}`, error.stack);
+    });
+    
     return gameState;
+  }
+  
+  /**
+   * Persist a game to the database
+   */
+  private async persistGameToDatabase(game: GameState): Promise<void> {
+    try {
+      // Only persist games with registered players (not guests)
+      if (game.whitePlayer.userId && game.blackPlayer.userId && 
+          !game.whitePlayer.isGuest && !game.blackPlayer.isGuest) {
+        
+        this.logger.log(`Persisting game ${game.gameId} to database`);
+        
+        // Create the game in the database
+        const dbGame = await this.gameRepositoryService.create({
+          id: game.gameId, // Use the same ID for consistency
+          whitePlayerId: game.whitePlayer.userId,
+          blackPlayerId: game.blackPlayer.userId,
+          status: 'ongoing',
+          rated: game.rated,
+          whitePlayerRating: game.whitePlayer.rating || 1500,
+          blackPlayerRating: game.blackPlayer.rating || 1500,
+          timeControl: game.timeControl,
+          pgn: game.pgn,
+          moves: [],
+          totalMoves: 0
+        });
+        
+        // Store the database ID in the game state
+        if (dbGame) {
+          game.dbGameId = dbGame.id;
+          this.logger.log(`Game ${game.gameId} persisted to database with ID ${game.dbGameId}`);
+        }
+      } else {
+        this.logger.log(`Skipping database persistence for game ${game.gameId} - one or both players are guests or missing user IDs`);
+      }
+    } catch (error) {
+      this.logger.error(`Error persisting game to database: ${error.message}`, error.stack);
+      throw error; // Re-throw for the caller to handle
+    }
   }
 
   /**

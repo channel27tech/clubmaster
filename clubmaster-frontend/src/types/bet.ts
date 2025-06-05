@@ -29,6 +29,12 @@ export interface BetChallenge {
   expiresAt: Date;            // When the bet challenge expires
   senderId?: string;          // User ID of the sender (same as challengerId, used for compatibility)
   senderUsername?: string;    // Username of the sender (same as challengerName, used for compatibility)
+  senderPhotoURL?: string;    // Profile photo URL of the sender
+  senderRating?: number;      // Rating of the sender
+  preferredSide?: string;     // Preferred side (white, black, random)
+  createdAt?: Date;           // When the bet challenge was created
+  opponentId?: string;        // User ID of the opponent
+  opponentSocketId?: string;  // Socket ID of the opponent
 }
 
 // Response to a bet challenge

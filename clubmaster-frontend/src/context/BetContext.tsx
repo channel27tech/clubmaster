@@ -6,6 +6,7 @@ import { BetChallenge, BetType } from '@/types/bet';
 import { useRouter } from 'next/navigation';
 import { useAuth } from './AuthContext';
 import { useSocket } from './SocketContext';
+import { useToast } from '@/hooks/useToast';
 
 interface BetContextType {
   pendingBetChallenges: BetChallenge[];
@@ -23,6 +24,7 @@ interface BetContextType {
     timeControl: string;
     preferredSide: string;
   }) => Promise<{ success: boolean; betId?: string; expiresAt?: string; message?: string }>;
+  currentBetResult: any | null;
 }
 
 const BetContext = createContext<BetContextType | undefined>(undefined);
@@ -43,9 +45,11 @@ export const BetProvider: React.FC<BetProviderProps> = ({ children }) => {
   const [pendingBetChallenges, setPendingBetChallenges] = useState<BetChallenge[]>([]);
   const [currentBetChallenge, setCurrentBetChallenge] = useState<BetChallenge | null>(null);
   const [isShowingBetNotification, setIsShowingBetNotification] = useState(false);
+  const [currentBetResult, setCurrentBetResult] = useState<any | null>(null);
   const router = useRouter();
   const { user } = useAuth();
   const { isConnected } = useSocket();
+  const toast = useToast();
 
   useEffect(() => {
     // Set up socket event listeners for bet challenges
@@ -58,21 +62,21 @@ export const BetProvider: React.FC<BetProviderProps> = ({ children }) => {
           console.error('[BetContext] Bet challenge missing ID:', challenge);
           return;
         }
-        
-        // Log detailed information about the challenge for debugging
+      
+      // Log detailed information about the challenge for debugging
         console.log(`[BetContext] Challenge details:
-          - ID: ${challenge.id}
+        - ID: ${challenge.id}
           - From user: ${challenge.senderId || 'Unknown'} (${challenge.challengerName || challenge.senderUsername || 'Unknown user'})
           - Challenger Name: ${challenge.challengerName}
           - Sender Username: ${challenge.senderUsername}
-          - Bet type: ${challenge.betType}
+        - Bet type: ${challenge.betType}
           - Game mode: ${challenge.gameMode || 'Unknown'}
           - Time control: ${challenge.timeControl || 'Unknown'}
-        `);
-        
+      `);
+      
         // Update state to show notification
-        setCurrentBetChallenge(challenge);
-        setIsShowingBetNotification(true);
+      setCurrentBetChallenge(challenge);
+      setIsShowingBetNotification(true);
         
         // Log successful notification display
         console.log('[BetContext] Bet challenge notification shown for challenge:', challenge.id);
@@ -82,39 +86,77 @@ export const BetProvider: React.FC<BetProviderProps> = ({ children }) => {
     };
 
     const handleBetChallengeResponse = (response: any) => {
-      console.log('Bet challenge response received:', response);
+      console.log('[BetContext] Bet challenge response received:', response);
       if (response.accepted) {
-        // If challenge was accepted, navigate to waiting screen
-        // The actual game start will be handled by the matchFound event
-        router.push('/play');
+        // If challenge was accepted, clear the current challenge and notification
+        setCurrentBetChallenge(null);
+        setIsShowingBetNotification(false);
+        
+        // Show a toast notification that the challenge was accepted
+        toast.success('Bet challenge accepted, setting up the game...');
+        console.log('[BetContext] Bet challenge accepted, waiting for game to start...');
+        
+        // For the sender, we need to close the waiting screen
+        // The matchFound event will handle navigation to the game for both players
+        
+        // Listen for matchFound event to navigate to the game
+        // This is handled in the MatchmakingManager component
       } else {
-        // If challenge was rejected, show notification
-        console.log('Bet challenge rejected');
-        // TODO: Add toast notification for rejection
+        // If challenge was rejected, clear the current challenge and notification
+        setCurrentBetChallenge(null);
+        setIsShowingBetNotification(false);
+        toast.info('Bet challenge rejected');
+        console.log('[BetContext] Bet challenge rejected');
       }
     };
 
     const handleBetChallengeExpired = (data: { betId: string }) => {
-      console.log('Bet challenge expired:', data);
+      console.log('[BetContext] Bet challenge expired:', data);
       if (currentBetChallenge?.id === data.betId) {
         setCurrentBetChallenge(null);
         setIsShowingBetNotification(false);
-        // TODO: Add toast notification for expiration
+        toast.warning('Bet challenge expired');
       }
     };
 
     const handleBetChallengeCancelled = (data: { betId: string }) => {
-      console.log('Bet challenge cancelled:', data);
+      console.log('[BetContext] Bet challenge cancelled:', data);
       if (currentBetChallenge?.id === data.betId) {
         setCurrentBetChallenge(null);
         setIsShowingBetNotification(false);
-        // TODO: Add toast notification for cancellation
+        toast.info('Bet challenge cancelled by opponent');
+        console.log('[BetContext] Bet challenge notification closed due to cancellation by sender');
       }
     };
 
     const handlePendingBetChallenges = (data: { challenges: BetChallenge[] }) => {
-      console.log('Pending bet challenges received:', data);
+      console.log('[BetContext] Pending bet challenges received:', data);
       setPendingBetChallenges(data.challenges);
+    };
+
+    const handleBetResult = (result: any) => {
+      console.log('[BetContext] Bet result received:', result);
+      setCurrentBetResult(result);
+      
+      // You may want to show a notification or redirect to a results page
+      // depending on your application flow
+    };
+
+    // Add handler for bet_game_ready event
+    const handleBetGameReady = (data: { gameId: string }) => {
+      console.log('[BetContext] Bet game ready event received:', data);
+      
+      if (data && data.gameId) {
+        // Show a success toast
+        toast.success('Game ready! Redirecting to the game...');
+        
+        // Navigate to the game page
+        console.log(`[BetContext] Navigating to game: /play/game/${data.gameId}`);
+        router.push(`/play/game/${data.gameId}`);
+      } else {
+        console.error('[BetContext] Invalid bet_game_ready data received:', data);
+        toast.error('Could not start game: Invalid game data received');
+      }
     };
 
     // Register event listeners
@@ -123,10 +165,12 @@ export const BetProvider: React.FC<BetProviderProps> = ({ children }) => {
     betService.onBetChallengeExpired(handleBetChallengeExpired);
     betService.onBetChallengeCancelled(handleBetChallengeCancelled);
     betService.onPendingBetChallenges(handlePendingBetChallenges);
+    betService.onBetResult(handleBetResult);
+    betService.onBetGameReady(handleBetGameReady); // Add listener for bet_game_ready
 
     // Get any pending bet challenges when the component mounts and socket is connected
     if (user && isConnected) {
-      console.log('Fetching pending bet challenges...');
+      console.log('[BetContext] Fetching pending bet challenges...');
       betService.getPendingBetChallenges();
     }
 
@@ -137,30 +181,41 @@ export const BetProvider: React.FC<BetProviderProps> = ({ children }) => {
       betService.offBetChallengeExpired();
       betService.offBetChallengeCancelled();
       betService.offPendingBetChallenges();
+      betService.offBetResult();
+      betService.offBetGameReady(); // Remove listener for bet_game_ready
     };
-  }, [currentBetChallenge, router, user, isConnected]);
+  }, [currentBetChallenge, router, user, isConnected, toast]);
 
   // Add a separate effect to re-fetch pending challenges when socket reconnects
   useEffect(() => {
     if (user && isConnected) {
-      console.log('Socket connected or reconnected, fetching pending bet challenges...');
+      console.log('[BetContext] Socket connected or reconnected, fetching pending bet challenges...');
       betService.getPendingBetChallenges();
     }
   }, [isConnected, user]);
 
   const acceptBetChallenge = (challengeId: string) => {
+    console.log(`[BetContext] Accepting bet challenge: ${challengeId}`);
     betService.respondToBetChallenge(challengeId, true);
     setIsShowingBetNotification(false);
     setCurrentBetChallenge(null);
+    
+    // Show an info toast instead of loading since loading is not available
+    toast.info('Accepting challenge and setting up the game...');
   };
 
   const rejectBetChallenge = (challengeId: string) => {
+    console.log(`[BetContext] Rejecting bet challenge: ${challengeId}`);
     betService.respondToBetChallenge(challengeId, false);
     setIsShowingBetNotification(false);
     setCurrentBetChallenge(null);
+    
+    // Show a toast
+    toast.info('Challenge rejected');
   };
 
   const cancelBetChallenge = (betId: string) => {
+    console.log(`[BetContext] Cancelling bet challenge: ${betId}`);
     betService.cancelBetChallenge(betId);
   };
 
@@ -173,6 +228,7 @@ export const BetProvider: React.FC<BetProviderProps> = ({ children }) => {
     timeControl: string;
     preferredSide: string;
   }) => {
+    console.log('[BetContext] Sending bet challenge with options:', options);
     return betService.sendBetChallenge(options);
   };
 
@@ -186,6 +242,7 @@ export const BetProvider: React.FC<BetProviderProps> = ({ children }) => {
         rejectBetChallenge,
         cancelBetChallenge,
         sendBetChallenge,
+        currentBetResult,
       }}
     >
       {children}

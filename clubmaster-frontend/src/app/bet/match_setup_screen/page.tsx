@@ -8,6 +8,8 @@ import * as socketService from "@/services/socketService";
 import { BetType } from "@/types/bet";
 import { useBet } from '@/context/BetContext';
 import { useSocket } from '@/context/SocketContext';
+import { ProfileDataService } from '@/utils/ProfileDataService';
+import { useToast } from '@/hooks/useToast';
 
 // Color codes
 const TITLE_COLOR = "#FAF3DD";
@@ -123,6 +125,9 @@ export default function MatchSetupScreen() {
   const [pendingBetId, setPendingBetId] = useState<string | null>(null);
   const [betError, setBetError] = useState<string | null>(null);
 
+  // Add a state for opponent photo URL
+  const [opponentPhotoURL, setOpponentPhotoURL] = useState<string | null>(null);
+
   // Only show timer options relevant to timer type
   const timerTypeToOption = { 0: 0, 1: 1, 2: 2 } as const;
   React.useEffect(() => {
@@ -133,10 +138,49 @@ export default function MatchSetupScreen() {
   const { sendBetChallenge } = useBet();
   const { isConnected } = useSocket();
 
-  // Set up socket event listeners
+  // Create a ProfileDataService instance at the component level
+  const profileDataService = new ProfileDataService();
+
+  // Update the useEffect to correctly fetch opponent profile data using the new method
+  useEffect(() => {
+    if (opponentId) {
+      // Fetch opponent details to get their photoURL
+      const fetchOpponentDetails = async () => {
+        try {
+          console.log(`Fetching opponent profile data for ID: ${opponentId}`);
+          // Use the dedicated method for fetching other users' profiles
+          const profileData = await profileDataService.fetchOtherUserProfile(opponentId);
+          
+          if (profileData) {
+            console.log('Opponent profile data fetched:', {
+              id: profileData.id,
+              displayName: profileData.displayName,
+              photoURL: profileData.photoURL,
+              effective_photo_url: profileData.effective_photo_url
+            });
+            
+            // Use effective_photo_url first (which may include custom_photo_base64), 
+            // then fall back to photoURL
+            setOpponentPhotoURL(profileData.effective_photo_url || profileData.photoURL || null);
+          } else {
+            console.log('No profile data found for opponent');
+            setOpponentPhotoURL(null);
+          }
+        } catch (error) {
+          console.error("Failed to fetch opponent details:", error);
+          setOpponentPhotoURL(null);
+        }
+      };
+
+      fetchOpponentDetails();
+    }
+  }, [opponentId]);
+
+  // Update the socket event listeners
   useEffect(() => {
     // Initialize socket connection
     const socket = socketService.getSocket();
+    const toast = useToast();
     
     // Listen for bet challenge responses
     betService.onBetChallengeResponse((response) => {
@@ -144,80 +188,96 @@ export default function MatchSetupScreen() {
       
       if (response.betId === pendingBetId) {
         if (response.accepted) {
-          // If challenge was accepted, navigate to waiting screen
-          // The actual game start will be handled by the matchFound event in MatchmakingManager
+          // If challenge was accepted, close the waiting screen
+          // The matchFound event will handle navigation to the game
           setWaitingPopupOpen(false);
-          router.push('/play');
+          console.log('Bet challenge accepted, waiting for matchmaking to complete...');
+          
+          // Add a message to inform the user
+          toast.success("Challenge accepted! Setting up the game...");
         } else {
-          // If challenge was rejected, show error toast and close waiting screen
+          // If challenge was rejected, close the waiting screen
           setWaitingPopupOpen(false);
-          // TODO: Add toast notification for rejection
-          console.log('Bet challenge rejected');
+          
+          toast.error("Your opponent declined the challenge.");
         }
       }
     });
     
-    // Listen for bet challenge expiration
-    betService.onBetChallengeExpired((data) => {
-      console.log('Bet challenge expired:', data);
-      
-      if (data.betId === pendingBetId) {
+    // Listen for bet game ready event
+    betService.onBetGameReady((data) => {
+      console.log('Bet game ready event received:', data);
+      if (data && data.gameId) {
+        // Navigate to the game page
+        console.log(`Navigating to game: /play/game/${data.gameId}`);
+        
+        // Close the waiting popup if it's still open
         setWaitingPopupOpen(false);
-        // TODO: Add toast notification for expiration
-        console.log('Bet challenge expired');
+        
+        // Show a success toast
+        toast.success("Game ready! Redirecting to the game...");
+        
+        // Navigate to the game page
+        router.push(`/play/game/${data.gameId}`);
       }
     });
-    
-    // Listen for bet challenge cancellation
-    betService.onBetChallengeCancelled((data) => {
-      console.log('Bet challenge cancelled:', data);
-      
-      // This would be received by the opponent
-      // TODO: Add toast notification for cancellation
-      console.log('Bet challenge cancelled by opponent');
-    });
-    
-    // Listen for bet challenge creation response
-    socket.on('bet_challenge_created', (data) => {
-      console.log('Bet challenge created:', data);
-      
-      if (data.data && data.data.success) {
-        // Store the bet ID for later reference
-        setPendingBetId(data.data.betId);
-      } else {
-        // If creation failed, show error and close waiting screen
-        setWaitingPopupOpen(false);
-        // TODO: Add toast notification for error
-        console.log('Error creating bet challenge');
+
+    // Listen for socket reconnect events
+    socket.on('connect', () => {
+      console.log('Socket reconnected, checking authentication status...');
+      // If we were waiting for a bet response, we may need to refresh the state
+      if (waitingPopupOpen && pendingBetId) {
+        // Check the status of the pending bet
+        betService.checkBetChallengeStatus(pendingBetId)
+          .then((status: { 
+            status: 'pending' | 'accepted' | 'rejected' | 'cancelled' | 'expired' | 'completed';
+            betId: string;
+            message?: string;
+            gameId?: string;
+          }) => {
+            console.log('Retrieved bet challenge status:', status);
+            if (status && status.status !== 'pending') {
+              // If the bet is no longer pending, update the UI
+              setWaitingPopupOpen(false);
+              
+              // If it was accepted and we have a game ID, navigate to the game
+              if (status.status === 'accepted' && status.gameId) {
+                console.log(`Navigating to game: /play/game/${status.gameId}`);
+                router.push(`/play/game/${status.gameId}`);
+              }
+            }
+          })
+          .catch((err: any) => {
+            console.error('Error checking bet challenge status:', err);
+            // Keep the waiting popup open, but show an error
+            toast.warning("Unable to check challenge status. Please wait or try again.");
+          });
       }
     });
-    
+
     // Listen for bet challenge error
-    socket.on('bet_challenge_error', (data) => {
-      console.log('Bet challenge error:', data);
-      
-      // Show error and close waiting screen
+    socket.on('bet_challenge_failed', (error) => {
+      console.error('Error creating bet challenge:', error);
       setWaitingPopupOpen(false);
-      // TODO: Add toast notification for error
-      console.log('Error with bet challenge:', data.data?.message);
+      toast.error(error.message || "An error occurred while creating the bet challenge.");
     });
-    
-    // Listen for incoming bet challenges (should not happen in this screen but for completeness)
-    betService.onBetChallengeReceived((challenge) => {
-      console.log('Bet challenge received:', challenge);
-      // We'll handle this in the main play screen
-    });
-    
-    // Clean up listeners on unmount
+
+    // Clean up listeners when component unmounts
     return () => {
       betService.offBetChallengeResponse();
-      betService.offBetChallengeExpired();
-      betService.offBetChallengeCancelled();
-      betService.offBetChallengeReceived();
-      socket.off('bet_challenge_created');
-      socket.off('bet_challenge_error');
+      betService.offBetGameReady();
+      socket.off('connect');
+      socket.off('bet_challenge_failed');
     };
-  }, [pendingBetId, router]);
+  }, [pendingBetId, waitingPopupOpen, router]);
+
+  // Add a retry function
+  const handleRetryBetChallenge = () => {
+    // Clear error message
+    setBetError(null);
+    // Try sending the request again
+    handleSendRequest();
+  };
 
   // Update the onClick handler for the "Send Request" button
   const handleSendRequest = async () => {
@@ -276,6 +336,8 @@ export default function MatchSetupScreen() {
         if (result.betId) {
           setPendingBetId(result.betId);
         }
+        // We no longer auto-close the waiting popup after success
+        // The user must manually cancel or the opponent must respond
       } else {
         console.log("Error creating bet challenge:", result.message);
         setBetError(result.message || "Failed to create bet challenge");
@@ -289,6 +351,15 @@ export default function MatchSetupScreen() {
       setWaitingPopupOpen(false);
     }
   };
+
+  // Add debugging logs when component mounts
+  useEffect(() => {
+    console.log('Match setup screen initialized with params:', {
+      friend,
+      opponentId,
+      opponentSocketId
+    });
+  }, []);
 
   return (
     <div className="min-h-screen w-full flex flex-col items-center justify-start" style={{ background: BG_COLOR }}>
@@ -373,8 +444,16 @@ export default function MatchSetupScreen() {
       )}
       {/* Show error message when there's a bet error */}
       {betError && (
-        <div className="fixed bottom-16 left-0 right-0 mx-auto w-4/5 max-w-md bg-red-500 text-white p-3 rounded-md text-center z-50">
-          {betError}
+        <div className="fixed bottom-16 left-0 right-0 mx-auto w-4/5 max-w-md bg-red-500 text-white p-3 rounded-md text-center z-50 flex flex-col items-center">
+          <p>{betError}</p>
+          {betError.includes("Failed") || betError.includes("Error") ? (
+            <button 
+              className="mt-2 bg-white text-red-500 px-4 py-1 rounded-md font-medium text-sm"
+              onClick={handleRetryBetChallenge}
+            >
+              Retry
+            </button>
+          ) : null}
         </div>
       )}
       {/* Waiting Popup Overlay */}
@@ -405,11 +484,15 @@ export default function MatchSetupScreen() {
             padding: '32px 20px 20px 20px',
           }}>
             <Image
-              src="/images/profile_waiting_screen.png"
+              src={opponentPhotoURL || "/images/profile_waiting_screen.png"}
               alt="Opponent Avatar"
               width={64}
               height={64}
               style={{ borderRadius: '50%', marginBottom: 18, border: '4px solid #fff', background: '#fff' }}
+              onError={(e) => {
+                // If the opponent's profile image fails to load, fall back to the default image
+                (e.target as HTMLImageElement).src = "/images/profile_waiting_screen.png";
+              }}
             />
             <div style={{ color: '#D9D9D9', fontWeight: "medium", fontSize: 16, marginBottom: 4, textAlign: 'center',fontFamily: "roboto"  }}>
               {timerOptions[selectedTimer]} game
@@ -433,6 +516,7 @@ export default function MatchSetupScreen() {
               onClick={() => {
                 // Cancel bet challenge if there is one
                 if (pendingBetId) {
+                  console.log("Cancelling bet challenge:", pendingBetId);
                   betService.cancelBetChallenge(pendingBetId);
                 }
                 // Close waiting popup
@@ -558,11 +642,15 @@ export default function MatchSetupScreen() {
           {/* Select Opponent Card */}
           <div className="rounded-[10px]  flex items-center px-3 py-3" style={{ background: CARD_COLOR }}>
             <Image
-              src="/images/atm_profile_avatar-icon.png"
+              src={opponentPhotoURL || "/images/atm_profile_avatar-icon.png"}
               alt="friend avatar"
               width={32}
               height={32}
               className="rounded-full"
+              onError={(e) => {
+                // Fallback to default image if the photo fails to load
+                (e.target as HTMLImageElement).src = "/images/atm_profile_avatar-icon.png";
+              }}
             />
             <span className="ml-3 flex-1 text-[#FAF3DD] font-medium" style={{ fontSize: 16 }}>{friend ? friend : "Select opponent"}</span>
             <svg width="22" height="22" fill="none" viewBox="0 0 24 24">
