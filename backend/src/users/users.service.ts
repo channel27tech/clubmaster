@@ -1,8 +1,10 @@
 import { Injectable, Logger, NotFoundException, ConflictException } from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, Not, In, IsNull } from 'typeorm';
 import { User } from './entities/user.entity';
 import { SyncUserDto } from './dto/sync-user.dto';
+import { Club } from '../club/club.entity';
+import { ClubMember } from '../club-member/club-member.entity';
 
 @Injectable()
 export class UsersService {
@@ -131,6 +133,76 @@ export class UsersService {
     user.gamesPlayed += 1;
     
     return this.usersRepository.save(user);
+  }
+
+  async findAllExcludingClubMembers(exclude: boolean, currentUserId: string): Promise<User[]> {
+    if (!exclude) {
+      return this.usersRepository.find();
+    }
+
+    this.logger.log(`Fetching users excluding club members for user with Firebase UID: ${currentUserId}`);
+
+    // Find the user entity by their Firebase UID to get their database ID
+    const currentUserEntity = await this.usersRepository.findOne({
+        where: { firebaseUid: currentUserId },
+        select: ['id'], // Only need the database ID
+    });
+
+    if (!currentUserEntity) {
+        this.logger.warn(`User with Firebase UID ${currentUserId} not found in database.`);
+        return this.usersRepository.find(); // Cannot exclude if user not found
+    }
+
+    const currentUserIdDatabase = currentUserEntity.id;
+    this.logger.log(`Found database user ID: ${currentUserIdDatabase}`);
+
+    // Find the club where the current user (using database ID) is the super admin
+    const adminClub = await this.dataSource.getRepository(Club).findOne({
+       where: { superAdminId: currentUserIdDatabase }, // Use database ID here
+       select: ['id'], // Only need the club ID
+    });
+
+    this.logger.log(`Admin Club find result: ${JSON.stringify(adminClub)}`);
+
+    // If the user is not a super admin of any club, return all users
+    if (!adminClub) {
+        this.logger.log(`User ${currentUserIdDatabase} is not a super admin of any club. Returning all users.`);
+        return this.usersRepository.find();
+    }
+
+    this.logger.log(`Found admin club with ID: ${adminClub.id}`);
+
+    // Find all user IDs who are members of the admin's club
+    const clubMemberIds = await this.dataSource.getRepository(ClubMember).find({
+        where: { clubId: adminClub.id },
+        select: ['userId'], // Only need the user ID
+    });
+
+    this.logger.log(`Club Member IDs raw result: ${JSON.stringify(clubMemberIds)}`); // Log raw result
+
+    const userIdsToExclude = clubMemberIds
+      .map(member => member.userId)
+      .filter((id): id is string => id !== null && id !== undefined); // Filter out null/undefined
+
+    this.logger.log(`User IDs to exclude from friend list: ${userIdsToExclude.join(', ')}`);
+
+    // If there are no members to exclude (shouldn't happen if adminClub is found, but good practice)
+     if (userIdsToExclude.length === 0) {
+         this.logger.log('No club members found to exclude.');
+         return this.usersRepository.find(); // Or return all users if no exclusion needed
+     }
+
+    // Find all users excluding those whose IDs are members of the admin's club
+    // Using QueryBuilder for more explicit exclusion
+    const users = await this.dataSource
+      .getRepository(User)
+      .createQueryBuilder('user')
+      .where('user.id NOT IN (:...userIdsToExclude)', { userIdsToExclude })
+      .getMany();
+
+    this.logger.log(`Found ${users.length} users after excluding club members.`);
+
+    return users;
   }
 
   /**

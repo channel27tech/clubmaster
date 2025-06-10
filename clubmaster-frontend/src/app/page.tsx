@@ -6,12 +6,12 @@ import { useAuth } from '../context/AuthContext';
 import Dashboard from './home/Dashboard';
 
 export default function Home() {
-  const { user, isLoading, isGuest } = useAuth();
+  const { user, loading, isGuest } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
     // Only run this effect after authentication state is loaded
-    if (!isLoading) {
+    if (!loading) {
       if (!user) {
         // Case 1: Fresh visitor (no user at all) - redirect to login
         console.log('Fresh visitor detected, redirecting to login page');
@@ -23,10 +23,10 @@ export default function Home() {
       }
       // Case 3: Registered user - show home page (default return below)
     }
-  }, [user, isLoading, isGuest, router]);
+  }, [user, loading, isGuest, router]);
 
   // Show loading state while checking authentication
-  if (isLoading) {
+  if (loading) {
   return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: "#333939" }}>
         <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-[#E9CB6B]"></div>

@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useRef, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import axios from 'axios';
 import { useAuth } from '../../../context/AuthContext';
@@ -30,6 +30,9 @@ export default function CreateClubPage() {
   const linkRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [previewLogo, setPreviewLogo] = useState('/images/club-icon.svg');
+  const searchParams = useSearchParams();
+  const editMode = searchParams.get('editMode') === 'true';
+  const clubId = searchParams.get('clubId');
 
   // Get Firebase token when component mounts
   useEffect(() => {
@@ -47,7 +50,31 @@ export default function CreateClubPage() {
     
     getToken();
   }, [user]);
-
+//edit mode
+  useEffect(() => {
+    if (editMode && clubId) {
+      fetch(`http://localhost:3001/club/${clubId}`)
+        .then(res => res.json())
+        .then(data => {
+          setClubData({
+            name: data.name || '',
+            location: data.location || '',
+            type: data.type || 'public',
+            description: data.description || '',
+            logo: data.logo?.startsWith('/uploads/')
+              ? `http://localhost:3001${data.logo}`
+              : data.logo || '/images/club-icon.svg',
+            ratingLimit: data.ratingLimit || 1000,
+          });
+          setPreviewLogo(
+            data.logo?.startsWith('/uploads/')
+              ? `http://localhost:3001${data.logo}`
+              : data.logo || '/images/club-icon.svg'
+          );
+        });
+    }
+  }, [editMode, clubId]);
+//edit mode end
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -146,14 +173,7 @@ export default function CreateClubPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // Validate the form
-    if (!validateForm()) {
-      // If validation fails, don't proceed
-      return;
-    }
-    
-    // Verify authentication
+    if (!validateForm()) return;
     if (!user) {
       setApiError('User not authenticated');
       return;
@@ -164,41 +184,53 @@ export default function CreateClubPage() {
       setApiError('No Firebase token found.');
       return;
     }
-    console.log('Club creation token:', token);
-    console.log('Club creation Authorization header:', `Bearer ${token}`);
-    
-    // Clear any previous errors
     setApiError('');
-    
-    // Set loading state
     setIsLoading(true);
-    
+
     try {
-      // Prepare the data for the backend API
-      const backendData = {
-        name: clubData.name,
-        location: clubData.location,
-        description: clubData.description || null,
-        logo: clubData.logo,
-        type: clubData.type === 'public' ? 'public' : mapTypeToBackend(clubData.type),
-        ratingLimit: clubData.ratingLimit,
-      };
-      
-      // Log the user-entered rating limit
-      console.log('User-entered rating limit:', clubData.ratingLimit);
-      
-      // Make the API call to create the club
-      const responseData = await createClub(backendData, token);
-      console.log('Club created successfully:', responseData);
-      
-      // Generate club link
-      const clubId = responseData.id;
-      setClubLink(`${window.location.origin}/club/join/${clubId}`);
-      
-      // Show success message
-    setShowSuccess(true);
-      
-      // Reset form
+      let backendData;
+      if (editMode && clubId) {
+        // Only send editable fields for PATCH (name, description, logo)
+        backendData = {
+          name: clubData.name,
+          description: clubData.description || null,
+          logo: clubData.logo,
+        };
+        console.log('PATCH payload:', backendData); // Debug: see what is sent
+        await axios.patch(
+          `http://localhost:3001/club/${clubId}`,
+          backendData,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        router.push(`/club/created-detail?id=${clubId}`);
+      } else {
+        // POST for create (send all fields)
+        backendData = {
+          name: clubData.name,
+          location: clubData.location,
+          description: clubData.description || null,
+          logo: clubData.logo,
+          type: clubData.type === 'public' ? 'public' : mapTypeToBackend(clubData.type),
+          ratingLimit: clubData.ratingLimit,
+        };
+        const responseData = await createClub(backendData, token);
+        const clubId = responseData.id;
+        setClubLink(`${window.location.origin}/club/join/${clubId}`);
+        setShowSuccess(true);
+      }
+    } catch (err: any) {
+      setApiError(err?.response?.data?.message || 'Error occurred');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleCancel = () => {
+    if (editMode && clubId) {
+      router.push(`/club/created-detail?id=${clubId}`);
+    } else {
+      // existing cancel logic
+      setShowSuccess(false);
       setClubData({
         name: '',
         location: '',
@@ -207,33 +239,10 @@ export default function CreateClubPage() {
         logo: '/images/club-icon.svg',
         ratingLimit: 1000
       });
-      
-    } catch (error: any) {
-      console.error('Error creating club:', error);
-      
-      // Handle specific error responses
-      if (axios.isAxiosError(error) && error.response) {
-        // Handle specific status codes
-        if (error.response.status === 400) {
-          // Handle 'User already owns a club' or other validation errors
-          setApiError(error.response.data.message || 'Failed to create club. Please try again.');
-        } else if (error.response.status === 401) {
-          setApiError('Authentication error. Please log in again.');
-        } else {
-          setApiError('Server error. Please try again later.');
-        }
-      } else {
-        setApiError('Failed to connect to server. Please check your internet connection.');
-      }
-    } finally {
-      // Reset loading state
-      setIsLoading(false);
+      setPreviewLogo('/images/club-icon.svg');
+      setApiError('');
+      setErrors({ name: false, location: false });
     }
-  };
-
-  const handleCancel = () => {
-    // Navigate back to clubs view without creating
-    router.push('/club/clubs');
   };
 
   const handleCopyLink = () => {
@@ -244,7 +253,6 @@ export default function CreateClubPage() {
       console.log('Link copied to clipboard');
     }
   };
-
   const handleDone = () => {
     // Navigate to club created detail view using next.js router
     router.push('/club/created-detail');
