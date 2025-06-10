@@ -10,6 +10,8 @@ import {
 import { RatingService, RatingChange, RatingResult as RatingServiceResult } from './rating/rating.service';
 import { GameRepositoryService } from './game-repository.service';
 import { UsersService } from '../users/users.service';
+import { BetService } from '../bet/bet.service';
+import { GameNotificationHelper } from './game-notification.helper';
 
 // Player type for active games
 export interface GamePlayer {
@@ -89,13 +91,38 @@ export class GameManagerService {
   
   // Grace period for reconnections: 2 minutes
   private readonly RECONNECTION_GRACE_PERIOD = 2 * 60 * 1000;
+  
+  // Socket.io server instance
+  private server: Server;
 
   constructor(
     private readonly gameEndService: GameEndService,
     private readonly ratingService: RatingService,
     private readonly gameRepositoryService: GameRepositoryService,
     private readonly usersService: UsersService,
+    private readonly betService: BetService,
+    private readonly gameNotificationHelper: GameNotificationHelper,
   ) {}
+  
+  /**
+   * Set the Socket.io server instance
+   * This should be called by the websocket gateway after initialization
+   */
+  setServer(server: Server): void {
+    this.server = server;
+    this.logger.log('Server instance set in GameManagerService');
+  }
+  
+  /**
+   * Get the Socket.io server instance
+   */
+  getServer(): Server | null {
+    if (!this.server) {
+      this.logger.warn('Server instance not set in GameManagerService');
+      return null;
+    }
+    return this.server;
+  }
 
   /**
    * Create a new game and add it to active games
@@ -143,7 +170,52 @@ export class GameManagerService {
     
     this.logger.log(`Game created: ${gameId}`);
     
+    // Immediately persist the game to the database
+    this.persistGameToDatabase(gameState).catch(error => {
+      this.logger.error(`Failed to persist game to database: ${error.message}`, error.stack);
+    });
+    
     return gameState;
+  }
+  
+  /**
+   * Persist a game to the database
+   */
+  private async persistGameToDatabase(game: GameState): Promise<void> {
+    try {
+      // Only persist games with registered players (not guests)
+      if (game.whitePlayer.userId && game.blackPlayer.userId && 
+          !game.whitePlayer.isGuest && !game.blackPlayer.isGuest) {
+        
+        this.logger.log(`Persisting game ${game.gameId} to database`);
+        
+        // Create the game in the database
+        const dbGame = await this.gameRepositoryService.create({
+          id: game.gameId, // Use the same ID for consistency
+          whitePlayerId: game.whitePlayer.userId,
+          blackPlayerId: game.blackPlayer.userId,
+          status: 'ongoing',
+          rated: game.rated,
+          whitePlayerRating: game.whitePlayer.rating || 1500,
+          blackPlayerRating: game.blackPlayer.rating || 1500,
+          timeControl: game.timeControl,
+          pgn: game.pgn,
+          moves: [],
+          totalMoves: 0
+        });
+        
+        // Store the database ID in the game state
+        if (dbGame) {
+          game.dbGameId = dbGame.id;
+          this.logger.log(`Game ${game.gameId} persisted to database with ID ${game.dbGameId}`);
+        }
+      } else {
+        this.logger.log(`Skipping database persistence for game ${game.gameId} - one or both players are guests or missing user IDs`);
+      }
+    } catch (error) {
+      this.logger.error(`Error persisting game to database: ${error.message}`, error.stack);
+      throw error; // Re-throw for the caller to handle
+    }
   }
 
   /**
@@ -684,6 +756,9 @@ export class GameManagerService {
 
     this.logger.log(`Emitting 'game_ended' for ${gameId} with data:`, JSON.stringify(finalResultData, null, 2));
     server.to(gameId).emit('game_ended', finalResultData);
+    
+    // Handle bet result if there is a bet associated with this game
+    await this.handleBetResult(gameId, gameEndDetails);
 
     // Persist final game state to database
     try {
@@ -797,6 +872,33 @@ export class GameManagerService {
 
     this.cleanupGame(gameId);
 
+    // Send game aborted notifications if appropriate
+    if (gameEndDetails.reason === GameEndReason.TIMEOUT || 
+        gameEndDetails.reason === GameEndReason.ABANDON ||
+        gameEndDetails.reason === GameEndReason.ABORT) {
+      try {
+        // Send notifications to both players if they're registered (not guests)
+        if (game.whitePlayer.userId) {
+          await this.gameNotificationHelper.sendGameAbortedNotification(
+            game.whitePlayer,
+            gameId,
+            gameEndDetails.reason,
+          );
+        }
+        
+        if (game.blackPlayer.userId) {
+          await this.gameNotificationHelper.sendGameAbortedNotification(
+            game.blackPlayer,
+            gameId,
+            gameEndDetails.reason,
+          );
+        }
+      } catch (error) {
+        this.logger.error(`Failed to send game aborted notifications: ${error.message}`);
+        // Non-blocking - continue even if notifications fail
+      }
+    }
+
     return finalResultData;
   }
 
@@ -822,5 +924,49 @@ export class GameManagerService {
    */
   getAllActiveGames(): GameState[] {
     return Array.from(this.activeGames.values());
+  }
+
+  /**
+   * Handle bet result for a game if there is an associated bet
+   */
+  private async handleBetResult(
+    gameId: string,
+    gameEndDetails: GameEndDetails,
+  ): Promise<void> {
+    try {
+      const game = this.activeGames.get(gameId);
+      if (!game) {
+        this.logger.warn(`Game not found in handleBetResult: ${gameId}`);
+        return;
+      }
+      
+      // Determine winner and if it's a draw
+      let winnerId: string | null = null;
+      const isDraw = gameEndDetails.result === GameResult.DRAW || gameEndDetails.result === GameResult.ABORTED;
+      
+      if (!isDraw && gameEndDetails.winnerSocketId) {
+        // Get winner's user ID from the game state
+        if (gameEndDetails.winnerSocketId === game.whitePlayer.socketId && game.whitePlayer.userId) {
+          winnerId = game.whitePlayer.userId;
+        } else if (gameEndDetails.winnerSocketId === game.blackPlayer.socketId && game.blackPlayer.userId) {
+          winnerId = game.blackPlayer.userId;
+        }
+      }
+      
+      // Check if there is a bet associated with this game
+      const betResult = await this.betService.recordBetResult(
+        gameId,
+        winnerId,
+        isDraw,
+      );
+      
+      if (betResult) {
+        this.logger.log(`Processed bet result for game ${gameId}:`, betResult);
+      } else {
+        this.logger.log(`No bet found for game ${gameId} or error processing bet result`);
+      }
+    } catch (error) {
+      this.logger.error(`Error handling bet result for game ${gameId}: ${error.message}`, error.stack);
+    }
   }
 } 

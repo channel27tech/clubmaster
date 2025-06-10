@@ -47,6 +47,11 @@ export default function Dashboard() {
   const handleProfileClick = () => {
     router.push('/user_profile');
   };
+  
+  // Handle navigation to notifications page
+  const handleNotificationClick = () => {
+    router.push('/notifications');
+  };
 
   return (
     <div className="min-h-screen bg-[#333939] flex flex-col items-center w-full max-w-[430px] mx-auto relative">
@@ -78,7 +83,10 @@ export default function Dashboard() {
           />
           
           {/* Notification Bell */}
-          <div className="flex items-center relative">
+          <div 
+            className="flex items-center relative cursor-pointer" 
+            onClick={handleNotificationClick}
+          >
             <Image 
               src="/images/hone page notification icon.svg" 
               alt="Notifications" 
@@ -196,7 +204,10 @@ export default function Dashboard() {
           </button>
           
           {/* Play for bet Button */}
-          <button className="w-[302px] h-[57px] rounded-[10px] bg-[#1F2323] text-[#D9D9D9] text-base flex items-center justify-center border border-[#000000] mb-4">
+          <button 
+            className="w-[302px] h-[57px] rounded-[10px] bg-[#1F2323] text-[#D9D9D9] text-base flex items-center justify-center border border-[#000000] mb-4"
+            onClick={() => router.push('/bet/opponents')}
+          >
             <span className="mr-3">
               <Image 
                 src="/images/bet btn icon.svg" 

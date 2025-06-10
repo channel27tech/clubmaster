@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 import React, { useState, useRef } from 'react';
 import MatchmakingManager, { MatchmakingManagerHandle } from '@/app/components/MatchmakingManager';
@@ -7,14 +7,15 @@ import { FaArrowLeft } from 'react-icons/fa';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
+import Head from "next/head";
 
 // Define the window interface to properly type the window extensions
-declare global {
-  interface Window {
-    startMatchmakingDebug?: () => void;
-    cancelMatchmakingDebug?: () => void;
-  }
+interface ExtendedWindow extends Window {
+  initTwilio?: () => void;
+  twilioInitialized?: boolean;
 }
+
+declare let window: ExtendedWindow;
 
 // Map time values to game modes for consistency
 const getGameModeFromTime = (timeInMinutes: number): string => {
@@ -76,22 +77,18 @@ const PlayPage: React.FC = () => {
   const handleStartMatchmaking = () => {
     console.log('Play Random clicked with:', { activeTab, selectedTime, playAs });
     
-    // Get the correct time based on game mode
     const timeForMode = getTimeFromGameMode(activeTab);
     console.log('Time for selected game mode:', timeForMode);
     
-    // Format time control string properly
     const timeControlStr = `${timeForMode}+0`;
     localStorage.setItem('timeControl', timeControlStr);
     console.log('📝 Stored time control in localStorage:', timeControlStr);
     
-    // Also store the game mode (Bullet, Blitz, Rapid)
     localStorage.setItem('gameMode', activeTab);
     console.log('📝 Stored game mode in localStorage:', activeTab);
     
     setIsMatchmaking(true);
     
-    // Pass the correct time control to MatchmakingManager
     if (matchmakingRef.current) {
       matchmakingRef.current.startMatchmaking(activeTab, String(timeForMode), playAs);
     } else {
@@ -101,7 +98,6 @@ const PlayPage: React.FC = () => {
 
   const handleCancelMatchmaking = () => {
     setIsMatchmaking(false);
-    // Method 1: Try to find and click the cancel button directly
     const cancelButton = document.getElementById('cancel-matchmaking-button');
     if (cancelButton) {
       console.log('Found cancel button, clicking it');
@@ -109,27 +105,36 @@ const PlayPage: React.FC = () => {
       return;
     }
     
-    // Method 2: Call the debug method directly
     if (typeof window !== 'undefined' && window.cancelMatchmakingDebug) {
       console.log('Using debug method');
       window.cancelMatchmakingDebug();
     }
   };
-  
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-black">
-      {isMatchmaking ? (
-        <WaitingScreen 
-          gameType={activeTab.toLowerCase()}
-          timeInMinutes={selectedTime}
+      <Head>
+        <title>Play Chess</title>
+        <meta name="description" content="Play chess online" />
+        <link rel="icon" href="/favicon.ico" />
+      </Head>
+
+      {/* Waiting screen for matchmaking */}
+      {isMatchmaking && (
+        <WaitingScreen
+          title="Finding opponents..."
+          subtitle={`${selectedTime} min ${activeTab}`}
           onCancel={handleCancelMatchmaking}
         />
-      ) : (
-        <div className="w-full max-w-[430px] flex flex-col h-screen sm:h-auto sm:min-h-[600px] sm:max-h-[90vh] sm:rounded-xl sm:shadow-lg sm:my-8" style={{ backgroundColor: '#333939' }}>
-          {/* Header with back button - 21px padding */}
-          <div className="px-[21px] pt-[21px] flex items-center">
-            <Link href="/" className="text-[#BFC0C0] hover:text-gray-300 transition-colors">
-              <FaArrowLeft size={20} />
+      )}
+
+      {/* Main content */}
+      {!isMatchmaking && (
+        <div className="w-full max-w-[400px] bg-[#363B3B] min-h-screen sm:min-h-0 sm:h-auto sm:rounded-[16px] overflow-hidden shadow-lg">
+          {/* Header with back button and title */}
+          <div className="w-full h-[60px] bg-[#363B3B] flex items-center px-[21px]">
+            <Link href="/" className="flex items-center justify-center w-[28px] h-[28px] text-[#FAF3DD]">
+              <FaArrowLeft />
             </Link>
             <h1 className="text-[22px] font-semibold mx-auto text-[#FAF3DD] font-poppins tracking-[0.25%]">Match Setup</h1>
           </div>
@@ -243,16 +248,23 @@ const PlayPage: React.FC = () => {
               >
                 Create Link
               </button>
+              
+              <button
+                onClick={() => router.push('/bet/match_setup_screen')}
+                className="h-[57px] bg-[#4C5454] hover:bg-[#3d4343] rounded-[10px] font-semibold transition-colors w-full text-[#FAF3DD] text-[18px] font-poppins"
+              >
+                Create Bet Challenge
+              </button>
             </div>
           </div>
         </div>
       )}
       
-      {/* Hidden MatchmakingManager component */}
+      {/* Matchmaking Manager (hidden component) */}
       <MatchmakingManager
         ref={matchmakingRef}
-        onError={handleMatchmakingError}
         onGameFound={handleGameFound}
+        onError={handleMatchmakingError}
       />
     </div>
   );

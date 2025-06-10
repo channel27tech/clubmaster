@@ -1,14 +1,20 @@
 "use client";
-import React, { useState, useMemo, useRef, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import BetMatchNotification from "../../components/BetMatchNotification";
+import { useSearchParams, useRouter } from "next/navigation";
+import * as betService from "@/services/betService";
+import * as socketService from "@/services/socketService";
+import { BetType } from "@/types/bet";
+import { useBet } from '@/context/BetContext';
+import { useSocket } from '@/context/SocketContext';
+import { ProfileDataService } from '@/utils/ProfileDataService';
+import { useToast } from '@/hooks/useToast';
+import { bettingPopups } from "@/data/bettingPopups";
 
 // Color codes
 const TITLE_COLOR = "#FAF3DD";
 const ACTIVE_COLOR = "#8FC0A9";
-const INACTIVE_COLOR = "#E9CB6B";
 const BG_COLOR = "#363B3B";
 const CARD_COLOR = "#4C5454";
 const BUTTON_DISABLED = "#2B3A31";
@@ -39,70 +45,20 @@ const bettingOptions = [
 
 const ratingStakeOptions = [20, 40, 60, 80];
 
-const mockAvatars = ["/white-profile.png", "/black-profile.png",];
-
 // Timer button colors
 const TIMER_ACTIVE = "#4A7C59";
 const TIMER_INACTIVE = "#4C5454";
 
-// Add popup content data
-const bettingPopups = [
-  {
-    title: "Temporary profile control",
-    description: "Win the game to gain temporary control over your opponent's profile for 24 hours.",
-    points: [
-      "What You Can Do:",
-      "Change Display Name: Choose from 6 predefined nicknames to update your opponent's display name.",
-      "Change Profile Picture: Select from 4 predefined avatars to change their profile picture.",
-      "Duration:",
-      "All changes are temporary and will automatically revert back to the original after 24 hours.",
-      "Conditions:",
-      "If You Win: You gain control over your opponent's profile as described.",
-      "If You Lose: Your opponent gains control over your profile with the same options.",
-      "If the Game is a Draw: No profile changes are made; both profiles remain unchanged.",
-    ],
-  },
-  {
-    title: "Temporary profile lock",
-    description: "Win the game to gain temporary control over your opponent's profile for 24 hours.",
-    points: [
-      "What You Can Do:",
-      "Change Display Name: Choose from 6 predefined nicknames to update your opponent's display name.",
-      "Change Profile Picture: Select from 4 predefined avatars to change their profile picture.",
-      "Duration:",
-      "All changes are temporary and will automatically revert back to the original after 24 hours.",
-      "Conditions:",
-      "If You Win: You gain control over your opponent's profile as described.",
-      "If You Lose: Your opponent gains control over your profile with the same options.",
-      "If the Game is a Draw: No profile changes are made; both profiles remain unchanged.",
-    ],
-  },
-  
-  {
-    title: "Rating Stakes",
-    description: "Win the game to gain temporary control over your opponent's profile for 24 hours.",
-    points: [
-      "What Happens:",
-      "Reduce Opponent's Rating: Deduct the agreed-upon rating points from your opponent's total rating (default: 200 points, customizable).",
-      "Standard Rating Gain: You only receive the standard rating increase for a normal game win.",
-      "Duration:",
-      "The rating deduction is applied immediately after the game ends and is reflected in the leaderboard rankings.",
-      "Conditions:",
-      "If You Win: Your opponent's rating decreases by the agreed points, and you gain the standard game rating increase.",
-      "If You Lose: Your rating decreases by the agreed points..",
-      "If the Game is a Draw: No changes are made to either player's rating; both remain unchanged.",
-    ],
-  },
-];
-
 export default function MatchSetupScreen() {
   const searchParams = useSearchParams();
-  const friend = searchParams.get("friend");
-  const friendAvatar = friend ? mockAvatars[0] : null;
+  const router = useRouter();
+  const friend = searchParams.get("opponent");
+  const opponentId = searchParams.get("opponentId");
+  const opponentSocketId = searchParams.get("socketId");
 
   // Timer type and time selection
-  const [selectedTimerType, setSelectedTimerType] = useState(0); // 0: Bullet, 1: Blitz, 2: Rapid
-  const [selectedTimer, setSelectedTimer] = useState(0); // 0: 3min, 1: 5min, 2: 10min
+  const [selectedTimerType, setSelectedTimerType] = useState(2); // 0: Bullet, 1: Blitz, 2: Rapid
+  const [selectedTimer, setSelectedTimer] = useState(2); // 0: 3min, 1: 5min, 2: 10min
   const [selectedPlayAs, setSelectedPlayAs] = useState(1); // default random
   const [selectedBetting, setSelectedBetting] = useState<number | null>(null);
   const [selectedStake, setSelectedStake] = useState(ratingStakeOptions[0]);
@@ -116,11 +72,15 @@ export default function MatchSetupScreen() {
   // Add after other useState hooks
   const [waitingPopupOpen, setWaitingPopupOpen] = useState(false);
   
-  // Add notification state
-  const [showBetNotification, setShowBetNotification] = useState(false);
+  // Track the pending bet ID for cancellation
+  const [pendingBetId, setPendingBetId] = useState<string | null>(null);
+  const [betError, setBetError] = useState<string | null>(null);
 
-  // Add after other useState hooks
-  const [notificationInfoPopup, setNotificationInfoPopup] = useState<null | 0 | 1 | 2>(null);
+  // Add a state for opponent photo URL
+  const [opponentPhotoURL, setOpponentPhotoURL] = useState<string | null>(null);
+
+  // Add a state to track rejection reason
+  const [rejectionMessage, setRejectionMessage] = useState<string | null>(null);
 
   // Only show timer options relevant to timer type
   const timerTypeToOption = { 0: 0, 1: 1, 2: 2 } as const;
@@ -128,157 +88,303 @@ export default function MatchSetupScreen() {
     setSelectedTimer(timerTypeToOption[selectedTimerType as keyof typeof timerTypeToOption]);
   }, [selectedTimerType]);
 
-  // Add effect to show notification after 5 seconds in waiting screen
+  // Use BetContext
+  const { sendBetChallenge } = useBet();
+  const { isConnected } = useSocket();
+
+  // Create a ProfileDataService instance at the component level
+  const profileDataService = new ProfileDataService();
+
+  // Add toast at the component level, not inside useEffect
+  const toast = useToast();
+
+  // Update the useEffect to correctly fetch opponent profile data using the new method
   useEffect(() => {
-    let notificationTimer: NodeJS.Timeout;
+    if (opponentId) {
+      // Fetch opponent details to get their photoURL
+      const fetchOpponentDetails = async () => {
+        try {
+          console.log(`Fetching opponent profile data for ID: ${opponentId}`);
+          // Use the dedicated method for fetching other users' profiles
+          const profileData = await profileDataService.fetchOtherUserProfile(opponentId);
+          
+          if (profileData) {
+            console.log('Opponent profile data fetched:', {
+              id: profileData.id,
+              displayName: profileData.displayName,
+              photoURL: profileData.photoURL,
+              effective_photo_url: profileData.effective_photo_url
+            });
+            
+            // Use effective_photo_url first (which may include custom_photo_base64), 
+            // then fall back to photoURL
+            setOpponentPhotoURL(profileData.effective_photo_url || profileData.photoURL || null);
+          } else {
+            console.log('No profile data found for opponent');
+            setOpponentPhotoURL(null);
+          }
+        } catch (error) {
+          console.error("Failed to fetch opponent details:", error);
+          setOpponentPhotoURL(null);
+        }
+      };
+
+      fetchOpponentDetails();
+    }
+  }, [opponentId]);
+
+  // Update the socket event listeners
+  useEffect(() => {
+    // Initialize socket connection
+    const socket = socketService.getSocket();
     
-    if (waitingPopupOpen) {
-      // Set timer to show notification after 5 seconds
-      notificationTimer = setTimeout(() => {
-        setShowBetNotification(true);
-      }, 5000);
-    } else {
-      // Hide notification when waiting popup is closed
-      setShowBetNotification(false);
+    // Listen for bet challenge responses
+    betService.onBetChallengeResponse((response) => {
+      console.log('Bet challenge response received:', response);
+      
+      // Fix: Always check if we're waiting for any bet response, not just for a specific betId
+      // This ensures we handle rejections even if the betId doesn't match exactly
+      if (waitingPopupOpen) {
+        // If we have a specific pending bet ID, check if it matches
+        if (pendingBetId && response.betId !== pendingBetId) {
+          console.log(`Ignoring response for different bet ID. Expected: ${pendingBetId}, Got: ${response.betId}`);
+          return;
+        }
+        
+        if (response.accepted) {
+          // If challenge was accepted, close the waiting screen
+          // The matchFound event will handle navigation to the game
+          setWaitingPopupOpen(false);
+          console.log('Bet challenge accepted, waiting for matchmaking to complete...');
+          
+          // Clear any rejection message
+          setRejectionMessage(null);
+          
+          // Add a message to inform the user
+          toast.success("Challenge accepted! Setting up the game...");
+        } else {
+          // If challenge was rejected, close the waiting screen
+          setWaitingPopupOpen(false);
+          
+          // Clear the pending bet ID since it's no longer active
+          setPendingBetId(null);
+          
+          // Create a more informative rejection message
+          const opponentName = friend || 'Your opponent';
+          const rejectMessage = `${opponentName} declined your challenge`;
+          
+          // Set the rejection message for display in the UI
+          setRejectionMessage(rejectMessage);
+          
+          // Show toast notification
+          toast.error(rejectMessage);
+          
+          console.log('Bet challenge rejected by opponent');
+        }
+      }
+    });
+    
+    // Listen for bet game ready event
+    betService.onBetGameReady((data) => {
+      console.log('Bet game ready event received:', data);
+      if (data && data.gameId) {
+        // Navigate to the game page
+        console.log(`Navigating to game: /play/game/${data.gameId}`);
+        
+        // Close the waiting popup if it's still open
+        setWaitingPopupOpen(false);
+        
+        // Clear any rejection message
+        setRejectionMessage(null);
+        
+        // Show a success toast
+        toast.success("Game ready! Redirecting to the game...");
+        
+        // Navigate to the game page
+        router.push(`/play/game/${data.gameId}`);
+      }
+    });
+
+    // Add a listener for bet challenge expiration
+    betService.onBetChallengeExpired((data) => {
+      console.log('Bet challenge expired:', data);
+      
+      // Check if the expired challenge is the one we're waiting for
+      if (data.betId === pendingBetId) {
+        // Close the waiting popup
+        setWaitingPopupOpen(false);
+        
+        // Clear the pending bet ID
+        setPendingBetId(null);
+        
+        // Clear any rejection message and set an expiration message
+        setRejectionMessage("Your bet challenge has expired. The opponent didn't respond in time.");
+        
+        // Show a toast notification
+        toast.warning("Bet challenge expired. Your opponent didn't respond in time.");
+      }
+    });
+
+    // Listen for bet challenge cancellation (in case the server cancels it)
+    betService.onBetChallengeCancelled((data) => {
+      console.log('Bet challenge cancelled:', data);
+      
+      // Check if the cancelled challenge is the one we're waiting for
+      if (data.betId === pendingBetId) {
+        // Close the waiting popup
+        setWaitingPopupOpen(false);
+        
+        // Clear the pending bet ID
+        setPendingBetId(null);
+        
+        // Clear any rejection message and set a cancellation message
+        setRejectionMessage("Your bet challenge was cancelled.");
+        
+        // Show a toast notification
+        toast.warning("Bet challenge cancelled.");
+      }
+    });
+
+    // Listen for socket reconnect events
+    socket.on('connect', () => {
+      console.log('Socket reconnected, checking authentication status...');
+      // If we were waiting for a bet response, we may need to refresh the state
+      if (waitingPopupOpen && pendingBetId) {
+        // Check the status of the pending bet
+        betService.checkBetChallengeStatus(pendingBetId)
+          .then((status) => {
+            console.log('Retrieved bet challenge status:', status);
+            if (status && status.status !== 'pending') {
+              // If the bet is no longer pending, update the UI
+              setWaitingPopupOpen(false);
+              
+              // If it was accepted and we have a game ID, navigate to the game
+              if (status.status === 'accepted' && status.gameId) {
+                console.log(`Navigating to game: /play/game/${status.gameId}`);
+                router.push(`/play/game/${status.gameId}`);
+              }
+            }
+          })
+          .catch((err: Error) => {
+            console.error('Error checking bet challenge status:', err);
+            // Keep the waiting popup open, but show an error
+            toast.warning("Unable to check challenge status. Please wait or try again.");
+          });
+      }
+    });
+
+    // Listen for bet challenge error
+    socket.on('bet_challenge_failed', (error) => {
+      console.error('Error creating bet challenge:', error);
+      setWaitingPopupOpen(false);
+      toast.error(error.message || "An error occurred while creating the bet challenge.");
+    });
+
+    // Clean up listeners when component unmounts
+    return () => {
+      betService.offBetChallengeResponse();
+      betService.offBetGameReady();
+      betService.offBetChallengeExpired();
+      betService.offBetChallengeCancelled();
+      socket.off('connect');
+      socket.off('bet_challenge_failed');
+    };
+  }, [pendingBetId, waitingPopupOpen, router, toast, friend]);
+
+  // Add a retry function
+  const handleRetryBetChallenge = () => {
+    // Clear error message
+    setBetError(null);
+    // Try sending the request again
+    handleSendRequest();
+  };
+
+  // Update the onClick handler for the "Send Request" button
+  const handleSendRequest = async () => {
+    // Prevent sending if not authenticated
+    if (!isConnected) {
+      setBetError("Socket not authenticated. Please wait for connection.");
+      return;
     }
     
-    // Clean up timer on unmount or when waitingPopupOpen changes
-    return () => {
-      if (notificationTimer) clearTimeout(notificationTimer);
+    // Clear any previous error or rejection message
+    setBetError(null);
+    setRejectionMessage(null);
+    
+    // Determine bet type and parameters
+    let betType: BetType;
+    let stakeAmount: number | undefined;
+
+    switch (selectedBetting) {
+        case 0: // Profile Control
+            betType = BetType.PROFILE_CONTROL;
+            break;
+        case 1: // Temporary Profile Lock
+            betType = BetType.PROFILE_LOCK;
+            break;
+        case 2: // Rating Stake
+            betType = BetType.RATING_STAKE;
+            stakeAmount = selectedStake;
+            break;
+        default:
+            console.error("Invalid betting option selected");
+            setBetError("Invalid betting option selected");
+            return;
+    }
+    
+    const options = {
+      opponentId: opponentId || undefined,
+      opponentSocketId: opponentSocketId || undefined,
+      betType,
+      stakeAmount,
+      gameMode: selectedTimerType === 0 ? 'Bullet' : selectedTimerType === 1 ? 'Blitz' : 'Rapid',
+      timeControl: selectedTimer === 0 ? '3+0' : selectedTimer === 1 ? '5+0' : '10+0',
+      preferredSide: selectedPlayAs === 0 ? 'white' : selectedPlayAs === 1 ? 'random' : 'black',
     };
-  }, [waitingPopupOpen]);
+    
+    console.log("Sending bet challenge with options:", options);
 
-  // Handle notification actions
-  const handleAcceptBet = () => {
-    setShowBetNotification(false);
-    setWaitingPopupOpen(false);
-    // Here you would normally navigate to the game screen
-    // For now we'll just close the popups
+    // Show the waiting popup immediately
+    setWaitingPopupOpen(true);
+
+    try {
+      // Send the bet challenge request with the Promise-based API
+      const result = await sendBetChallenge(options);
+
+      // Check the result
+      if (result.success) {
+        console.log("Bet challenge created:", result);
+        // Store the bet ID for cancellation
+        if (result.betId) {
+          setPendingBetId(result.betId);
+        }
+        // We no longer auto-close the waiting popup after success
+        // The user must manually cancel or the opponent must respond
+      } else {
+        console.log("Error creating bet challenge:", result.message);
+        setBetError(result.message || "Failed to create bet challenge");
+        // Close the waiting popup if there was an error
+        setWaitingPopupOpen(false);
+      }
+    } catch (error) {
+      console.error("Exception sending bet challenge:", error);
+      setBetError("An unexpected error occurred. Please try again.");
+      // Close the waiting popup if there was an error
+      setWaitingPopupOpen(false);
+    }
   };
 
-  const handleRejectBet = () => {
-    setShowBetNotification(false);
-    setWaitingPopupOpen(false);
-  };
-
-  const stakeSelectRef = useRef<HTMLSelectElement>(null);
-
-  // Handler to show info popup from notification
-  const handleShowNotificationInfo = () => {
-    if (selectedBetting === 0) setNotificationInfoPopup(0);
-    else if (selectedBetting === 1) setNotificationInfoPopup(1);
-    else if (selectedBetting === 2) setNotificationInfoPopup(2);
-  };
+  // Add debugging logs when component mounts
+  useEffect(() => {
+    console.log('Match setup screen initialized with params:', {
+      friend,
+      opponentId,
+      opponentSocketId
+    });
+  }, []);
 
   return (
     <div className="min-h-screen w-full flex flex-col items-center justify-start" style={{ background: BG_COLOR }}>
-      {/* Add this just before rendering <BetMatchNotification /> */}
-      {showBetNotification && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          width: '100vw',
-          height: '100vh',
-          background: 'rgba(34,38,38,0.75)',
-          backdropFilter: 'blur(4px)',
-          zIndex: 9998,
-        }} />
-      )}
-      {/* Notification Info Popup */}
-      {notificationInfoPopup !== null && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          width: '100vw',
-          height: '100vh',
-          background: 'rgba(0,0,0,0.45)',
-          zIndex: 10000,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}>
-          <div style={{
-            background: '#4C5454',
-            borderRadius: 14,
-            maxWidth: 340,
-            width: '90vw',
-            boxShadow: '0 4px 32px rgba(0,0,0,0.18)',
-            overflow: 'hidden',
-            position: 'relative',
-          }}>
-            {/* Header */}
-            <div style={{
-              background: '#4A7C59',
-              color: '#fff',
-              padding: '16px 24px 12px 24px',
-              fontWeight: 700,
-              fontSize: 18,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: "flex-end",
-            }}>
-              <button
-                onClick={() => setNotificationInfoPopup(null)}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: '#fff',
-                  fontSize: 22,
-                  cursor: 'pointer',
-                  marginLeft: 12,
-                  lineHeight: 1,
-                }}
-                aria-label="Close"
-              >
-                ×
-              </button>
-            </div>
-            {/* Description */}
-            <span className="flex justify-center items-center mt-3 front-roboto text-semibold text-[16px] text-white">{bettingPopups[notificationInfoPopup].title}</span>
-            <div style={{
-              color: '#ffffff',
-              fontWeight: "regular",
-              fontSize: 16,
-              fontFamily:"roboto",
-              padding: '18px 20px 0 20px',
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-            }}>{bettingPopups[notificationInfoPopup].description}</div>
-            {/* Points */}
-            <ul style={{
-              color: '#ffffff',
-              fontWeight: 400,
-              fontSize: 14,
-              padding: '12px 28px 24px 32px',
-              margin: 0,
-              listStyle: 'disc',
-            }}>
-              {bettingPopups[notificationInfoPopup].points.map((pt, i) => (
-                <li key={i} style={{ marginBottom: 6 }}>{pt}</li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      )}
-      {/* Bet Match Notification */}
-      <BetMatchNotification
-        isOpen={showBetNotification}
-        onAccept={handleAcceptBet}
-        onReject={handleRejectBet}
-        onShowInfo={handleShowNotificationInfo}
-        challengerName={friend || "Opponent"}
-        challengerRating={308}
-        challengerCountryCode="in"
-        challengerProfileImage="/images/profile_waiting_screen.png"
-        bettingType={selectedBetting === 0 ? "Temporary Profile Control" : 
-                    selectedBetting === 1 ? "Temporary Profile Lock" : 
-                    "Rating Stake"}
-        ratingStake={selectedBetting === 2 ? selectedStake : undefined}
-      />
-      
       {/* Popup Overlay */}
       {openPopup !== null && (
         <div style={{
@@ -358,8 +464,28 @@ export default function MatchSetupScreen() {
           </div>
         </div>
       )}
+      {/* Show rejection message when there's a bet rejection */}
+      {rejectionMessage && (
+        <div className="fixed top-16 left-0 right-0 mx-auto w-4/5 max-w-md bg-red-500 text-white p-3 rounded-md text-center z-50">
+          <p>{rejectionMessage}</p>
+        </div>
+      )}
+      {/* Show error message when there's a bet error */}
+      {betError && (
+        <div className="fixed bottom-16 left-0 right-0 mx-auto w-4/5 max-w-md bg-red-500 text-white p-3 rounded-md text-center z-50 flex flex-col items-center">
+          <p>{betError}</p>
+          {betError.includes("Failed") || betError.includes("Error") ? (
+            <button 
+              className="mt-2 bg-white text-red-500 px-4 py-1 rounded-md font-medium text-sm"
+              onClick={handleRetryBetChallenge}
+            >
+              Retry
+            </button>
+          ) : null}
+        </div>
+      )}
       {/* Waiting Popup Overlay */}
-      {waitingPopupOpen && !showBetNotification && (
+      {waitingPopupOpen && (
         <div style={{
           position: 'fixed',
           top: 0,
@@ -386,11 +512,15 @@ export default function MatchSetupScreen() {
             padding: '32px 20px 20px 20px',
           }}>
             <Image
-              src="/images/profile_waiting_screen.png"
+              src={opponentPhotoURL || "/images/profile_waiting_screen.png"}
               alt="Opponent Avatar"
               width={64}
               height={64}
               style={{ borderRadius: '50%', marginBottom: 18, border: '4px solid #fff', background: '#fff' }}
+              onError={(e) => {
+                // If the opponent's profile image fails to load, fall back to the default image
+                (e.target as HTMLImageElement).src = "/images/profile_waiting_screen.png";
+              }}
             />
             <div style={{ color: '#D9D9D9', fontWeight: "medium", fontSize: 16, marginBottom: 4, textAlign: 'center',fontFamily: "roboto"  }}>
               {timerOptions[selectedTimer]} game
@@ -411,7 +541,15 @@ export default function MatchSetupScreen() {
                 maxWidth:"410px",
                 transition: 'all 0.2s',
               }}
-              onClick={() => setWaitingPopupOpen(false)}
+              onClick={() => {
+                // Cancel bet challenge if there is one
+                if (pendingBetId) {
+                  console.log("Cancelling bet challenge:", pendingBetId);
+                  betService.cancelBetChallenge(pendingBetId);
+                }
+                // Close waiting popup
+                setWaitingPopupOpen(false);
+              }}
             >
               Cancel
             </button>
@@ -532,11 +670,15 @@ export default function MatchSetupScreen() {
           {/* Select Opponent Card */}
           <div className="rounded-[10px]  flex items-center px-3 py-3" style={{ background: CARD_COLOR }}>
             <Image
-              src="/images/atm_profile_avatar-icon.png"
+              src={opponentPhotoURL || "/images/atm_profile_avatar-icon.png"}
               alt="friend avatar"
               width={32}
               height={32}
               className="rounded-full"
+              onError={(e) => {
+                // Fallback to default image if the photo fails to load
+                (e.target as HTMLImageElement).src = "/images/atm_profile_avatar-icon.png";
+              }}
             />
             <span className="ml-3 flex-1 text-[#FAF3DD] font-medium" style={{ fontSize: 16 }}>{friend ? friend : "Select opponent"}</span>
             <svg width="22" height="22" fill="none" viewBox="0 0 24 24">
@@ -721,19 +863,17 @@ export default function MatchSetupScreen() {
             <button
               className="w-full py-3 font-semibold text-lg  send-request-btn"
               style={{
-                background: selectedBetting !== null ? "#4A7C59" : BUTTON_DISABLED,
-                color: selectedBetting !== null ? BUTTON_TEXT_ENABLED : BUTTON_TEXT_DISABLED,
-                borderColor: selectedBetting !== null ? "#E9CB6B" : "#3A4A3A",
+                background: selectedBetting !== null && isConnected ? "#4A7C59" : BUTTON_DISABLED,
+                color: selectedBetting !== null && isConnected ? BUTTON_TEXT_ENABLED : BUTTON_TEXT_DISABLED,
+                borderColor: selectedBetting !== null && isConnected ? "#E9CB6B" : "#3A4A3A",
                 borderWidth: 2,
                 borderStyle: 'solid',
                 borderRadius: 10,
-                cursor: selectedBetting !== null ? "pointer" : "not-allowed",
+                cursor: selectedBetting !== null && isConnected ? "pointer" : "not-allowed",
                 transition: "all 0.2s",
               }}
-              disabled={selectedBetting === null}
-              onClick={() => {
-                if (selectedBetting !== null) setWaitingPopupOpen(true);
-              }}
+              disabled={selectedBetting === null || !isConnected}
+              onClick={handleSendRequest}
             >
               Send Request
             </button>

@@ -19,6 +19,7 @@ import { DisconnectionService } from '../game/disconnection.service';
 import { JoinGameDto } from '../game/dto/join-game.dto';
 import { UsersService } from '../users/users.service';
 import { GameRepositoryService } from '../game/game-repository.service';
+import { UserActivityService } from '../users/user-activity.service';
 
 // Define an interface for the matchmaking options
 interface MatchmakingOptions {
@@ -79,8 +80,27 @@ export class GameGateway
     private readonly ratingService: RatingService,
     private readonly disconnectionService: DisconnectionService,
     private readonly usersService: UsersService,
-    private readonly gameRepositoryService: GameRepositoryService
+    private readonly gameRepositoryService: GameRepositoryService,
+    private readonly userActivityService: UserActivityService
   ) {}
+
+  /**
+   * Helper method to safely get a socket by ID
+   * @param socketId The socket ID to find
+   * @returns The socket if found, null otherwise
+   */
+  private safeGetSocket(socketId: string): Socket | null {
+    try {
+      if (this.server && this.server.sockets && this.server.sockets.sockets) {
+        return this.server.sockets.sockets.get(socketId) || null;
+      }
+      this.logger.warn(`Cannot access socket collection when looking for socket ${socketId}`);
+      return null;
+    } catch (error) {
+      this.logger.error(`Error accessing socket ${socketId}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      return null;
+    }
+  }
 
   /**
    * This method runs when the gateway is initialized
@@ -88,6 +108,10 @@ export class GameGateway
   afterInit() {
     this.logger.log('Chess Game WebSocket Gateway Initialized');
     this.logger.warn('⚠ GAME STATE WARNING: All game state is stored in-memory only. Restarting the server will clear all active games.');
+    
+    // Set the server instance in the GameManagerService
+    this.gameManagerService.setServer(this.server);
+    this.logger.log('Server instance passed to GameManagerService');
   }
 
   /**
@@ -95,6 +119,13 @@ export class GameGateway
    */
   handleConnection(client: Socket, ...args: any[]) {
     this.logger.log(`Client connected: ${client.id}`);
+    
+    // Check if user is authenticated
+    if (client.handshake?.auth?.uid) {
+      // We don't mark as in-game yet, just register connection
+      this.userActivityService.registerConnection(client.handshake.auth.uid, client.id);
+    }
+    
     // Check if this is a reconnecting player
     this.matchmakingService.handlePlayerReconnect(client.id);
     // Send a welcome message to the connected client
@@ -109,6 +140,12 @@ export class GameGateway
    */
   handleDisconnect(client: Socket) {
     this.logger.log(`Client disconnected: ${client.id}`);
+    
+    // Update user activity status if authenticated
+    if (client.handshake?.auth?.uid) {
+      this.userActivityService.registerDisconnection(client.id);
+    }
+    
     // Mark player as disconnected but give them time to reconnect
     this.matchmakingService.removePlayerFromQueue(client.id, true);
     // Give the client some time to reconnect before removing from queue
@@ -157,6 +194,12 @@ export class GameGateway
         rated: payload.rated !== undefined ? payload.rated : true,
         preferredSide: payload.preferredSide || 'random'
       });
+
+      // Track user activity if auth is available
+      if (client.handshake?.auth?.uid) {
+        // Not in game yet, but update activity timestamp
+        this.userActivityService.registerActivity(client.handshake.auth.uid);
+      }
       
       // Always return success if no exception was thrown
       return {
@@ -186,6 +229,11 @@ export class GameGateway
     
     // Get the game state
     const game = this.gameManagerService.getGame(payload.gameId);
+    
+    // Track player activity if user auth is available
+    if (client.handshake?.auth?.uid) {
+      this.userActivityService.registerInGame(client.handshake.auth.uid, payload.gameId);
+    }
     
     if (!game) {
       this.logger.warn(`Game ${payload.gameId} not found in gameManagerService - Games registry might be broken.`);
@@ -1061,6 +1109,15 @@ export class GameGateway
         };
       }
       
+      // Verify that game has a valid chessInstance
+      if (!game.chessInstance) {
+        this.logger.error(`Game ${payload.gameId} has no chess instance`);
+        
+        // Create a new chess instance for the game
+        game.chessInstance = new Chess();
+        this.logger.log(`Created new chess instance for game ${payload.gameId}`);
+      }
+      
       // Check if player is part of the game
       const isWhitePlayer = game.whitePlayer.socketId === client.id;
       const isBlackPlayer = game.blackPlayer.socketId === client.id;
@@ -1819,6 +1876,21 @@ export class GameGateway
           event: 'error',
           data: { success: false, message: 'Game not found' }
         };
+      }
+      
+      // Update user activity status to no longer in game for both players
+      if (game.whitePlayer?.socketId) {
+        const whiteSocket = this.safeGetSocket(game.whitePlayer.socketId);
+        if (whiteSocket?.handshake?.auth?.uid) {
+          this.userActivityService.registerLeftGame(whiteSocket.handshake.auth.uid);
+        }
+      }
+      
+      if (game.blackPlayer?.socketId) {
+        const blackSocket = this.safeGetSocket(game.blackPlayer.socketId);
+        if (blackSocket?.handshake?.auth?.uid) {
+          this.userActivityService.registerLeftGame(blackSocket.handshake.auth.uid);
+        }
       }
       
       // Check if the game is already over

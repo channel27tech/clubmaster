@@ -3,7 +3,8 @@ import { io, Socket, ManagerOptions } from 'socket.io-client';
 let socket: Socket | null = null;
 
 // Update the socket URL to use port 3001
-const SOCKET_SERVER_URL = 'http://localhost:3001';
+// Fix: Use environment variable or fallback to localhost
+const SOCKET_SERVER_URL = process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || 'http://localhost:3001';
 
 // Default socket options
 const DEFAULT_OPTIONS: Partial<ManagerOptions> = {
@@ -22,18 +23,32 @@ const DEFAULT_OPTIONS: Partial<ManagerOptions> = {
 /**
  * Initialize and get the socket connection
  * @param options Custom options to override defaults
+ * @param idToken Optional Firebase ID token for authentication
  * @returns Socket instance
  */
-export const getSocket = (options?: Partial<ManagerOptions>): Socket => {
+export const getSocket = (options?: Partial<ManagerOptions> & { auth?: { [key: string]: unknown } }, idToken?: string): Socket => {
   if (!socket) {
-    socket = io(`${SOCKET_SERVER_URL}/chess`, {
+    const finalOptions: Partial<ManagerOptions> & { auth?: { [key: string]: unknown }, extraHeaders?: { [key: string]: string } } = {
       ...DEFAULT_OPTIONS,
-      ...options
-    });
+      ...options,
+    };
+
+    // Add authentication token to headers if provided
+    if (idToken) {
+      finalOptions.extraHeaders = {
+        Authorization: `Bearer ${idToken}`,
+      };
+    }
+
+    // Fix: Ensure we have a valid URL and log it
+    const serverUrl = SOCKET_SERVER_URL || 'http://localhost:3001';
+    console.log('Connecting to socket server:', serverUrl);
+    
+    socket = io(`${serverUrl}/chess`, finalOptions);
     
     // Add connection debugging
     socket.on('connect', () => {
-      console.log('Socket connected successfully to', SOCKET_SERVER_URL);
+      console.log('Socket connected successfully to', serverUrl);
     });
     
     socket.on('connect_error', (error) => {
@@ -103,8 +118,8 @@ export const startMatchmaking = (matchmakingOptions: {
     const auth = getAuth();
     const currentUser = auth.currentUser;
     
-    let firebaseUid = currentUser ? currentUser.uid : 'guest';
-    let username = currentUser?.displayName || null;
+    const firebaseUid = currentUser ? currentUser.uid : 'guest';
+    const username = currentUser?.displayName || null;
     
     console.log('🔑 Firebase UID:', firebaseUid !== 'guest' ? 'Found' : 'Not found (guest)');
     if (firebaseUid !== 'guest') {
@@ -179,7 +194,7 @@ export const onOpponentDisconnect = (callback: (data: { playerId: string, gameId
 /**
  * Remove the opponent disconnect listener
  */
-export const offOpponentDisconnect = (callback?: (data: any) => void): void => {
+export const offOpponentDisconnect = (callback?: (data: unknown) => void): void => {
   if (socket) {
     if (callback) {
       socket.off('opponent_disconnected', callback);
@@ -202,7 +217,7 @@ export const onOpponentReconnect = (callback: (data: { playerId: string, gameId:
 /**
  * Remove the opponent reconnect listener
  */
-export const offOpponentReconnect = (callback?: (data: any) => void): void => {
+export const offOpponentReconnect = (callback?: (data: unknown) => void): void => {
   if (socket) {
     if (callback) {
       socket.off('opponent_reconnected', callback);
@@ -230,7 +245,7 @@ export const onGameTimeoutDueToDisconnection = (callback: (data: {
 /**
  * Remove the game timeout due to disconnection listener
  */
-export const offGameTimeoutDueToDisconnection = (callback?: (data: any) => void): void => {
+export const offGameTimeoutDueToDisconnection = (callback?: (data: unknown) => void): void => {
   if (socket) {
     if (callback) {
       socket.off('game_timeout_disconnection', callback);
@@ -293,7 +308,7 @@ export const onMatchFound = (callback: (gameData: {
 /**
  * Remove the match found listener
  */
-export const offMatchFound = (callback?: (gameData: any) => void): void => {
+export const offMatchFound = (callback?: (gameData: unknown) => void): void => {
   if (socket) {
     if (callback) {
       socket.off('matchFound', callback);
@@ -307,7 +322,7 @@ export const offMatchFound = (callback?: (gameData: any) => void): void => {
  * Add a listener for matchmaking errors
  * @param callback Function to call when a matchmaking error occurs
  */
-export const onMatchmakingError = (callback: (error: any) => void): void => {
+export const onMatchmakingError = (callback: (error: unknown) => void): void => {
   if (socket) {
     socket.on('matchmakingError', callback);
   }
@@ -316,7 +331,7 @@ export const onMatchmakingError = (callback: (error: any) => void): void => {
 /**
  * Remove the matchmaking error listener
  */
-export const offMatchmakingError = (callback?: (error: any) => void): void => {
+export const offMatchmakingError = (callback?: (error: unknown) => void): void => {
   if (socket) {
     if (callback) {
       socket.off('matchmakingError', callback);
@@ -330,7 +345,7 @@ export const offMatchmakingError = (callback?: (error: any) => void): void => {
  * Add a listener for matchmaking status updates
  * @param callback Function to call when a matchmaking status update is received
  */
-export const onMatchmakingStatus = (callback: (status: any) => void): void => {
+export const onMatchmakingStatus = (callback: (status: unknown) => void): void => {
   if (socket) {
     socket.on('matchmakingStatus', callback);
   }
@@ -339,7 +354,7 @@ export const onMatchmakingStatus = (callback: (status: any) => void): void => {
 /**
  * Remove the matchmaking status listener
  */
-export const offMatchmakingStatus = (callback?: (status: any) => void): void => {
+export const offMatchmakingStatus = (callback?: (status: unknown) => void): void => {
   if (socket) {
     if (callback) {
       socket.off('matchmakingStatus', callback);
@@ -409,27 +424,6 @@ export const initializeTimer = (gameId: string, timeControl: string): void => {
   }
 };
 
-// Helper function to format time control
-const formatTimeControl = (timeControl: string): string => {
-  try {
-    // If it's already in the correct format (e.g., "3+0"), return as is
-    if (/^\d+\+\d+$/.test(timeControl)) {
-      return timeControl;
-    }
-
-    // If it's just a number (e.g., "3"), format it
-    const minutes = parseInt(timeControl);
-    if (!isNaN(minutes)) {
-      return `${minutes}+0`;
-    }
-
-    throw new Error('Invalid time control format');
-  } catch (error) {
-    console.error('Error formatting time control:', error);
-    return '5+0'; // Default fallback
-  }
-};
-
 /**
  * Get the current timer state for a game
  * @param gameId The ID of the game
@@ -449,4 +443,92 @@ export const getTimerState = (gameId: string): void => {
  */
 export const getSocketId = (): string | null => {
   return socket?.id ?? null;
+};
+
+/**
+ * Authenticate the socket connection with a Firebase ID token
+ * @param idToken The Firebase ID token
+ * @returns Promise that resolves when the authentication is complete
+ */
+export const authenticateSocket = (idToken: string): Promise<{ success: boolean; message?: string; userId?: string }> => {
+  return new Promise((resolve, reject) => {
+    if (!socket) {
+      console.error('Cannot authenticate socket: Socket not initialized');
+      // Resolve with failure instead of undefined
+      resolve({ success: false, message: 'Socket not initialized' });
+      return;
+    }
+    if (!socket.connected) {
+      console.error('Cannot authenticate socket: Socket not connected');
+      // Resolve with failure instead of undefined
+      resolve({ success: false, message: 'Socket not connected' });
+      return;
+    }
+
+    // Add a flag to track if the promise was resolved
+    let isResolved = false;
+    let timeoutId; // <-- Declare timeoutId in parent scope
+
+    // Set up listener for authentication_result event (fallback if ack doesn't work)
+    const authResultListener = (response: { success: boolean; message?: string; userId?: string }) => {
+      console.log('Received authentication_result event:', response);
+      if (!isResolved) {
+        isResolved = true;
+        // Clean up listener to avoid memory leaks
+        socket.off('authentication_result', authResultListener);
+        // Clear timeout
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
+        resolve(response);
+      }
+    };
+    
+    // Add the listener before emitting the authenticate event
+    socket.on('authentication_result', authResultListener);
+
+    console.log('Attempting to send authenticate event...');
+    try {
+      socket.emit('authenticate', { token: idToken }, (response: { success: boolean; message?: string; userId?: string }) => {
+        // This callback runs when the server acknowledges the authentication
+        console.log('Received authenticate acknowledgement:', response);
+        
+        // Only resolve if we haven't already
+        if (!isResolved) {
+          isResolved = true;
+          // Remove the event listener since we got the ack
+          socket.off('authentication_result', authResultListener);
+          // Clear timeout
+          if (timeoutId) {
+            clearTimeout(timeoutId);
+          }
+          // Resolve with the actual response from the server
+          if (response && typeof response === 'object') {
+            resolve(response);
+          } else {
+            // If we got an invalid response, resolve with a failure
+            resolve({ success: false, message: 'Invalid response from server' });
+          }
+        }
+      });
+
+      // Add a timeout in case the server never responds
+      timeoutId = setTimeout(() => {
+        // Only resolve if we haven't already
+        if (!isResolved) {
+          isResolved = true;
+          // Remove the event listener since we're timing out
+          socket.off('authentication_result', authResultListener);
+          console.warn('Authentication response timeout - assuming failed');
+          resolve({ success: false, message: 'Authentication timeout' });
+        }
+      }, 10000); // 10 second timeout (increased from 5s)
+
+    } catch (error) {
+      // Clean up listener in case of error
+      socket.off('authentication_result', authResultListener);
+      console.error('Error emitting authenticate event:', error);
+      reject(error);
+    }
+  });
 };

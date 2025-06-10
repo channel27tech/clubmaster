@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Chess, Color } from 'chess.js'; // We'll use chess.js for game logic
+import { BetService } from '../../bet/bet.service';
 
 // Game end reasons
 export enum GameEndReason {
@@ -40,6 +41,10 @@ interface Piece {
 @Injectable()
 export class GameEndService {
   private readonly logger = new Logger(GameEndService.name);
+  
+  constructor(
+    private readonly betService: BetService
+  ) {}
 
   /**
    * Check if the game has ended and determine the result

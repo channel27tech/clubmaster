@@ -3,18 +3,17 @@ const nextConfig = {
   reactStrictMode: true,
   transpilePackages: ['firebase'],
   images: {
-    remotePatterns: [
+    domains: ['lh3.googleusercontent.com', 'localhost'],
+  },
+  // Add redirects to replace the functionality of middleware.ts
+  async redirects() {
+    return [
       {
-        protocol: 'https',
-        hostname: 'lh3.googleusercontent.com',
-        pathname: '**',
+        source: '/clubs',
+        destination: '/club/clubs',
+        permanent: true,
       },
-      {
-        protocol: 'http',
-        hostname: 'localhost',
-        pathname: '**',
-      },
-    ],
+    ];
   },
   webpack: (config) => {
     // This is required for Firebase to work properly

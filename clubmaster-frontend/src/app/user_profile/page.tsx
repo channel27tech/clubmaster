@@ -248,7 +248,8 @@ export default function UserProfile() {
               <span className="text-[#8FC0A9] text-[12px] font-medium font-roboto">Wins</span>
             </div>
             <div className="flex flex-col items-center">
-            <span className="text-[#FAF3DD] text-[16px] font-semibold font-roboto">{userData.gamesLost}</span>
+ 
+  <span className="text-[#FAF3DD] text-[16px] font-semibold font-roboto">{userData.gamesLost}</span>
               <span className="text-[#8FC0A9] text-[12px] font-medium font-roboto">Losses</span>
             </div>
             <div className="flex flex-col items-center">
@@ -357,3 +358,4 @@ export default function UserProfile() {
     </div>
   );
 }
+ 

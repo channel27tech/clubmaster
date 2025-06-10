@@ -1,235 +1,241 @@
 "use client";
-import React, { useState, useMemo, useEffect } from "react";
-import Image from "next/image";
-import Link from "next/link";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { ShareLinkModal } from '../share-link/page';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { useAuth } from '../../../context/AuthContext';
+import PlayerSelectionList, { PlayerType } from "../../components/players/PlayerSelectionList";
+import { useAuth } from "@/context/AuthContext";
+import { fetchUsers, AppUser } from "@/services/userService";
+import { useToast } from "@/hooks/useToast";
+import { useActivity } from "@/context/ActivityContext";
+import { UserActivityStatus } from "@/types/activity";
+import { useRouter } from "next/navigation";
+import Image from "next/image";
 
-// Color codes
-const TITLE_COLOR = "#FAF3DD";
-const ACTIVE_COLOR = "#8FC0A9";
-const INACTIVE_COLOR = "#E9CB6B";
-const BG_COLOR = "#333939";
-const CARD_COLOR = "#4C5454";
-const SEARCH_BG = "#4C5454";
-const TEXT_COLOR = "#D9D9D9";
-
-// Mock data
-// const friends = [
-//   { name: "QueenKnight_22", active: true },
-//   { name: "Abhishek", active: true },
-//   { name: "Asif", active: true },
-//   { name: "Basith", active: true },
-//   { name: "Junaid", active: false, lastActive: "5 hrs ago" },
-//   { name: "Ramees", active: false, lastActive: "10 hrs ago" },
-//   { name: "Akash", active: false, lastActive: "11 hrs ago" },
-//   { name: "Akhil", active: false, lastActive: "15 hrs ago" },
-//   { name: "Safwan", active: false, lastActive: "1 Day ago" },
-//   { name: "Safwan", active: false, lastActive: "1 Day ago" },
-//   { name: "Safwan", active: false, lastActive: "1 Day ago" },
-// ];
-
-function StatusDot({ active }: { active: boolean }) {
-  return (
-    <span
-      style={{
-        display: "inline-block",
-        width: 15,
-        height: 15,
-        borderRadius: "50%",
-        background: active ? ACTIVE_COLOR : INACTIVE_COLOR,
-        border: "2px solid #D9D9D9",
-        position: "absolute",
-        left:35,
-        bottom: 0,
-      }}
-    />
-  );
+// Extended player type with additional fields
+interface ExtendedPlayerType extends PlayerType {
+  originalDisplayName?: string;
+  originalPhotoURL?: string;
+  username?: string;
+  custom_photo_base64?: string;
+  effective_photo_url?: string;
 }
 
-function FriendListItem({ friend, onInvite }: { friend: { id: string; displayName: string; }; onInvite: () => void }) {
-  return (
-    <div
-      className="flex items-center gap-4 p-3 rounded-xl mb-3 relative"
-      style={{ background: CARD_COLOR }}
-    >
-      <div className="relative flex items-center justify-center" style={{ width: 48, height: 48, background: '#D9D9D9', borderRadius: '50%' }}>
-        <Image
-          src="/images/frnds dp.svg"
-          alt="profile"
-          width={24}
-          height={28}
-        />
-        {/* <StatusDot active={friend.active} /> */}
-        {/* StatusDot removed as we don't have active status from backend yet */}
-      </div>
-      <div className="flex flex-col flex-1">
-        <span className="text-[16px] front-roboto front-regular" style={{ color: TITLE_COLOR }}>{friend.displayName}</span>
-        {/* {friend.active ? (
-          <span className="text-xs" style={{ color: ACTIVE_COLOR }}>Active now</span>
-        ) : (
-          <span className="text-xs" style={{ color: INACTIVE_COLOR }}>{friend.lastActive}</span>
-        )} */}
-        {/* Active status removed as we don't have it from backend yet */}
-      </div>
-      <button
-        className="ml-auto px-4 py-2 rounded-md bg-[#4A7C59] text-[#FAF3DD] text-sm font-medium"
-        onClick={onInvite}
-      >
-        Invite
-      </button>
-    </div>
-  );
+// Extended AppUser interface to include custom photo
+interface ExtendedAppUser extends AppUser {
+  custom_photo_base64?: string;
+  effective_photo_url?: string;
 }
 
-export default function BetFriendsListPage() {
-  const [search, setSearch] = useState("");
+export default function ClubFriendsPage() {
   const [showShareModal, setShowShareModal] = useState(false);
-  const [users, setUsers] = useState<{ id: string; displayName: string; }[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const { user, loading: authLoading, idToken } = useAuth();
-
-  useEffect(() => {
-    if (!authLoading && user && idToken) {
-      const fetchUsers = async () => {
-        try {
-          const response = await fetch('http://localhost:3001/users/list?excludeClubMembers=true', {
-            headers: {
-              'Authorization': `Bearer ${idToken}`,
-            },
-          });
-          if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-          }
-          const data = await response.json();
-          setUsers(data);
-        } catch (err: any) {
-          setError(err.message);
-        } finally {
-          setLoading(false);
-        }
-      };
-
-      fetchUsers();
-    } else if (!authLoading && !user) {
-      setLoading(false);
-      setError('User not authenticated.');
-    }
-  }, [authLoading, user, idToken]);
-
-  const filtered = useMemo(
-    () =>
-      users.filter((user) =>
-        user.displayName.toLowerCase().includes(search.toLowerCase())
-      ),
-    [search, users]
-  );
+  const { user } = useAuth();
+  const [players, setPlayers] = useState<ExtendedPlayerType[]>([]);
+  const [filteredPlayers, setFilteredPlayers] = useState<ExtendedPlayerType[]>([]);
+  const [searchTerm, setSearchTerm] = useState<string>("");
+  const [isLoading, setIsLoading] = useState(false);
+  const { error: showErrorToast } = useToast();
+  const isMounted = useRef(true);
+  const { getUserActivityById, getTimeElapsed } = useActivity();
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const mode = searchParams.get("mode");
 
-  if (mode === "play") {
-    // Play-a-friend UI (matching screenshot)
-    return (
-      <div className="min-h-screen flex flex-col bg-[#333939] max-w-[430px] mx-auto pb-4 px-[21px]">
-        {/* Header */}
-        <div className="w-full flex items-center pt-4 pb-4 relative z-10">
-          <button onClick={() => router.back()} className="flex items-center justify-center" style={{ width: 40, height: 40, background: 'transparent', borderRadius: 0, padding: 0, border: 'none' }}>
-            <Image src="/icons/back arrow option.svg" alt="Back" width={18} height={18} />
-          </button>
-          <div className="flex-1 flex justify-center">
-            <span className="text-[#FAF3DD] text-[22px] font-semibold">Friends</span>
-          </div>
-        </div>
-        {/* Search Bar */}
-        <div className="mb-3">
-          <div className="flex items-center bg-[#444948] rounded-[10px] px-3 py-2">
-            <input
-              type="text"
-              placeholder="Search..."
-              className="flex-1 bg-transparent outline-none text-[#FAF3DD] placeholder-[#A0A0A0] text-base"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-            />
-            <svg width="20" height="20" fill="none" viewBox="0 0 20 20">
-              <path d="M19 19L14.65 14.65M16.5 9.25C16.5 13.115 13.365 16.25 9.5 16.25C5.63501 16.25 2.5 13.115 2.5 9.25C2.5 5.38501 5.63501 2.25 9.5 2.25C13.365 2.25 16.5 5.38501 16.5 9.25Z" stroke="#A0A0A0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-          </div>
-        </div>
-        {/* Friends List */}
-        <div className="flex-1 overflow-y-auto">
-          {loading && <div className="text-center text-[#B0B0B0] mt-8">Loading users...</div>}
-          {error && <div className="text-center text-red-500 mt-8">Error: {error}</div>}
-          {!loading && !error && filtered.length === 0 && (
-            <div className="text-center text-[#B0B0B0] mt-8">No users found.</div>
-          )}
-          {!loading && !error && filtered.length > 0 && (
-            filtered.map((friend) => {
-              // const isActive = friend.active; // Active status removed
-              return (
-                <div
-                  key={friend.id}
-                  className="flex items-center bg-[#4C5454] rounded-[10px] px-4 py-3 mb-3 relative cursor-pointer"
-                  // onClick={() => router.push(`/user_profile?user=${encodeURIComponent(friend.name)}&from=friends`)} // Use friend.displayName
-                  onClick={() => router.push(`/user_profile?user=${encodeURIComponent(friend.displayName)}&from=friends`)}
-                >
-                  <div className="relative w-10 h-10 flex items-center justify-center mr-4">
-                    <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <circle cx="20" cy="20" r="20" fill="#A0A0A0" />
-                      <path d="M20 22c3.314 0 6-2.686 6-6s-2.686-6-6-6-6 2.686-6 6 2.686 6 6 6z" fill="#E6E6E6"/>
-                      <path d="M10 32c0-4.418 3.582-8 8-8h4c4.418 0 8 3.582 8 8" fill="#E6E6E6"/>
-                    </svg>
-                    {/* <span
-                      className="absolute w-3.5 h-3.5 rounded-full border-2 border-[#333939]"
-                      style={{
-                        background: isActive ? '#8FC0A9' : '#E9CB6B',
-                        right: 0,
-                        bottom: 0,
-                      }}
-                    /> */}
-                    {/* Status dot removed */}
-                  </div>
-                  <div className="flex-1">
-                    <div className="text-[#FAF3DD] text-base font-medium">{friend.displayName}</div>
-                    {/* <div className={isActive ? "text-[#8FC0A9] text-sm" : "text-[#E9CB6B] text-sm"}>{isActive ? 'Active now' : friend.lastActive}</div> */}
-                    {/* Active status text removed */}
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-      </div>
+  // Fetch users function
+  const getUsers = useCallback(async () => {
+    if (!user || !isMounted.current) return;
+    
+    setIsLoading(true);
+    try {
+      const users = await fetchUsers(user);
+
+      // Skip processing if component unmounted during fetch
+      if (!isMounted.current) return;
+
+      // Get Firebase ID token for authentication once for all requests
+      const token = await user.getIdToken();
+
+      // For each user, fetch their full profile data to get custom photo
+      const enrichedUsers = await Promise.all(
+        users.map(async (userItem) => {
+          try {
+            // Make API call to get full profile data using the current user's token
+            const response = await fetch(`/api/profile/${userItem.id}`, {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+            });
+            
+            if (response.ok) {
+              const profileData = await response.json();
+              return {
+                ...userItem,
+                custom_photo_base64: profileData.custom_photo_base64,
+                effective_photo_url: profileData.effective_photo_url
+              };
+            }
+          } catch (error) {
+            console.error(`Error fetching profile for user ${userItem.id}:`, error);
+          }
+          
+          // Return original user if profile fetch fails
+          return userItem;
+        })
+      );
+
+      // Use activity data to enrich players list with real-time status and socketId
+      const playersList: ExtendedPlayerType[] = enrichedUsers.map(userItem => {
+        const activity = getUserActivityById(userItem.id);
+        const isTrulyActive = activity ? 
+          activity.status === UserActivityStatus.ONLINE || 
+          activity.status === UserActivityStatus.IN_GAME : false;
+
+        // Treat user as ExtendedAppUser to access custom_photo_base64
+        const extendedUser = userItem as ExtendedAppUser;
+
+        // Prioritize custom username over displayName from Google
+        const displayName = userItem.username || userItem.displayName;
+
+        // Determine which photo to use - use effective_photo_url first, then custom_photo_base64, then photoURL
+        let photoToUse = extendedUser.effective_photo_url || extendedUser.custom_photo_base64 || userItem.photoURL;
+
+        return {
+          id: userItem.id,
+          name: displayName,
+          active: isTrulyActive, // Use real-time activity status
+          lastActive: activity?.lastActive ? 
+            getTimeElapsed(new Date(activity.lastActive)) : 
+            userItem.lastActive, // Use real-time last active if available, fallback to fetched
+          rating: userItem.rating,
+          photoURL: photoToUse, // Use effective_photo_url or custom photo if available, otherwise Google photo
+          socketId: activity?.socketId, // Add socketId from activity data
+          // Store original data for debugging
+          originalDisplayName: userItem.displayName,
+          originalPhotoURL: userItem.photoURL,
+          username: userItem.username,
+          custom_photo_base64: extendedUser.custom_photo_base64,
+          effective_photo_url: extendedUser.effective_photo_url
+        };
+      });
+
+      console.log('Raw user data from API:', users);
+      setPlayers(playersList);
+      // Initially don't show any players until search
+      setFilteredPlayers([]);
+      console.log('Fetched and processed players:', playersList);
+    } catch (error) {
+      console.error("Failed to fetch users:", error);
+      if (isMounted.current) {
+        showErrorToast("Failed to load players");
+        setPlayers([]);
+        setFilteredPlayers([]);
+      }
+    } finally {
+      if (isMounted.current) {
+        setIsLoading(false);
+      }
+    }
+  }, [user, getUserActivityById, getTimeElapsed, showErrorToast]);
+
+  // Fetch users on component mount or when user changes
+  useEffect(() => {
+    // Set isMounted to true when component mounts
+    isMounted.current = true;
+    
+    // Call getUsers only once on mount or when user changes
+    if (user) {
+      getUsers();
+    } else {
+      setIsLoading(false);
+    }
+    
+    // Cleanup function
+    return () => {
+      isMounted.current = false;
+    };
+  }, [user]); // Remove getUsers from dependencies
+
+  // Handle search term changes
+  const handleSearch = (term: string) => {
+    setSearchTerm(term);
+    
+    if (!term.trim()) {
+      // If search is empty, show no results
+      setFilteredPlayers([]);
+      return;
+    }
+    
+    // Filter players based on search term
+    const filtered = players.filter(player => 
+      player.name.toLowerCase().includes(term.toLowerCase())
     );
-  }
+    
+    setFilteredPlayers(filtered);
+  };
 
-  // Default friends UI (existing)
+  // Dummy function for player action (no invite button needed)
+  const handlePlayerAction = () => {};
+
   return (
-    <div className="min-h-screen w-full" style={{ background: BG_COLOR }}>
+    <>
+      <CustomPlayerList
+        headerTitle="Friends"
+        onSearch={handleSearch}
+        players={filteredPlayers}
+        isLoading={isLoading}
+        searchTerm={searchTerm}
+      />
+
+      {showShareModal && (
+        <ShareLinkModal isOpen={showShareModal} onClose={() => setShowShareModal(false)} />
+      )}
+    </>
+  );
+}
+
+// Custom player list component that doesn't show action buttons
+interface CustomPlayerListProps {
+  headerTitle: string;
+  onSearch: (term: string) => void;
+  players: ExtendedPlayerType[];
+  isLoading: boolean;
+  searchTerm: string;
+}
+
+function CustomPlayerList({ 
+  headerTitle, 
+  onSearch, 
+  players, 
+  isLoading,
+  searchTerm
+}: CustomPlayerListProps) {
+  const router = useRouter();
+  
+  const handleBackClick = () => {
+    router.back();
+  };
+
+  return (
+    <div className="min-h-screen w-full" style={{ background: "#333939" }}>
       {/* Header */}
-      <div className="sticky top-0 z-20" style={{ background: BG_COLOR }}>
+      <div className="sticky top-0 z-20" style={{ background: "#333939" }}>
         <div className="flex items-center ms-4 px-2 py-4 ">
           <button 
-            onClick={() => router.back()} 
+            onClick={handleBackClick} 
             className="text-[#BFC0C0] mr-2"
           >
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-6 h-6">
               <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
             </svg>
           </button>
-          <h1 className="flex-1 text-center text-[26px] front-poppins front-semibold" style={{ color: TITLE_COLOR, letterSpacing: 1 }}>Friends</h1>
+          <h1 className="flex-1 text-center text-[26px] front-poppins front-semibold" style={{ color: "#FAF3DD", letterSpacing: 1 }}>{headerTitle}</h1>
           <span className="w-8" /> {/* Spacer for symmetry */}
         </div>
         {/* Search Bar */}
-        <div className="px-4 py-2 sticky top-[56px] z-10" style={{ background: BG_COLOR }}>
-          <div className="flex items-center rounded-lg px-3" style={{ background: SEARCH_BG }}>
+        <div className="px-4 py-2 sticky top-[56px] z-10" style={{ background: "#333939" }}>
+          <div className="flex items-center rounded-lg px-3" style={{ background: "#4C5454" }}>
             <input
               className="flex-1 bg-transparent outline-none py-4 text-[#FAF3DD] placeholder-[#B0B0B0]"
               placeholder="Search..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
+              value={searchTerm}
+              onChange={e => onSearch(e.target.value)}
               style={{ fontSize: 16 }}
             />
             <svg width="20" height="20" fill="none" viewBox="0 0 24 24">
@@ -239,36 +245,140 @@ export default function BetFriendsListPage() {
           </div>
         </div>
       </div>
-      {/* Friends List */}
+      {/* Players List */}
       <div className="px-4 pt-2 pb-8" style={{ maxWidth: 480, margin: "0 auto" }}>
-        {loading && <div className="text-center text-[#B0B0B0] mt-8">Loading users...</div>}
-        {error && <div className="text-center text-red-500 mt-8">Error: {error}</div>}
-        {!loading && !error && filtered.length === 0 ? (
-          <div className="text-center text-[#B0B0B0] mt-8">No users found.</div>
-        ) : (!loading && !error && filtered.length > 0 && (
-          filtered.map((friend) => (
-            <div key={friend.id} onClick={() => router.push(`/user_profile?user=${encodeURIComponent(friend.displayName)}&from=friends`)} style={{ cursor: 'pointer' }}>
-              {/* Passed dummy data for active/lastActive as it's not available from backend yet */}
-              <FriendListItem friend={friend as any} onInvite={() => setShowShareModal(true)} />
-            </div>
+        {isLoading ? (
+          <div className="text-center text-[#B0B0B0] mt-8">Loading...</div>
+        ) : searchTerm && players.length === 0 ? (
+          <div className="text-center text-[#B0B0B0] mt-8">No players found.</div>
+        ) : !searchTerm ? (
+          <div className="text-center text-[#B0B0B0] mt-8">Search for players above.</div>
+        ) : (
+          players.map((player, idx) => (
+            <PlayerCard 
+              player={player} 
+              key={player.id || player.name + idx} 
+            />
           ))
-        ))}
+        )}
       </div>
-      {showShareModal && (
-        <ShareLinkModal isOpen={showShareModal} onClose={() => setShowShareModal(false)} />
-      )}
-      <style jsx global>{`
-        @media (max-width: 600px) {
-          .min-h-screen { min-height: 100vh; }
-          .text-xl { font-size: 1.2rem; }
-          .text-base { font-size: 1rem; }
-        }
-        @media (min-width: 601px) {
-          .px-4 { padding-left: 2rem; padding-right: 2rem; }
-          .pt-2 { padding-top: 1rem; }
-          .pb-8 { padding-bottom: 2rem; }
-        }
-      `}</style>
     </div>
   );
-} 
+}
+
+// Player card component without action button
+function PlayerCard({ player }: { player: ExtendedPlayerType }) {
+  // Use the useActivity hook to get real-time activity status
+  const { getUserActivityById, getTimeElapsed } = useActivity();
+  // Only get activity if player.id is defined
+  const activity = player.id ? getUserActivityById(player.id) : undefined;
+  const router = useRouter();
+
+  // Determine if the user is currently active online or in-game
+  const isTrulyActive = activity ? activity.status === UserActivityStatus.ONLINE || activity.status === UserActivityStatus.IN_GAME : false;
+
+  // Determine the status text to display based on real-time activity
+  let displayStatusText;
+  if (activity) {
+    if (activity.status === UserActivityStatus.ONLINE) {
+      displayStatusText = "Active now";
+    } else if (activity.lastActive) {
+      displayStatusText = getTimeElapsed(activity.lastActive);
+    } else {
+      displayStatusText = "Offline";
+    }
+  } else if (player.lastActive) {
+     displayStatusText = player.lastActive;
+  } else {
+    displayStatusText = "Offline";
+  }
+
+  // For debugging purposes
+  console.log(`Player ${player.name} data:`, {
+    displayedName: player.name,
+    originalName: player.originalDisplayName,
+    customUsername: player.username,
+    photoURL: player.photoURL,
+    effective_photo_url: player.effective_photo_url,
+    custom_photo_base64: player.custom_photo_base64 ? 'Present (not shown)' : 'Not present',
+    hasCustomPhoto: !!(player.effective_photo_url || player.custom_photo_base64)
+  });
+
+  // Determine if the photo URL is a base64 string or a custom photo
+  const isBase64Image = player.photoURL?.startsWith('data:image');
+  const isCustomPhoto = !!(player.effective_photo_url || player.custom_photo_base64);
+
+  // Navigate to player profile page
+  const handlePlayerClick = () => {
+    if (player.id) {
+      router.push(`/player/${player.id}`);
+    }
+  };
+
+  return (
+    <div
+      className="flex items-center gap-4 p-3 rounded-xl mb-3 relative cursor-pointer"
+      style={{ background: "#4C5454" }}
+      onClick={handlePlayerClick}
+    >
+      <div className="relative flex items-center justify-center" style={{ width: 48, height: 48, background: '#D9D9D9', borderRadius: '50%' }}>
+        {player.photoURL ? (
+          <Image
+            src={player.photoURL}
+            alt={player.name}
+            width={48}
+            height={48}
+            className="rounded-full object-cover"
+            unoptimized={isBase64Image || isCustomPhoto} // Skip image optimization for base64 and custom images
+          />
+        ) : (
+          <Image
+            src="/images/frnds dp.svg"
+            alt="profile"
+            width={24}
+            height={28}
+          />
+        )}
+        <StatusDot active={isTrulyActive} />
+      </div>
+      <div className="flex flex-col flex-1">
+        <div className="flex items-center">
+          <span className="text-[16px] front-roboto front-regular" style={{ color: "#FAF3DD" }}>{player.name}</span>
+          {player.rating && (
+            <span className="ml-2 text-xs font-medium px-2 py-0.5 rounded-full" style={{ background: "#8FC0A9", color: '#FFF' }}>
+              {player.rating}
+            </span>
+          )}
+        </div>
+        {/* Display status text based on real-time activity */}
+        <span className="text-xs" style={{ color: isTrulyActive ? "#8FC0A9" : "#E9CB6B" }}>
+          {displayStatusText}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// Status dot component
+function StatusDot({ active }: { active: boolean }) {
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        width: 15,
+        height: 15,
+        borderRadius: "50%",
+        background: active ? "#8FC0A9" : "#E9CB6B",
+        border: "2px solid #D9D9D9",
+        position: "absolute",
+        left: 35,
+        bottom: 0,
+      }}
+    />
+  );
+}
+
+// Note: The PlayerType interface and helper components like StatusDot and PlayerListItem
+// are defined in clubmaster-frontend/src/app/components/players/PlayerSelectionList.tsx.
+// You should ensure that the PlayerSelectionList component is used consistently
+// if that is the desired approach. 
