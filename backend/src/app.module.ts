@@ -14,6 +14,7 @@ import { DatabaseModule } from './database/database.module';
 import { UsersModule } from './users/users.module';
 import { FirebaseModule } from './firebase/firebase.module';
 import { ProfileModule } from './profile/profile.module';
+import { ClubInviteModule } from './club-invite/club-invite.module';
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { ProfileModule } from './profile/profile.module';
     ClubModule,
     ClubMemberModule,
     ProfileModule,
+    ClubInviteModule,
   ],
   controllers: [AppController],
   providers: [AppService],

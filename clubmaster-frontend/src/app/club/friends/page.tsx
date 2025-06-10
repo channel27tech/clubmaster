@@ -1,9 +1,10 @@
 "use client";
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { ShareLinkModal } from '../share-link/page';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { useAuth } from '../../../context/AuthContext';
 
 // Color codes
 const TITLE_COLOR = "#FAF3DD";
@@ -15,19 +16,19 @@ const SEARCH_BG = "#4C5454";
 const TEXT_COLOR = "#D9D9D9";
 
 // Mock data
-const friends = [
-  { name: "QueenKnight_22", active: true },
-  { name: "Abhishek", active: true },
-  { name: "Asif", active: true },
-  { name: "Basith", active: true },
-  { name: "Junaid", active: false, lastActive: "5 hrs ago" },
-  { name: "Ramees", active: false, lastActive: "10 hrs ago" },
-  { name: "Akash", active: false, lastActive: "11 hrs ago" },
-  { name: "Akhil", active: false, lastActive: "15 hrs ago" },
-  { name: "Safwan", active: false, lastActive: "1 Day ago" },
-  { name: "Safwan", active: false, lastActive: "1 Day ago" },
-  { name: "Safwan", active: false, lastActive: "1 Day ago" },
-];
+// const friends = [
+//   { name: "QueenKnight_22", active: true },
+//   { name: "Abhishek", active: true },
+//   { name: "Asif", active: true },
+//   { name: "Basith", active: true },
+//   { name: "Junaid", active: false, lastActive: "5 hrs ago" },
+//   { name: "Ramees", active: false, lastActive: "10 hrs ago" },
+//   { name: "Akash", active: false, lastActive: "11 hrs ago" },
+//   { name: "Akhil", active: false, lastActive: "15 hrs ago" },
+//   { name: "Safwan", active: false, lastActive: "1 Day ago" },
+//   { name: "Safwan", active: false, lastActive: "1 Day ago" },
+//   { name: "Safwan", active: false, lastActive: "1 Day ago" },
+// ];
 
 function StatusDot({ active }: { active: boolean }) {
   return (
@@ -47,7 +48,7 @@ function StatusDot({ active }: { active: boolean }) {
   );
 }
 
-function FriendListItem({ friend, onInvite }: { friend: typeof friends[0], onInvite: () => void }) {
+function FriendListItem({ friend, onInvite }: { friend: { id: string; displayName: string; }; onInvite: () => void }) {
   return (
     <div
       className="flex items-center gap-4 p-3 rounded-xl mb-3 relative"
@@ -60,15 +61,17 @@ function FriendListItem({ friend, onInvite }: { friend: typeof friends[0], onInv
           width={24}
           height={28}
         />
-        <StatusDot active={friend.active} />
+        {/* <StatusDot active={friend.active} /> */}
+        {/* StatusDot removed as we don't have active status from backend yet */}
       </div>
       <div className="flex flex-col flex-1">
-        <span className="text-[16px] front-roboto front-regular" style={{ color: TITLE_COLOR }}>{friend.name}</span>
-        {friend.active ? (
+        <span className="text-[16px] front-roboto front-regular" style={{ color: TITLE_COLOR }}>{friend.displayName}</span>
+        {/* {friend.active ? (
           <span className="text-xs" style={{ color: ACTIVE_COLOR }}>Active now</span>
         ) : (
           <span className="text-xs" style={{ color: INACTIVE_COLOR }}>{friend.lastActive}</span>
-        )}
+        )} */}
+        {/* Active status removed as we don't have it from backend yet */}
       </div>
       <button
         className="ml-auto px-4 py-2 rounded-md bg-[#4A7C59] text-[#FAF3DD] text-sm font-medium"
@@ -83,12 +86,45 @@ function FriendListItem({ friend, onInvite }: { friend: typeof friends[0], onInv
 export default function BetFriendsListPage() {
   const [search, setSearch] = useState("");
   const [showShareModal, setShowShareModal] = useState(false);
+  const [users, setUsers] = useState<{ id: string; displayName: string; }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const { user, loading: authLoading, idToken } = useAuth();
+
+  useEffect(() => {
+    if (!authLoading && user && idToken) {
+      const fetchUsers = async () => {
+        try {
+          const response = await fetch('http://localhost:3001/users/list?excludeClubMembers=true', {
+            headers: {
+              'Authorization': `Bearer ${idToken}`,
+            },
+          });
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+          const data = await response.json();
+          setUsers(data);
+        } catch (err: any) {
+          setError(err.message);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      fetchUsers();
+    } else if (!authLoading && !user) {
+      setLoading(false);
+      setError('User not authenticated.');
+    }
+  }, [authLoading, user, idToken]);
+
   const filtered = useMemo(
     () =>
-      friends.filter((f) =>
-        f.name.toLowerCase().includes(search.toLowerCase())
+      users.filter((user) =>
+        user.displayName.toLowerCase().includes(search.toLowerCase())
       ),
-    [search]
+    [search, users]
   );
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -124,36 +160,46 @@ export default function BetFriendsListPage() {
         </div>
         {/* Friends List */}
         <div className="flex-1 overflow-y-auto">
-          {filtered.map((friend, idx) => {
-            const isActive = friend.active;
-            return (
-              <div
-                key={idx}
-                className="flex items-center bg-[#4C5454] rounded-[10px] px-4 py-3 mb-3 relative cursor-pointer"
-                onClick={() => router.push(`/user_profile?user=${encodeURIComponent(friend.name)}&from=friends`)}
-              >
-                <div className="relative w-10 h-10 flex items-center justify-center mr-4">
-                  <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <circle cx="20" cy="20" r="20" fill="#A0A0A0" />
-                    <path d="M20 22c3.314 0 6-2.686 6-6s-2.686-6-6-6-6 2.686-6 6 2.686 6 6 6z" fill="#E6E6E6"/>
-                    <path d="M10 32c0-4.418 3.582-8 8-8h4c4.418 0 8 3.582 8 8" fill="#E6E6E6"/>
-                  </svg>
-                  <span
-                    className="absolute w-3.5 h-3.5 rounded-full border-2 border-[#333939]"
-                    style={{
-                      background: isActive ? '#8FC0A9' : '#E9CB6B',
-                      right: 0,
-                      bottom: 0,
-                    }}
-                  />
+          {loading && <div className="text-center text-[#B0B0B0] mt-8">Loading users...</div>}
+          {error && <div className="text-center text-red-500 mt-8">Error: {error}</div>}
+          {!loading && !error && filtered.length === 0 && (
+            <div className="text-center text-[#B0B0B0] mt-8">No users found.</div>
+          )}
+          {!loading && !error && filtered.length > 0 && (
+            filtered.map((friend) => {
+              // const isActive = friend.active; // Active status removed
+              return (
+                <div
+                  key={friend.id}
+                  className="flex items-center bg-[#4C5454] rounded-[10px] px-4 py-3 mb-3 relative cursor-pointer"
+                  // onClick={() => router.push(`/user_profile?user=${encodeURIComponent(friend.name)}&from=friends`)} // Use friend.displayName
+                  onClick={() => router.push(`/user_profile?user=${encodeURIComponent(friend.displayName)}&from=friends`)}
+                >
+                  <div className="relative w-10 h-10 flex items-center justify-center mr-4">
+                    <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <circle cx="20" cy="20" r="20" fill="#A0A0A0" />
+                      <path d="M20 22c3.314 0 6-2.686 6-6s-2.686-6-6-6-6 2.686-6 6 2.686 6 6 6z" fill="#E6E6E6"/>
+                      <path d="M10 32c0-4.418 3.582-8 8-8h4c4.418 0 8 3.582 8 8" fill="#E6E6E6"/>
+                    </svg>
+                    {/* <span
+                      className="absolute w-3.5 h-3.5 rounded-full border-2 border-[#333939]"
+                      style={{
+                        background: isActive ? '#8FC0A9' : '#E9CB6B',
+                        right: 0,
+                        bottom: 0,
+                      }}
+                    /> */}
+                    {/* Status dot removed */}
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-[#FAF3DD] text-base font-medium">{friend.displayName}</div>
+                    {/* <div className={isActive ? "text-[#8FC0A9] text-sm" : "text-[#E9CB6B] text-sm"}>{isActive ? 'Active now' : friend.lastActive}</div> */}
+                    {/* Active status text removed */}
+                  </div>
                 </div>
-                <div className="flex-1">
-                  <div className="text-[#FAF3DD] text-base font-medium">{friend.name}</div>
-                  <div className={isActive ? "text-[#8FC0A9] text-sm" : "text-[#E9CB6B] text-sm"}>{isActive ? 'Active now' : friend.lastActive}</div>
-                </div>
-              </div>
-            );
-          })}
+              );
+            })
+          )}
         </div>
       </div>
     );
@@ -195,15 +241,18 @@ export default function BetFriendsListPage() {
       </div>
       {/* Friends List */}
       <div className="px-4 pt-2 pb-8" style={{ maxWidth: 480, margin: "0 auto" }}>
-        {filtered.length === 0 ? (
-          <div className="text-center text-[#B0B0B0] mt-8">No friends found.</div>
-        ) : (
-          filtered.map((friend, idx) => (
-            <div key={friend.name + idx} onClick={() => router.push(`/user_profile?user=${encodeURIComponent(friend.name)}&from=friends`)} style={{ cursor: 'pointer' }}>
-              <FriendListItem friend={friend} onInvite={() => setShowShareModal(true)} />
+        {loading && <div className="text-center text-[#B0B0B0] mt-8">Loading users...</div>}
+        {error && <div className="text-center text-red-500 mt-8">Error: {error}</div>}
+        {!loading && !error && filtered.length === 0 ? (
+          <div className="text-center text-[#B0B0B0] mt-8">No users found.</div>
+        ) : (!loading && !error && filtered.length > 0 && (
+          filtered.map((friend) => (
+            <div key={friend.id} onClick={() => router.push(`/user_profile?user=${encodeURIComponent(friend.displayName)}&from=friends`)} style={{ cursor: 'pointer' }}>
+              {/* Passed dummy data for active/lastActive as it's not available from backend yet */}
+              <FriendListItem friend={friend as any} onInvite={() => setShowShareModal(true)} />
             </div>
           ))
-        )}
+        ))}
       </div>
       {showShareModal && (
         <ShareLinkModal isOpen={showShareModal} onClose={() => setShowShareModal(false)} />

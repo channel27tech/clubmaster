@@ -1,7 +1,8 @@
-import { Controller, Get, Post, Body, Req, UsePipes, ValidationPipe, UseGuards, UnauthorizedException, Param, NotFoundException } from '@nestjs/common';
+import { Controller, Get, Post, Body, Req, UsePipes, ValidationPipe, UseGuards, UnauthorizedException, Param, NotFoundException, Patch } from '@nestjs/common';
 import { ClubService } from './club.service';
 import { CreateClubDto } from './dto/create-club.dto';
 import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
+import { UpdateClubDto } from './dto/update-club.dto';
 
 // Extend the Express Request interface to include our firebaseUser property
 interface FirebaseRequest extends Request {
@@ -39,5 +40,16 @@ export class ClubController {
     const club = await this.clubService.findOneById(Number(id));
     if (!club) throw new NotFoundException('Club not found');
     return club;
+  }
+
+  @Patch(':id')
+  @UseGuards(FirebaseAuthGuard)
+  @UsePipes(new ValidationPipe({ whitelist: true }))
+  async update(
+    @Param('id') id: string,
+    @Body() updateClubDto: UpdateClubDto,
+    @Req() req: FirebaseRequest
+  ) {
+    return this.clubService.updateClub(Number(id), updateClubDto, req.user.uid);
   }
 } 

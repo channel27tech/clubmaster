@@ -5,6 +5,7 @@ import { ClubMember } from './club-member.entity';
 import { Club } from '../club/club.entity';
 import { JoinClubDto } from './dto/join-club.dto';
 import { User } from '../users/entities/user.entity';
+import { ClubInviteService } from '../club-invite/club-invite.service';
 
 @Injectable()
 export class ClubMemberService {
@@ -15,6 +16,7 @@ export class ClubMemberService {
     private clubRepository: Repository<Club>,
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    private clubInviteService: ClubInviteService,
   ) {}
 
   async joinClub(joinClubDto: JoinClubDto, firebaseUid: string) {
@@ -40,7 +42,13 @@ export class ClubMemberService {
     if (club.type === 'public') {
       // allow
     } else if (club.type === 'private_by_invite') {
-      throw new BadRequestException('Invite required to join this club');
+      if (!joinClubDto.inviteToken) {
+        throw new BadRequestException('Invite required to join this club');
+      }
+      // Validate invite token
+      const invite = await this.clubInviteService.validateInvite(joinClubDto.inviteToken, club.id);
+      // Mark invite as used
+      await this.clubInviteService.markInviteUsed(joinClubDto.inviteToken, user.id.toString());
     } else if (club.type === 'private_by_rating') {
       const limit = club.ratingLimit ?? 1000;
       if (user.rating < limit) {
