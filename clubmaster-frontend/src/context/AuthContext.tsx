@@ -25,8 +25,9 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 // Define types for the context
 interface AuthContextType {
   user: User | null;
-  isLoading: boolean;
+  loading: boolean;
   isGuest: boolean;
+  idToken: string | null;
   loginWithGoogle: () => Promise<UserCredential>;
   loginWithFacebook: () => Promise<UserCredential>;
   loginWithPhone: (phoneNumber: string) => Promise<ConfirmationResult>;
@@ -46,8 +47,9 @@ interface AuthProviderProps {
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [idToken, setIdToken] = useState<string | null>(null);
   
   // Derived state to identify guest users
   const isGuest = user?.isAnonymous === true;
@@ -136,14 +138,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           
           // Sync user data with backend
           await syncUserWithBackend(firebaseUser);
+
+          // Get and set the ID token
+          const token = await firebaseUser.getIdToken();
+          setIdToken(token);
         }
         
         setUser(firebaseUser);
-        setIsLoading(false);
+        setLoading(false);
       }, (error) => {
         console.error("Auth state change error:", error);
         setError("Authentication state monitoring failed");
-        setIsLoading(false);
+        setLoading(false);
       });
       
       // Clean up subscription on unmount
@@ -168,7 +174,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       
       // Explicitly update the user state (though the onAuthStateChanged should catch this too)
       setUser(result.user);
-      
+
+      // Get and set the ID token after login
+      const token = await result.user.getIdToken();
+      setIdToken(token);
+
       return result;
     } catch (error: any) {
       console.error("Google login error:", error);
@@ -208,7 +218,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       
       // Explicitly update the user state (though the onAuthStateChanged should catch this too)
       setUser(result.user);
-      
+
+      // Get and set the ID token after login
+      const token = await result.user.getIdToken();
+      setIdToken(token);
+
       return result;
     } catch (error: any) {
       console.error("Facebook login error:", error);
@@ -289,12 +303,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const result = await confirmationResult.confirm(otp);
       console.log("Phone login successful, user:", result.user.phoneNumber);
       
-      // Explicitly sync with backend right after login
+      // Explicitly sync with backend
       await syncUserWithBackend(result.user);
-      
-      // Explicitly update the user state
-      setUser(result.user);
-      
+
+      // Get and set the ID token after verification
+      const token = await result.user.getIdToken();
+      setIdToken(token);
+
       return result;
     } catch (error: any) {
       console.error("OTP verification error:", error);
@@ -339,9 +354,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         }
       }
       
-      // Sync user data with backend
+      // Explicitly sync with backend
       await syncUserWithBackend(result.user);
-      
+
+      // Get and set the ID token after guest login
+      const token = await result.user.getIdToken();
+      setIdToken(token);
+
       return result;
     } catch (error: any) {
       console.error("Guest login error:", error);
@@ -359,6 +378,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       
       // Explicitly set user to null
       setUser(null);
+
+      // Clear the ID token on logout
+      setIdToken(null);
     } catch (error: any) {
       console.error("Logout error:", error);
       setError("Failed to log out. Please try again.");
@@ -369,8 +391,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   // Provide the auth context value
   const value: AuthContextType = {
     user,
-    isLoading,
+    loading,
     isGuest,
+    idToken,
     loginWithGoogle,
     loginWithFacebook,
     loginWithPhone,
@@ -423,8 +446,9 @@ export const useAuth = (): AuthContextType => {
     // Return stub implementation for SSR
     return {
       user: null,
-      isLoading: true,
+      loading: true,
       isGuest: false,
+      idToken: null,
       loginWithGoogle: async () => { throw new Error('Auth not available during SSR'); },
       loginWithFacebook: async () => { throw new Error('Auth not available during SSR'); },
       loginWithPhone: async () => { throw new Error('Auth not available during SSR'); },

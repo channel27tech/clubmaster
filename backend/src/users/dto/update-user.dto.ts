@@ -28,4 +28,8 @@ export class UpdateUserDto {
   @IsOptional()
   @IsNumber()
   rating?: number;
+
+  @IsOptional()
+  @IsString()
+  location?: string;
 } 

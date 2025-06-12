@@ -15,6 +15,7 @@ import { ProfileModule } from './profile/profile.module';
 import { BetModule } from './bet/bet.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { FriendsModule } from './friends/friends.module';
+import { ClubInviteModule } from './club-invite/club-invite.module';
 
 // This is the main module that starts the server
 @Module({
@@ -55,6 +56,7 @@ import { FriendsModule } from './friends/friends.module';
     BetModule,
     NotificationsModule,
     FriendsModule,
+    ClubInviteModule,
   ],
 })
 export class AppModule {}

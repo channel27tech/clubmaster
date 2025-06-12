@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Put, Delete, NotFoundException, Logger, Headers, UnauthorizedException, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Put, Delete, NotFoundException, Logger, Headers, UnauthorizedException, UseGuards, Req, Query } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { User } from './entities/user.entity';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -36,6 +36,17 @@ export class UsersController {
   @Get()
   async findAll(): Promise<User[]> {
     return this.usersService.findAll();
+  }
+
+  @Get('list')
+  @UseGuards(FirebaseAuthGuard)
+  async listUsers(
+    @Req() req: FirebaseRequest,
+    @Query('excludeClubMembers') excludeClubMembers?: string
+  ): Promise<User[]> {
+    const currentUserId = req.user.uid; // This line will now have req.user defined
+    const exclude = excludeClubMembers === 'true';
+    return this.usersService.findAllExcludingClubMembers(exclude, currentUserId);
   }
 
   @Get(':id')

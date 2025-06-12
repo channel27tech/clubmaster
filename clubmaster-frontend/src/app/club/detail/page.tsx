@@ -31,6 +31,7 @@ interface Club {
   credits?: number;
   rank?: number;
   ratingLimit?: number;
+  type?: string;
 }
 
 export default function ClubDetailPage() {
@@ -45,12 +46,14 @@ export default function ClubDetailPage() {
   const [showShareModal, setShowShareModal] = useState(false);
   const [apiError, setApiError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [profile, setProfile] = useState<{ location?: string } | null>(null);
+  const inviteToken = searchParams.get('invite');
+  const [isMember, setIsMember] = useState(false);
+  const [joinError, setJoinError] = useState('');
+  const [members, setMembers] = useState<ClubMember[]>([]);
 
   // Get club ID from query string (?id=123)
   const clubId = searchParams.get('id');
-
-  // Check if the current user is a member of this club
-  const isMember = user && club?.members.some(member => member.userId === user.uid);
 
   // Show join button if user is not a member of any club and not a member of this club
   const showJoinButton = !hasClub && !isMember && club;
@@ -69,8 +72,26 @@ export default function ClubDetailPage() {
     if (!clubId) return;
     fetch(`http://localhost:3001/club/${clubId}`)
       .then(res => res.json())
-      .then(data => setClub(data));
+      .then(data => {
+        setClub(data);
+        setMembers(data.members || []);
+      });
   }, [clubId]);
+
+  useEffect(() => {
+    const fetchProfile = async () => {
+      if (!user) return;
+      const token = await user.getIdToken();
+      const res = await fetch('/api/profile', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setProfile(data);
+      }
+    };
+    fetchProfile();
+  }, [user]);
 
   // Add useEffect to control body scroll
   useEffect(() => {
@@ -109,21 +130,39 @@ export default function ClubDetailPage() {
   // Join handler (replace with actual join logic as needed)
   const handleJoin = async () => {
     if (!user || !clubId) return;
+    // Check for private by location club and user location
+    if (club?.type === 'private_by_location') {
+      if (!profile?.location) {
+        setApiError('Please enter your location in your profile before joining this club.');
+        setTimeout(() => {
+          router.push('/user_profile/edit');
+        }, 1500);
+        return;
+      }
+      if (profile.location && club.location && profile.location.trim().toLowerCase() !== club.location.trim().toLowerCase()) {
+        setApiError('Your location does not match the club location.');
+        setTimeout(() => {
+          router.push('/user_profile/edit');
+        }, 1500);
+        return;
+      }
+      console.log('User location when joining:', profile.location);
+    }
     setLoading(true);
     setApiError('');
     try {
       const token = await user.getIdToken();
-      await joinClub(Number(clubId), token);
+      await joinClub(Number(clubId), token, inviteToken || undefined);
       // Refetch club data to update members and hide join button
       const updatedClub = await fetch(`http://localhost:3001/club/${clubId}`).then(res => res.json());
       setClub(updatedClub);
       // Optionally, update hasClub in context if needed
       // Find the joined user in the updated member list
-    const joinedUser = updatedClub.members.find((member: any) => member.userId === user.uid);
-    if (joinedUser) {
-      console.log('User joined club:', joinedUser);
-      // You can also display this info in the UI if needed
-    }
+      const joinedUser = updatedClub.members.find((member: any) => member.userId === user.uid);
+      if (joinedUser) {
+        console.log('User joined club:', joinedUser);
+        // You can also display this info in the UI if needed
+      }
       // Optionally, show a success message
     } catch (error: any) {
       setApiError(error?.response?.data?.message || 'Failed to join club');
@@ -136,6 +175,46 @@ export default function ClubDetailPage() {
   const uniqueMembers = Array.isArray(club?.members)
     ? Array.from(new Map(club.members.map(m => [m.firebaseUid, m])).values())
     : [];
+
+  // Check if user is already a member (fetch from API)
+  useEffect(() => {
+    if (!user || !members.length) return;
+    setIsMember(members.some(member => member.firebaseUid === user.uid));
+  }, [user, members]);
+
+  // Refactor handleGenerateInvite to immediately open WhatsApp with the generated link
+  const handleGenerateInvite = async () => {
+    const res = await fetch('http://localhost:3001/club-invite/create', {
+      method: 'POST',
+      body: JSON.stringify({ clubId }),
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${user && await user.getIdToken()}` }
+    });
+    const { token: inviteToken } = await res.json();
+    const link = `${window.location.origin}/club/detail?id=${clubId}&invite=${inviteToken}`;
+    // Immediately open WhatsApp with the generated link
+    const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(link)}`;
+    window.open(whatsappUrl, '_blank');
+  };
+
+  // Handle join with invite
+  const handleJoinWithInvite = async () => {
+    setJoinError('');
+    setLoading(true);
+    try {
+      const res = await fetch('/api/club-member/join', {
+        method: 'POST',
+        body: JSON.stringify({ clubId, inviteToken }),
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${user && await user.getIdToken()}` }
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setIsMember(true);
+      // Optionally, refresh club data
+    } catch (err: any) {
+      setJoinError(err.message || 'Failed to join club');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className={`min-h-screen bg-[#333939] flex flex-col w-full max-w-[400px] mx-auto relative ${showMenu || showLeaveConfirm ? 'overflow-hidden' : ''}`}>
@@ -321,7 +400,7 @@ export default function ClubDetailPage() {
 
       {/* Bottom Sheet Menu */}
       {showMenu && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[388px] h-[179px] bg-[#1F2323] rounded-[10px] z-50 overflow-hidden">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[388px] h-[225px] bg-[#1F2323] rounded-[10px] z-50 overflow-hidden">
           <div className="flex flex-col h-full">
             <button
               onClick={() => handleMenuClick('invite')}
@@ -334,6 +413,12 @@ export default function ClubDetailPage() {
               className="w-full text-center py-4 text-[#D9D9D9] text-base border-b border-[#3A393C]"
             >
               Share Link
+            </button>
+            <button
+              onClick={() => handleMenuClick('invite')}
+              className="w-full text-center py-4 text-[#D9D9D9] text-base border-b border-[#3A393C]"
+            >
+              Edit Club
             </button>
             <button
               onClick={() => handleMenuClick('leave')}
@@ -396,12 +481,27 @@ export default function ClubDetailPage() {
         <BottomNavigation />
       </div>
 
-      {/* Admin-only UI */}
+      {/* Super Admin: Share Link UI (inside detail page) */}
       {isSuperAdmin && (
-        <button /* your admin button code here */>
-          {/* Admin-only features, e.g., Create Tournament, 3-dot menu, etc. */}
-        </button>
+        <div className="mt-4 p-4 bg-[#4C5454] rounded-lg">
+          <button onClick={handleGenerateInvite} className="w-full py-2 rounded bg-[#4A7C59] text-[#FAF3DD] font-medium border border-[#E9CB6B] mb-2">
+            Share Link
+          </button>
+          {/* When clicked, WhatsApp will open with the generated invite link */}
+        </div>
       )}
+
+      {/* Invited User: Join Club Button */}
+      {!isMember && inviteToken && (
+        <div className="mt-4 p-4 bg-[#4C5454] rounded-lg">
+          <button onClick={handleJoinWithInvite} disabled={loading} className="w-full py-2 rounded bg-[#4A7C59] text-[#FAF3DD] font-medium border border-[#E9CB6B]">
+            {loading ? 'Joining...' : 'Join Club'}
+          </button>
+          {joinError && <div className="text-red-400 text-center mt-2">{joinError}</div>}
+        </div>
+      )}
+
+      {isMember && <div>Welcome to the club!</div>}
     </div>
   );
 } 

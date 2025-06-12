@@ -170,10 +170,10 @@ export default function ClubCreatedDetailPage() {
             className="text-[#BFC0C0]"
             onClick={() => setShowMenu(!showMenu)}
           >
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z" />
-            </svg>
-          </button>
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z" />
+          </svg>
+        </button>
         )}
       </div>
 
@@ -314,13 +314,13 @@ export default function ClubCreatedDetailPage() {
 
       {/* Create Tournament Button */}
       {isSuperAdmin && (
-        <div className="fixed bottom-16 left-1/2 -translate-x-1/2 w-full max-w-[400px] px-4 py-3 bg-[#333939]">
-          <button 
-            className="w-full py-3 rounded-lg bg-[#4A7C59] text-[#FAF3DD] font-medium border border-[#E9CB6B]"
-          >
-            Create Tournament
-          </button>
-        </div>
+      <div className="fixed bottom-16 left-1/2 -translate-x-1/2 w-full max-w-[400px] px-4 py-3 bg-[#333939]">
+        <button 
+          className="w-full py-3 rounded-lg bg-[#4A7C59] text-[#FAF3DD] font-medium border border-[#E9CB6B]"
+        >
+          Create Tournament
+        </button>
+      </div>
       )}
       {/* Overlay to close menu when clicking outside */}
       {showMenu && (
@@ -330,31 +330,39 @@ export default function ClubCreatedDetailPage() {
         ></div>
       )}
 
-      {/* Bottom Sheet Menu */}
-      {showMenu && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[388px] h-[179px] bg-[#1F2323] rounded-[10px] z-50 overflow-hidden">
-          <div className="flex flex-col h-full">
-            <button
-              onClick={() => handleMenuClick('invite')}
-              className="w-full text-center py-4 text-[#D9D9D9] text-base border-b border-[#3A393C]"
-            >
-              Invite
-            </button>
-            <button
-              onClick={() => handleMenuClick('share')}
-              className="w-full text-center py-4 text-[#D9D9D9] text-base border-b border-[#3A393C]"
-            >
-              Share Link
-            </button>
-            <button
-              onClick={() => handleMenuClick('leave')}
-              className="w-full text-center py-4 text-[#D9D9D9] text-base"
-            >
-              Leave Club
-            </button>
-          </div>
-        </div>
-      )}
+{showMenu && (
+  <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[388px] h-[225px] bg-[#1F2323] rounded-[10px] z-50 overflow-hidden">
+    <div className="flex flex-col h-full">
+      <button
+        onClick={() => handleMenuClick('invite')}
+        className="w-full text-center py-4 text-[#D9D9D9] text-base border-b border-[#3A393C]"
+      >
+        Invite
+      </button>
+      <button
+        onClick={() => handleMenuClick('share')}
+        className="w-full text-center py-4 text-[#D9D9D9] text-base border-b border-[#3A393C]"
+      >
+        Share Link
+      </button>
+      <button
+        onClick={() => {
+          setShowMenu(false);
+          router.push(`/club/create?editMode=true&clubId=${club.id}`);
+        }}
+        className="w-full text-center py-4 text-[#D9D9D9] text-base border-b border-[#3A393C]"
+      >
+        Edit Club
+      </button>
+      <button
+        onClick={() => handleMenuClick('leave')}
+        className="w-full text-center py-4 text-[#D9D9D9] text-base"
+      >
+        Leave Club
+      </button>
+    </div>
+  </div>
+)}
 
       {/* Leave Confirmation Dialog */}
       {showLeaveConfirm && (
@@ -388,6 +396,40 @@ export default function ClubCreatedDetailPage() {
         <ShareLinkModal isOpen={showShareModal} onClose={() => setShowShareModal(false)} />
       )}
 
+      {/* Invite Link Section */}
+      {isSuperAdmin && (
+        <div className="fixed bottom-16 left-1/2 -translate-x-1/2 w-full max-w-[400px] px-4 py-3 bg-[#333939]">
+          <button
+            onClick={async () => {
+              // Generate invite and open WhatsApp directly
+              if (!user) {
+                alert('User not authenticated');
+                return;
+              }
+              try {
+                const res = await fetch('http://localhost:3001/club-invite/create', {
+                  method: 'POST',
+                  body: JSON.stringify({ clubId: club?.id }),
+                  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await user.getIdToken()}` }
+                });
+                if (!res.ok) {
+                  alert('Failed to generate invite link');
+                  return;
+                }
+                const { token: inviteToken } = await res.json();
+                const link = `${window.location.origin}/club/detail?id=${club?.id}&invite=${inviteToken}`;
+                const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(link)}`;
+                window.open(whatsappUrl, '_blank');
+              } catch (err) {
+                alert('Failed to generate invite link');
+              }
+            }}
+            className="w-full py-3 rounded-lg bg-[#4A7C59] text-[#FAF3DD] font-medium border border-[#E9CB6B]"
+          >
+            Share Link
+          </button>
+        </div>
+      )}
 
       {/* Bottom Navigation */}
       <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[400px] z-10">
