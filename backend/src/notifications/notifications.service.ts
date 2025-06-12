@@ -96,6 +96,22 @@ export class NotificationsService {
   }
 
   /**
+   * Mark a notification as processed (after an action has been taken)
+   * @param id - Notification ID
+   * @returns The updated notification
+   */
+  async markAsProcessed(id: string): Promise<Notification> {
+    const notification = await this.notificationsRepository.findOne({ where: { id } });
+    
+    if (!notification) {
+      throw new NotFoundException(`Notification with ID ${id} not found`);
+    }
+
+    notification.status = NotificationStatus.PROCESSED;
+    return this.notificationsRepository.save(notification);
+  }
+
+  /**
    * Mark all notifications for a user as read
    * @param userId - User ID
    * @returns Number of affected notifications

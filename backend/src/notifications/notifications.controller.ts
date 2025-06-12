@@ -2,11 +2,11 @@ import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards, Re
 import { NotificationsService } from './notifications.service';
 import { CreateNotificationDto } from './dto/create-notification.dto';
 import { NotificationQueryDto } from './dto/notification-query.dto';
-import { AuthGuard } from '@nestjs/passport';
+import { FirebaseAuthGuard } from '../firebase/firebase-auth.guard';
 import { Notification } from './entities/notification.entity';
 
 @Controller('notifications')
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(FirebaseAuthGuard)
 export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}
 
@@ -18,7 +18,7 @@ export class NotificationsController {
     @Query() query: NotificationQueryDto,
     @Request() req,
   ): Promise<{ notifications: Notification[]; total: number }> {
-    const userId = req.user.id;
+    const userId = req.user.uid;
     return this.notificationsService.getNotificationsForUser(userId, query);
   }
 
@@ -29,7 +29,7 @@ export class NotificationsController {
   async getUnreadCount(
     @Request() req,
   ): Promise<{ count: number }> {
-    const userId = req.user.id;
+    const userId = req.user.uid;
     return this.notificationsService.getUnreadCount(userId);
   }
 
@@ -42,7 +42,7 @@ export class NotificationsController {
     @Param('id') id: string,
     @Request() req,
   ): Promise<Notification> {
-    const userId = req.user.id;
+    const userId = req.user.uid;
     
     // Get the notification first to verify ownership
     const notification = await this.notificationsService.findOne(id);
@@ -66,7 +66,7 @@ export class NotificationsController {
   async markAllAsRead(
     @Request() req,
   ): Promise<{ affected: number }> {
-    const userId = req.user.id;
+    const userId = req.user.uid;
     return this.notificationsService.markAllAsRead(userId);
   }
 
@@ -80,7 +80,7 @@ export class NotificationsController {
     @Param('id') id: string,
     @Request() req,
   ): Promise<void> {
-    const userId = req.user.id;
+    const userId = req.user.uid;
     
     // Get the notification first to verify ownership
     const notification = await this.notificationsService.findOne(id);
