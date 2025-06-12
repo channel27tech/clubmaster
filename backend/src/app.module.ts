@@ -14,6 +14,7 @@ import { FirebaseModule } from './firebase/firebase.module';
 import { ProfileModule } from './profile/profile.module';
 import { BetModule } from './bet/bet.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { FriendsModule } from './friends/friends.module';
 
 // This is the main module that starts the server
 @Module({
@@ -53,6 +54,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     ProfileModule,
     BetModule,
     NotificationsModule,
+    FriendsModule,
   ],
 })
 export class AppModule {}
