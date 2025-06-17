@@ -137,6 +137,9 @@ export default function EditProfilePage() {
         return;
       }
 
+      // Log the user-entered location
+      console.log('User-entered location:', location);
+      
       const response = await fetch("/api/profile/update", {
         method: "POST",
         headers: {
