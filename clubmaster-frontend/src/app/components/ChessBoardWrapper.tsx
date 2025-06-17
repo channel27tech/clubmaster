@@ -132,6 +132,19 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     // console.log('Black player data updated:', blackPlayer);
   }, [blackPlayer]);
   
+  // Board state
+  const [boardState, setBoardState] = useState<BoardState>({
+    squares: Array(8).fill(null).map((_, rowIndex) => 
+      Array(8).fill(null).map((_, colIndex) => ({
+        position: `${String.fromCharCode(97 + colIndex)}${8 - rowIndex}`,
+        piece: null
+      }))
+    )
+  });
+  
+  // Last move for highlighting
+  const [lastMove, setLastMove] = useState<{ from: string, to: string } | null>(null);
+  
   // Loading state for player data
   const [loadingPlayers, setLoadingPlayers] = useState<boolean>(true);
   const [playerDataError, setPlayerDataError] = useState<string | null>(null);
@@ -551,47 +564,101 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       }
     });
     
-    safeSocket.on('move_made', ({ player, isCapture, isCheck }) => {
-      // Update our game state tracker
-      gameStateTracker.lastUpdateTime = Date.now();
+    safeSocket.on('move_made', ({ player, isCapture, isCheck, from, to, san, notation, fen, moveId, promotion }) => {
+      console.log(`[SERVER EVENT] Received move_made broadcast - player: ${player}, from: ${from}, to: ${to}, promotion: ${promotion}`);
       
-      // First update game state
-      if (player === 'white') {
-        gameStateTracker.isWhiteTurn = false;
-        gameStateTracker.activePlayer = 'black';
-        
-        setGameState(prev => ({ 
-          ...prev, 
-          isWhiteTurn: false,
-          hasWhiteMoved: true 
-        }));
-        
-        // Also ensure activePlayer state is synchronized
-        setActivePlayer('black');
-      } else {
-        gameStateTracker.isWhiteTurn = true;
-        gameStateTracker.activePlayer = 'white';
-        
-        setGameState(prev => ({ 
-          ...prev, 
-          isWhiteTurn: true,
-          // Always mark hasWhiteMoved as true after any move (even black's moves)
-          hasWhiteMoved: true
-        }));
-        
-        // Also ensure activePlayer state is synchronized
-        setActivePlayer('white');
-      }
+      // CRITICAL: Do NOT add this server-broadcast move to the moveQueue
+      // Instead, directly apply it to our local chess engine
       
-      // Then play sounds if enabled
-      if (soundEnabledRef.current) {
-        if (isCheck) {
-          playSound('CHECK', true);
-        } else if (isCapture) {
-          playSound('CAPTURE', true);
-        } else {
-          playSound('MOVE', true);
+      try {
+        const chess = getChessEngine();
+        
+        // If we have a FEN, use it for full synchronization (most reliable)
+        if (fen) {
+          console.log(`[SYNC] Using server-provided FEN for synchronization: ${fen}`);
+          chess.load(fen);
         }
+        // Otherwise try SAN notation
+        else if (san) {
+          console.log(`[SYNC] Using SAN notation for move: ${san}`);
+          chess.move(san);
+        }
+        // Or use from/to coordinates with promotion if needed
+        else if (from && to) {
+          console.log(`[SYNC] Using from/to coordinates for move: ${from} to ${to}${promotion ? ' with promotion: ' + promotion : ''}`);
+          
+          // Create the move object
+          const moveObj: any = {
+            from,
+            to
+          };
+          
+          // Add promotion if specified
+          if (promotion) {
+            moveObj.promotion = promotion;
+          }
+          
+          // Make the move
+          const result = chess.move(moveObj);
+          
+          if (!result) {
+            console.error(`[ERROR] Failed to make move from ${from} to ${to}${promotion ? ' with promotion: ' + promotion : ''}`);
+            
+            // Request a board sync from the server
+            safeSocket.emit('request_board_sync', {
+              gameId,
+              reason: 'move_application_failed',
+              clientState: chess.fen()
+            });
+          }
+        }
+        
+        // Update the board state from the new position
+        const newBoardState = getCurrentBoardState();
+        setBoardState(newBoardState);
+        
+        // Update the last move for highlighting
+        setLastMove({ from, to });
+        
+        // Update whose turn it is
+        const isWhiteTurn = chess.turn() === 'w';
+        setActivePlayer(isWhiteTurn ? 'white' : 'black');
+        
+        // Update game state
+        setGameState(prev => ({
+          ...prev,
+          isWhiteTurn,
+          hasWhiteMoved: true,
+          isCheck: chess.isCheck(),
+          isCheckmate: chess.isCheckmate(),
+          isStalemate: chess.isStalemate(),
+          isDraw: chess.isDraw(),
+          isGameOver: chess.isGameOver(),
+          isThreefoldRepetition: chess.isThreefoldRepetition(),
+          isInsufficientMaterial: chess.isInsufficientMaterial()
+        }));
+        
+        // Update the move history
+        const sanMoves = chess.history();
+        setSanMoveList(sanMoves);
+        if (onSanMoveListChange) onSanMoveListChange(sanMoves);
+        
+        // Update captured pieces
+        updateCapturedPieces();
+        
+        // Play move sound if enabled
+        if (soundEnabledRef.current) {
+          playMoveSound(isCapture, isCheck);
+        }
+      } catch (error) {
+        console.error('[ERROR] Failed to process move_made event:', error);
+        
+        // Request a board sync from the server
+        safeSocket.emit('request_board_sync', {
+          gameId,
+          reason: 'move_processing_failed',
+          clientState: getChessEngine().fen()
+        });
       }
     });
     
@@ -1395,42 +1462,76 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   // This is completely separated from sound settings or other game state updates
   useEffect(() => {
     if (!socket || !moveQueue.length || !gameRoomId) return;
-
+    
     const move = moveQueue[0];
     const currentSocket = socket; // Capture current socket to avoid closure issues
-
-    // Only send the move to the server, do not apply it locally
+    
+    // Only send the move to the server, do not apply it locally again
+    // (it's already been applied by the local move handler in ChessBoard.tsx)
     const sendMoveToServer = () => {
       try {
-        console.log(`Sending move to server: ${move.from} to ${move.to} (Socket connected: ${currentSocket.connected})`);
-        const currentPlayerColor = !gameState.isWhiteTurn ? 'white' : 'black'; // Invert since move is being made
-
+        console.log(`[OUTGOING] Sending move to server: ${move.from} to ${move.to}${move.promotion ? ', promotion: ' + move.promotion : ''}`);
+        
+        // Use the player color stored with the move
+        const currentPlayerColor = move.player;
+        
+        if (!currentPlayerColor) {
+          console.error('[ERROR] No player color specified with move');
+          setMoveQueue(prev => prev.slice(1));
+          return;
+        }
+        
+        // Ensure we have a valid socket connection
+        if (!socket || !socket.connected) {
+          console.error('[ERROR] No socket connection available');
+          setMoveQueue(prev => prev.slice(1));
+          return;
+        }
+        
         // Get the current chess engine instance
         const chess = getChessEngine();
         const currentFen = chess.fen();
-        const moveHistory = sanMoveList;
-
-        // Emit the move_made event with SAN notation as the primary identifier
-        currentSocket.emit('move_made', {
+        
+        // Get the current move history
+        const history = chess.history({ verbose: true });
+        const lastMoveVerbose = history.length > 0 ? history[history.length - 1] : null;
+        
+        // Check if this is a pawn promotion move
+        if (move.promotion) {
+          console.log(`[PROMOTION] Sending promotion move with piece: ${move.promotion}`);
+        }
+        
+        // Create a unique move ID for tracking
+        const moveId = `${move.from}-${move.to}-${Date.now()}`;
+        
+        // Emit the move to the server
+        socket.emit('move_made', {
           gameId: gameRoomId,
+          moveId,
           from: move.from,
           to: move.to,
           player: currentPlayerColor,
+          notation: move.notation || undefined,
           promotion: move.promotion,
-          currentFen: currentFen, // FEN before the move (for validation)
-          moveHistory: moveHistory // Include move history for verification
+          isCapture: move.isCapture || lastMoveVerbose?.captured !== undefined,
+          fen: currentFen,
+          san: lastMoveVerbose?.san || undefined,
+          timestamp: Date.now()
         });
-        console.log(`Move emitted to server: ${move.from}-${move.to}`);
+        
+        // Remove the move from the queue
+        setMoveQueue(prev => prev.slice(1));
       } catch (error) {
-        console.error('Error sending move to server:', error);
+        console.error('[ERROR] Failed to send move to server:', error);
+        // Remove the move from the queue even if it failed
+        setMoveQueue(prev => prev.slice(1));
       }
     };
 
     // Send the move to the server
     sendMoveToServer();
-    // Remove the move from the queue immediately (or optionally, after server confirmation)
-    setMoveQueue(prev => prev.slice(1));
-  }, [socket, moveQueue, gameRoomId, gameState.isWhiteTurn, sanMoveList]);
+    // Don't remove the move from the queue immediately - wait for server confirmation
+  }, [socket, moveQueue, gameRoomId, sanMoveList]);
   
   // Add a function to synchronize the board from FEN or move history
   const synchronizeBoardFromFen = useCallback((fen: string, moveHistory?: string[]) => {
@@ -1605,82 +1706,79 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       
       console.log(`Received board_updated event for game ${data.gameId} with ${data.moveHistory.length} moves`);
       
-      // Log the last move if available
-      if (data.lastMove) {
-        console.log(`Last move: ${data.lastMove}, isCapture: ${data.isCapture}, isCheck: ${data.isCheck}`);
-      }
-      
-      // Compare current move history with received move history
-      const moveHistoryChanged = JSON.stringify(sanMoveList) !== JSON.stringify(data.moveHistory);
-      if (!moveHistoryChanged && sanMoveList.length > 0) {
-        console.log('Move history unchanged, skipping full board synchronization');
-        
-        // Still update turn information if provided
-        if (data.whiteTurn !== undefined) {
-          setActivePlayer(data.whiteTurn ? 'white' : 'black');
-          
-          // Also update game state
-          setGameState(prev => ({
-            ...prev,
-            isWhiteTurn: data.whiteTurn === true, // Ensure boolean type
-            hasWhiteMoved: data.moveHistory.length > 0
-          }));
-        }
-        
-        return;
-      }
-      
-      // Synchronize the board using move history as the primary source of truth
-      // Always trust the server's move history and FEN
-      const syncResult = synchronizeBoardFromMoveHistory(data.moveHistory);
-      if (syncResult) {
-        setBoardState(getCurrentBoardState());
-        // If FEN is provided, validate it against our local state
+      try {
+        // Always update the chess engine state with the server's FEN if provided
         if (data.fen) {
-          const chess = getChessEngine();
-          const localFen = chess.fen();
-          const serverFenParts = data.fen.split(' ');
-          const localFenParts = localFen.split(' ');
-          const serverPosition = serverFenParts.slice(0, 4).join(' ');
-          const localPosition = localFenParts.slice(0, 4).join(' ');
-          if (serverPosition !== localPosition) {
-            // FEN mismatch: force sync and request board sync from server
-            setChessPosition(data.fen, gameRoomId);
-            setSanMoveList(data.moveHistory);
-            if (onSanMoveListChange) onSanMoveListChange(data.moveHistory);
+          setChessPosition(data.fen, gameRoomId);
+        }
+      
+        // Synchronize the board using move history as the primary source of truth
+        const syncResult = synchronizeBoardFromMoveHistory(data.moveHistory);
+        if (syncResult) {
+          // Update the board state from the new position
+          const newBoardState = getCurrentBoardState();
+          
+          // Update move history
+          setSanMoveList(data.moveHistory);
+          if (onSanMoveListChange) onSanMoveListChange(data.moveHistory);
+          
+          // Batch state updates to prevent excessive renders
+          const updates: any = {
+            boardState: newBoardState
+          };
+          
+          // Update last move if provided
+          if (data.lastMove) {
+            const matches = data.lastMove.match(/[a-h][1-8]/g) || [];
+            if (matches.length >= 2) {
+              const from = matches[0];
+              const to = matches[1];
+              updates.lastMove = { from, to };
+            }
+          }
+          
+          // Update active player and game state if whiteTurn is provided
+          if (data.whiteTurn !== undefined) {
+            updates.activePlayer = data.whiteTurn ? 'white' : 'black';
+            updates.gameState = {
+              ...gameState,
+              isWhiteTurn: data.whiteTurn,
+              hasWhiteMoved: data.moveHistory.length > 0,
+              isGameOver: data.isGameOver || false,
+              isCheck: data.isCheck || false,
+              gameOverReason: data.gameOverReason
+            };
+          }
+          
+          // Apply all updates in a single batch to prevent cascading updates
+          setBoardState(newBoardState);
+          if (updates.lastMove) setLastMove(updates.lastMove);
+          if (updates.activePlayer) setActivePlayer(updates.activePlayer);
+          if (updates.gameState) setGameState(updates.gameState);
+          
+          console.log('Successfully processed board update');
+        } else {
+          // If move history sync fails, fallback to FEN
+          if (data.fen) {
+            synchronizeBoardFromFen(data.fen, data.moveHistory);
             if (socket && gameRoomId) {
               socket.emit('request_board_sync', {
                 gameId: gameRoomId,
-                reason: 'fen_sync_failed',
-                clientState: localFen
+                reason: 'critical_sync_failure',
+                clientState: getChessEngine().fen()
               });
             }
-          } else {
-            // FEN matches, update move list
-            setSanMoveList(data.moveHistory);
-            if (onSanMoveListChange) onSanMoveListChange(data.moveHistory);
           }
         }
-        // Update active player and game state
-        if (data.whiteTurn !== undefined) {
-          setActivePlayer(data.whiteTurn ? 'white' : 'black');
-          setGameState(prev => ({
-            ...prev,
-            isWhiteTurn: data.whiteTurn === true,
-            hasWhiteMoved: data.moveHistory.length > 0
-          }));
-        }
-      } else {
-        // If move history sync fails, fallback to FEN
-        if (data.fen) {
-          synchronizeBoardFromFen(data.fen, data.moveHistory);
-          if (socket && gameRoomId) {
-            socket.emit('request_board_sync', {
-              gameId: gameRoomId,
-              reason: 'critical_sync_failure',
-              clientState: getChessEngine().fen()
-            });
-          }
+      } catch (error) {
+        console.error('Error processing board update:', error);
+        // Request a full board sync if we fail to process the update
+        if (socket && gameRoomId) {
+          socket.emit('request_board_sync', {
+            gameId: gameRoomId,
+            reason: 'board_update_processing_failed',
+            clientState: getChessEngine().fen()
+          });
         }
       }
     };
@@ -1702,28 +1800,51 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       
       console.log(`Received board_sync event for game ${data.gameId} with FEN: ${data.fen}`);
       
-      // If move history is available, use it as the primary source of truth
-      if (data.moveHistory && data.moveHistory.length > 0) {
-        console.log(`Using move history from board_sync event (${data.moveHistory.length} moves)`);
-        synchronizeBoardFromMoveHistory(data.moveHistory);
-        setBoardState(getCurrentBoardState());
-      } else {
-        // Fall back to FEN synchronization
-        console.log(`No move history in board_sync event, falling back to FEN`);
-        synchronizeBoardFromFen(data.fen);
-        setBoardState(getCurrentBoardState());
-      }
-      
-      // Update active player based on whiteTurn if provided
-      if (data.whiteTurn !== undefined) {
-        setActivePlayer(data.whiteTurn ? 'white' : 'black');
+      try {
+        // Always set the FEN position first
+        setChessPosition(data.fen, gameRoomId);
         
-        // Also update game state
-        setGameState(prev => ({
-          ...prev,
-          isWhiteTurn: data.whiteTurn === true, // Ensure boolean type
-          hasWhiteMoved: data.moveHistory !== undefined && data.moveHistory.length > 0
-        }));
+        // If move history is available, use it to update the move list
+        if (data.moveHistory && data.moveHistory.length > 0) {
+          console.log(`Using move history from board_sync event (${data.moveHistory.length} moves)`);
+          setSanMoveList(data.moveHistory);
+          if (onSanMoveListChange) onSanMoveListChange(data.moveHistory);
+        }
+        
+        // Update the board state from the new position
+        const newBoardState = getCurrentBoardState();
+        
+        // Batch state updates to prevent excessive renders
+        const updates: any = {
+          boardState: newBoardState
+        };
+        
+        // Update active player based on whiteTurn if provided
+        if (data.whiteTurn !== undefined) {
+          updates.activePlayer = data.whiteTurn ? 'white' : 'black';
+          updates.gameState = {
+            ...gameState,
+            isWhiteTurn: data.whiteTurn,
+            hasWhiteMoved: data.moveHistory !== undefined && data.moveHistory.length > 0
+          };
+        }
+        
+        // Apply all updates in a single batch to prevent cascading updates
+        setBoardState(newBoardState);
+        if (updates.activePlayer) setActivePlayer(updates.activePlayer);
+        if (updates.gameState) setGameState(updates.gameState);
+        
+        console.log('Successfully processed board sync');
+      } catch (error) {
+        console.error('Error processing board sync:', error);
+        // If we fail to process the sync, request another one
+        if (socket && gameRoomId) {
+          socket.emit('request_board_sync', {
+            gameId: gameRoomId,
+            reason: 'sync_processing_failed',
+            clientState: getChessEngine().fen()
+          });
+        }
       }
     };
     
@@ -1835,370 +1956,86 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     
     setMoveHistory(history);
     
-    if (history && history.moves && history.moves.length > 0) {
-      // 🔄 FIX: When updating the move list for display, we need to:
-      // 1. Use ALL moves in the history, not just up to currentMoveIndex
-      // 2. Ensure we're sending the correct SAN notations to the MoveTracker
-
-      // Extract notations from ALL moves in history
-      // This ensures the move tracker always shows the complete game history
-      const allSanMoves = history.moves.map(move => move.notation);
-      
-      // Get the current index from history for debugging
-      const currentIndex = history.currentMoveIndex;
-      
-      // Log the state for debugging
-      console.log('📊 Move Tracker Update Debug:', {
-        totalMovesInHistory: history.moves.length,
-        currentMoveIndex: currentIndex,
-        movesBeingSentToTracker: allSanMoves.length
-      });
-      
-      // Update the sanMoveList state with ALL moves
-      setSanMoveList(prevSanMoveList => {
-        if (JSON.stringify(prevSanMoveList) !== JSON.stringify(allSanMoves)) {
-          return allSanMoves;
-        }
-        return prevSanMoveList;
-      });
-    } else {
-      setSanMoveList(prevSanMoveList => {
-        if (prevSanMoveList.length > 0) {
-          return [];
-        }
-        return prevSanMoveList;
-      });
-    }
-
-    // Update captured pieces based on the current move
-    if (history.moves.length > 0 && history.currentMoveIndex >= 0) {
-      const currentMove = history.moves[history.currentMoveIndex];
-      if (currentMove.boardState && currentMove.boardState.capturedPieces) {
-        setWhiteCapturedPieces(currentMove.boardState.capturedPieces.white);
-        setBlackCapturedPieces(currentMove.boardState.capturedPieces.black);
-      }
-    } else if (history.currentMoveIndex === -1) {
-      // At initial position, reset captured pieces
-      setWhiteCapturedPieces([]);
-      setBlackCapturedPieces([]);
-    }
+    // Debug the move tracker update
+    console.log(`📊 Move Tracker Update Debug: {totalMovesInHistory: ${history.moves.length}, currentMoveIndex: ${history.currentMoveIndex}, movesBeingSentToTracker: ${history.moves.length}}`);
     
-    // Check game status after every move
-    const status = getGameStatus();
-    
-    // Handle threefold repetition
-    if (status.isThreefoldRepetition) {
-      console.log('Threefold repetition detected - game is a draw');
-      
-      // Ensure player data is ready before creating game result data
-      ensurePlayerDataReady();
-      
-      // Create game result data for threefold repetition
-      const resultData = {
-        result: 'draw' as GameResultType,
-        reason: 'threefold_repetition' as GameEndReason,
-        playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
-        opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-        playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-        opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
-        playerPhotoURL: playerColor === 'white' ? whitePlayer.photoURL : blackPlayer.photoURL,
-        opponentPhotoURL: playerColor === 'white' ? blackPlayer.photoURL : whitePlayer.photoURL,
-        playerRatingChange: 0, // Draw means no rating change
-        opponentRatingChange: 0  // Draw means no rating change
+    // Check for threefold repetition after move history updates
+    try {
+      const chess = getChessEngine();
+      const status = {
+        fen: chess.fen(),
+        isCheck: chess.isCheck(),
+        isCheckmate: chess.isCheckmate(),
+        isDraw: chess.isDraw(),
+        isThreefoldRepetition: isThreefoldRepetition()
       };
       
-      // Log the created result data
-      console.log('Created game result data (threefold repetition):', resultData);
+      // Update current position FEN for debugging
+      console.log(`Current position FEN: ${status.fen}`);
       
-      // Set the game result data and show result screen
-      setGameResultData(resultData);
-      setShowResultScreen(true);
-      
-      // Update game state
-      setGameState(prev => ({
-        ...prev,
-        isGameOver: true,
-        isWhiteTurn: status.turn === 'white'
-      }));
-      
-      // Stop both clocks
-      setActivePlayer(null);
-      
-      // Play draw sound - only if sound is enabled
-      if (soundEnabled) {
-        playSound('GAME_END', true);
-      }
-      
-      // Notify the server about the threefold repetition
-      if (socket) {
-        console.log('Emitting threefold_repetition event to server');
-        socket.emit('threefold_repetition', {
-          gameId: gameRoomId,
-          fen: status.fen
-        });
+      // If threefold repetition is detected, handle it
+      if (status.isThreefoldRepetition) {
+        console.log('Threefold repetition detected in handleMoveHistoryChange');
         
-        // Also emit a game_ended event for consistency with other end conditions
-        socket.emit('game_ended', {
-          gameId: gameRoomId,
-          reason: 'threefold_repetition',
-          result: 'draw'
-        });
-      }
-      
-      // Dispatch a local game_ended event
-      try {
-        const gameEndedEvent = new CustomEvent('game_ended', {
-          detail: {
-            reason: 'threefold_repetition',
-            result: 'draw',
-            source: 'local_threefold_repetition',
-            timestamp: Date.now()
-          }
-        });
-        window.dispatchEvent(gameEndedEvent);
-      } catch (error) {
-        console.error('Error dispatching threefold_repetition event:', error);
-      }
-      
-      return;
-    }
-    
-    // Handle checkmate immediately
-    if (status.isCheckmate) {
-      // Ensure player data is ready before creating game result data
-      ensurePlayerDataReady();
-      
-      // Determine the winner based on whose turn it is
-      // In chess, the player who can't move is in checkmate, so the other player wins
-      const isCurrentPlayerWinner = (status.turn === 'white' && playerColor === 'black') || 
-                                  (status.turn === 'black' && playerColor === 'white');
-      
-      // Log player data before creating result data for checkmate
-      console.log('Player data for game result (checkmate):', {
-        playerColor,
-        whitePlayer,
-        blackPlayer,
-        isCurrentPlayerWinner
-      });
-
-      // Create game result data for checkmate
-      const resultData = {
-        result: isCurrentPlayerWinner ? 'win' : 'loss' as 'win' | 'loss',
-        reason: 'checkmate' as GameEndReason,
-        playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
-        opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-        playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-        opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
-        playerPhotoURL: playerColor === 'white' ? whitePlayer.photoURL : blackPlayer.photoURL,
-        opponentPhotoURL: playerColor === 'white' ? blackPlayer.photoURL : whitePlayer.photoURL,
-        playerRatingChange: isCurrentPlayerWinner ? 10 : -10,
-        opponentRatingChange: isCurrentPlayerWinner ? -10 : 10
-      };
-      
-      // Log the created result data
-      console.log('Created game result data (checkmate):', resultData);
-      
-      // Set the game result data and show result screen
-      setGameResultData(resultData);
-      setShowResultScreen(true);
-      
-      // Update game state
-      setGameState(prev => ({
-        ...prev,
-        isGameOver: true,
-        isWhiteTurn: status.turn === 'white'
-      }));
-      
-      // Stop both clocks
-      setActivePlayer(null);
-      
-      // Play checkmate sound - only if sound is enabled
-      if (soundEnabledRef.current) {
-        playSound('CHECKMATE', true);
-      }
-      
-      return;
-    }
-    
-    // Update game state based on chess.js status
-    setGameState(prev => ({ 
-      ...prev,
-      isWhiteTurn: status.turn === 'white',
-      hasWhiteMoved: true,
-      isGameOver: status.isGameOver,
-    }));
-    
-    // If the game is over due to checkmate, stalemate, etc., show the result screen
-    if (status.isGameOver) {
-      // Ensure player data is ready before creating game result data
-      ensurePlayerDataReady();
-      
-      // Determine the result
-      let result: GameResultType = 'draw';
-      let reason: GameEndReason = 'stalemate';
-      
-      if (status.isCheckmate) {
-        // If it's checkmate, the current player (whose turn it is) lost
-        result = status.turn === playerColor ? 'loss' : 'win';
-        reason = 'checkmate';
-      } else if (status.isDraw) {
-        result = 'draw';
-        reason = 'stalemate';
-      }
-      
-      // Get player and opponent based on color
-      const player = playerColor === 'white' ? whitePlayer : blackPlayer;
-      const opponent = playerColor === 'white' ? blackPlayer : whitePlayer;
-
-      // Ensure we have valid player data, or use fallback values
-      const playerName = player?.username || (playerColor === 'white' ? 'White Player' : 'Black Player');
-      const opponentName = opponent?.username || (playerColor === 'white' ? 'Black Player' : 'White Player');
-      const playerRating = typeof player?.rating === 'number' ? player.rating : 1500;
-      const opponentRating = typeof opponent?.rating === 'number' ? opponent.rating : 1500;
-
-      // Log player data before creating result data
-      console.log('Player data for game result (stalemate/draw):', {
-        playerColor,
-        player,
-        opponent,
-        whitePlayer,
-        blackPlayer
-      });
-
-      // Create result data with safe values
-      const resultData = {
-        result,
-        reason,
-        playerName,
-        opponentName,
-        playerRating,
-        opponentRating,
-        playerPhotoURL: player?.photoURL || null,
-        opponentPhotoURL: opponent?.photoURL || null,
-        playerRatingChange: result === 'win' ? 10 : (result === 'loss' ? -10 : 0),
-        opponentRatingChange: result === 'win' ? -10 : (result === 'loss' ? 10 : 0)
-      };
-      
-      // Log the created result data
-      console.log('Created game result data (stalemate/draw):', resultData);
-      
-      console.log('Game result data created:', resultData);
-      
-      // Set result data and show the screen
-      setGameResultData(resultData);
-      setShowResultScreen(true);
-    }
-    
-    // Update active player for clocks
-    if (status.isGameOver) {
-      setActivePlayer(null); // Stop both clocks
-    } else {
-      setActivePlayer(status.turn === 'white' ? 'white' : 'black'); // Set the active player based on whose turn it is
-      
-      // Check for threefold repetition after the move with enhanced validation
-      try {
-        // First ensure the chess engine is in a valid state
-        const chess = getChessEngine();
-        const currentFen = chess.fen();
+        // Update game state
+        setGameState(prev => ({
+          ...prev,
+          isGameOver: true,
+          gameOverReason: 'threefold_repetition'
+        }));
         
-        // Log the current position for debugging
-        console.log(`Current position FEN: ${currentFen}`);
-        console.log(`Move history length: ${chess.history().length}`);
+        // Stop the clocks
+        setActivePlayer(null);
         
-        // Only check for threefold repetition if we have enough moves
-        // Threefold repetition requires at least 8 moves (4 by each player)
-        if (chess.history().length >= 8) {
-          // Use the chess.js isThreefoldRepetition method to check
-          const isThreefoldRep = isThreefoldRepetition();
-          
-          console.log(`Threefold repetition check result: ${isThreefoldRep}`);
-          
-          if (isThreefoldRep && !gameState.isGameOver && socket) {
-            console.log('THREEFOLD REPETITION DETECTED! Emitting game_end event to server...');
-            
-            // Emit game_end event to the server with threefold_repetition reason
-            // This follows the same pattern as other game-ending scenarios
-            socket.emit('game_end', {
-              gameId: gameRoomId,
-              reason: 'threefold_repetition',
-              fen: currentFen,
-              moveHistory: chess.history() // Include move history for verification
-            });
-            
-            // Update game state to mark game as over
-            setGameState(prev => ({
-              ...prev,
-              isGameOver: true,
-              gameOverReason: 'threefold_repetition'
-            }));
-            
-            // Stop the clocks
-            setActivePlayer(null);
-            
-            // Play game end sound
-            playSound('GAME_END', soundEnabled);
-            
-            console.log('Waiting for server to process threefold repetition and emit game_end event...');
-            
-            // Request a board sync to ensure all clients have the correct state
-            socket.emit('request_board_sync', {
-              gameId: gameRoomId,
-              reason: 'threefold_repetition_detected',
-              clientState: currentFen
-            });
-            
-            // Store a temporary game result in localStorage to ensure we can show the result screen
-            // even if there's a delay in receiving the server's game_end event
-            try {
-              const tempResultData = {
-                result: 'draw' as GameResultType,
-                reason: 'threefold_repetition' as GameEndReason,
-                playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
-                opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-                playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-                opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
-                playerPhotoURL: playerColor === 'white' ? whitePlayer.photoURL : blackPlayer.photoURL,
-                opponentPhotoURL: playerColor === 'white' ? blackPlayer.photoURL : whitePlayer.photoURL,
-                playerRatingChange: 0, // Will be updated when server responds
-                opponentRatingChange: 0 // Will be updated when server responds
-              };
-              
-              localStorage.setItem(`gameResult_${gameRoomId}`, JSON.stringify(tempResultData));
-              console.log('Temporary game result data saved to localStorage for threefold repetition');
-            } catch (storageError) {
-              console.error('Failed to save temporary game result data to localStorage:', storageError);
-            }
-          }
-        }
-      } catch (error) {
-        console.error(`Error checking for threefold repetition: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        
-        // If there's an error, request a board sync to recover
-        if (socket && gameRoomId) {
-          console.log('Requesting board sync due to threefold repetition check error');
-          socket.emit('request_board_sync', {
+        // Notify the server about the threefold repetition
+        if (socket) {
+          console.log('Emitting threefold_repetition event to server');
+          socket.emit('threefold_repetition', {
             gameId: gameRoomId,
-            reason: 'threefold_repetition_check_error',
-            clientState: getChessEngine().fen()
+            fen: status.fen
+          });
+          
+          // Also emit a game_ended event for consistency with other end conditions
+          socket.emit('game_ended', {
+            gameId: gameRoomId,
+            reason: 'threefold_repetition',
+            result: 'draw'
           });
         }
+        
+        // Dispatch a local game_ended event
+        try {
+          const gameEndedEvent = new CustomEvent('game_ended', {
+            detail: {
+              reason: 'threefold_repetition',
+              result: 'draw',
+              source: 'local_threefold_repetition',
+              timestamp: Date.now()
+            }
+          });
+          window.dispatchEvent(gameEndedEvent);
+        } catch (error) {
+          console.error('Error dispatching threefold_repetition event:', error);
+        }
+        
+        return;
+      }
+    } catch (error) {
+      console.error(`Error checking for threefold repetition: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      
+      // If there's an error, request a board sync to recover
+      if (socket && gameRoomId) {
+        console.log('Requesting board sync due to threefold repetition check error');
+        socket.emit('request_board_sync', {
+          gameId: gameRoomId,
+          reason: 'threefold_repetition_check_error',
+          clientState: getChessEngine().fen()
+        });
       }
     }
     
-    // If a move is made, add it to the move queue
-    // This is critical for synchronizing moves between clients
-    if (history.moves.length > 0 && history.currentMoveIndex === history.moves.length - 1) {
-      const lastMove = history.moves[history.currentMoveIndex];
-      
-      // Add to move queue instead of directly emitting
-      // This ensures moves are processed even if sound settings change
-      console.log(`Adding move to queue: ${lastMove.from}-${lastMove.to}`);
-      setMoveQueue(prev => [...prev, {
-        from: lastMove.from,
-        to: lastMove.to,
-        promotion: lastMove.promotion
-      }]);
-    }
+    // IMPORTANT: Don't add moves to the queue here - they're already being sent by ChessBoard.tsx
+    // The move queue should only contain moves initiated by the local player
   }, [soundEnabled, playerColor, whitePlayer.username, whitePlayer.rating, blackPlayer.username, blackPlayer.rating]);
   
   // Handle back button click
@@ -2958,8 +2795,36 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     setSanMoveList(chess.history());
   }, [gameRoomId]);
 
-  // Ensure boardState and setBoardState are defined
-  const [boardState, setBoardState] = useState(getCurrentBoardState());
+  // Listen for add_move_to_queue events from the useChessMultiplayer hook
+  useEffect(() => {
+    // Define the handler for the add_move_to_queue event
+    const handleAddMoveToQueue = (event: CustomEvent) => {
+      const moveData = event.detail;
+      console.log('[EVENT] Received add_move_to_queue event:', moveData);
+      
+      // Validate that the move has all required fields
+      if (!moveData.from || !moveData.to || !moveData.player) {
+        console.error('[ERROR] Invalid move data received:', moveData);
+        return;
+      }
+      
+      // Add the move to the moveQueue
+      setMoveQueue(prev => [...prev, {
+        from: moveData.from,
+        to: moveData.to,
+        promotion: moveData.promotion,
+        player: moveData.player
+      }]);
+    };
+    
+    // Add the event listener
+    window.addEventListener('add_move_to_queue', handleAddMoveToQueue as EventListener);
+    
+    // Clean up when component unmounts
+    return () => {
+      window.removeEventListener('add_move_to_queue', handleAddMoveToQueue as EventListener);
+    };
+  }, []);
 
   return (
     <div className="flex flex-col w-full h-full rounded-t-xl rounded-b-none sm:rounded-t-xl sm:rounded-b-none overflow-hidden flex-shrink-0 pb-[62px]" style={{ backgroundColor: '#4A7C59' }}>
