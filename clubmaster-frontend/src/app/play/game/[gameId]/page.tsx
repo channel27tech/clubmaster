@@ -53,35 +53,21 @@ export default function GamePage() {
     if (typeof window !== "undefined") {
       // Get playerColor
       const storedColor = localStorage.getItem("playerColor");
-      // Only set valid values
       if (storedColor === 'white' || storedColor === 'black') {
         setPlayerColor(storedColor);
-        console.log(`🎮 Player color set to: ${storedColor} (White always starts first)`);
       } else {
-        console.warn('No valid player color found in localStorage, defaulting to white');
-        // Default to white if no color is set (should not happen with side selection logic)
+        // Default to white if no color is set
         setPlayerColor('white');
       }
-      
       // Get timeControl
       const storedTimeControl = localStorage.getItem("timeControl");
-      console.log('🔍 Retrieved from localStorage - timeControl:', storedTimeControl);
-      
       // Use helper function to validate and format time control
       const validatedTimeControl = validateTimeControl(storedTimeControl);
       setTimeControl(validatedTimeControl);
-      console.log(`✅ Using time control: ${validatedTimeControl}`);
-      
-      // Also log any gameMode that might be stored
-      const storedGameMode = localStorage.getItem("gameMode");
-      console.log('🔍 Retrieved from localStorage - gameMode:', storedGameMode);
-
-      console.log(`🎮 Game page loaded with gameId: ${gameId}`);
-      console.log(`👤 Player: ${storedColor}, ⏱️ Time control: ${validatedTimeControl}`);
-      
+      // Game start summary log
+      console.log(`[GamePage] Game started: gameId=${gameId}, playerColor=${storedColor || 'white'}, timeControl=${validatedTimeControl}`);
       // Ensure moveHistory is initialized to blank at the beginning of a game
       if (typeof window.localStorage !== 'undefined') {
-        // Reset move history for a fresh game
         const chessState = {
           fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
           hasWhiteMoved: false,
@@ -91,32 +77,24 @@ export default function GamePage() {
           }
         };
         window.localStorage.setItem('chess_engine_state', JSON.stringify(chessState));
-        console.log('[GamePage] Initialized chess_engine_state in localStorage.');
       }
-      
       // Emit enter_game when the component mounts to get initial game state
       if (socket && gameId) {
-        console.log(`[GamePage] useEffect for enter_game: Socket ID: ${socket.id}, Connected: ${socket.connected}, Game ID: ${gameId}`);
         setTimeout(() => {
-          console.log(`[GamePage] First attempt to emit enter_game: Socket ID: ${socket.id}, Connected: ${socket.connected}, Game ID: ${gameId}`);
           if (socket.connected) {
             socket.emit('enter_game', { 
               gameId, 
               requestInitialState: true, 
               timestamp: Date.now() 
             });
-            console.log('[GamePage] enter_game emitted (first attempt).');
           } else {
-            console.warn('[GamePage] Socket not connected on first attempt, setting fallback.');
             setTimeout(() => {
-              console.log(`[GamePage] Fallback attempt to emit enter_game: Socket ID: ${socket.id}, Connected: ${socket.connected}, Game ID: ${gameId}`);
               if (socket.connected) {
                 socket.emit('enter_game', { 
                   gameId, 
                   requestInitialState: true, 
                   timestamp: Date.now() 
                 });
-                console.log('[GamePage] enter_game emitted (fallback attempt).');
               } else {
                 console.error('[GamePage] Socket still not connected on fallback, cannot emit enter_game.');
               }
@@ -124,8 +102,8 @@ export default function GamePage() {
           }
         }, 200);
       } else {
-        if (!socket) console.warn('[GamePage] Socket is null in useEffect for enter_game.');
-        if (!gameId) console.warn('[GamePage] gameId is not available in useEffect for enter_game.');
+        if (!socket) console.error('[GamePage] Socket is null in useEffect for enter_game.');
+        if (!gameId) console.error('[GamePage] gameId is not available in useEffect for enter_game.');
       }
     }
   }, [gameId, socket]);

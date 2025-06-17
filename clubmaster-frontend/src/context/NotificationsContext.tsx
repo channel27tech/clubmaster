@@ -55,7 +55,6 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
   useEffect(() => {
     // Check if user is authenticated and has an ID property
     if (!user || !user.uid) {
-      console.log('User not authenticated or missing uid, skipping socket connection');
       return;
     }
 
@@ -72,22 +71,18 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
 
     // Connection event handlers
     socketInstance.on('connect', () => {
-      console.log('Connected to notifications socket');
       setConnected(true);
     });
 
     socketInstance.on('disconnect', () => {
-      console.log('Disconnected from notifications socket');
       setConnected(false);
     });
 
     socketInstance.on('connection_established', (data) => {
-      console.log('Notifications socket connection established:', data);
     });
 
     // Listen for new notifications
     socketInstance.on('new_notification', (notification) => {
-      console.log('New notification received:', notification);
       
       // Add the notification to our state with read=false
       setNotifications(prev => [
@@ -134,7 +129,6 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
           );
         }
       } catch (error) {
-        console.error('Failed to fetch notifications:', error);
       }
     };
 
@@ -154,7 +148,6 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
         method: 'PATCH',
       });
     } catch (error) {
-      console.error('Failed to mark notification as read:', error);
       // Revert optimistic update on error
       setNotifications(prev => 
         prev.map(n => n.id === notificationId ? { ...n, read: false } : n)
@@ -175,8 +168,6 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
         method: 'PATCH',
       });
     } catch (error) {
-      console.error('Failed to mark all notifications as read:', error);
-      // No revert needed here, just log the error
     }
   };
 
@@ -193,8 +184,6 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
         method: 'DELETE',
       });
     } catch (error) {
-      console.error('Failed to delete notification:', error);
-      // No revert needed here, just log the error
     }
   };
 

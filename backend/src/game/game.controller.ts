@@ -17,14 +17,14 @@ export class GameController {
   @UseGuards(FirebaseAuthGuard)
   async getGamePlayers(@Param('id') id: string) {
     this.logger.log(`Received request for game players with ID: ${id}`);
-    
-    // Pass the full original ID to the repository service
-    // The repository service will handle the extraction and lookup logic
-    const game = await this.gameRepositoryService.findOne(id);
+   
+    // Use the customId-aware lookup
+    const game = await this.gameRepositoryService.findOneByCustomId(id);
     if (!game) {
       this.logger.error(`Game with ID ${id} not found`);
       throw new NotFoundException(`Game with ID ${id} not found`);
     }
+    this.logger.log(`[GameController] Found game for customId ${id}: ${game.id}`);
     
     this.logger.debug(`Found game with ID: ${game.id}, white player ID: ${game.whitePlayerId}, black player ID: ${game.blackPlayerId}`);
 
@@ -56,12 +56,14 @@ export class GameController {
       whitePlayer: { 
         username: whitePlayer.displayName, 
         rating: whiteRating,
-        photoURL: whitePlayer.photoURL || null 
+        photoURL: whitePlayer.photoURL || null,
+        userId: whitePlayer.id
       },
       blackPlayer: { 
         username: blackPlayer.displayName, 
         rating: blackRating,
-        photoURL: blackPlayer.photoURL || null 
+        photoURL: blackPlayer.photoURL || null,
+        userId: blackPlayer.id
       }
     };
 

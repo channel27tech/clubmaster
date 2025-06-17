@@ -67,14 +67,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         isAnonymous: firebaseUser.isAnonymous,
       };
       
-      // Log sync attempt
-      console.log('🔄 Syncing user data with backend:', {
-        uid: firebaseUser.uid,
-        email: firebaseUser.email,
-        displayName: firebaseUser.displayName
-      });
-      console.log('🔑 Token available:', !!token);
-      
       // Check if backend is available
       try {
         // Send to backend with a timeout of 5 seconds
@@ -96,21 +88,35 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         
         if (!response.ok) {
           const errorText = await response.text();
-          console.warn(`Backend sync response not OK: ${response.status} ${response.statusText}. Details: ${errorText}`);
           return; // Continue without blocking auth flow
         }
         
         const data = await response.json();
-        console.log('✅ User data synced successfully:', data);
+        
+        // After syncing, fetch the backend user profile to get the backend UUID
+        try {
+          const profileResponse = await fetch(`${API_URL}/profile`, {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+          });
+          if (profileResponse.ok) {
+            const profileData = await profileResponse.json();
+            if (profileData && profileData.id) {
+              localStorage.setItem('backendUserId', profileData.id);
+            }
+          }
+        } catch (profileError) {
+          // Continue anyway, as this is not critical
+        }
       } catch (fetchError: unknown) {
         // Handle network errors or timeout
-        console.warn('⚠️ Backend sync network error (continuing with auth flow):', 
-          fetchError instanceof Error ? fetchError.message : String(fetchError));
         // Still allow the user to proceed with authentication
         // This prevents the backend being down from blocking the entire auth flow
       }
     } catch (error) {
-      console.error('❌ Error syncing user data with backend:', error);
       // We don't set error state here to avoid blocking the login flow
       // But we log it for debugging
     }
@@ -120,20 +126,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   useEffect(() => {
     // Only run in browser
     if (typeof window !== 'undefined') {
-      console.log("Setting up auth state listener");
       const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-        console.log("Auth state changed:", firebaseUser ? "User logged in" : "No user");
-        
         if (firebaseUser) {
-          console.log("User details:", {
-            uid: firebaseUser.uid,
-            email: firebaseUser.email,
-            displayName: firebaseUser.displayName,
-            isAnonymous: firebaseUser.isAnonymous,
-            emailVerified: firebaseUser.emailVerified,
-            providerId: firebaseUser.providerId,
-          });
-          
           // Sync user data with backend
           await syncUserWithBackend(firebaseUser);
         }
@@ -141,7 +135,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         setUser(firebaseUser);
         setIsLoading(false);
       }, (error) => {
-        console.error("Auth state change error:", error);
         setError("Authentication state monitoring failed");
         setIsLoading(false);
       });
@@ -155,13 +148,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const loginWithGoogle = async (): Promise<UserCredential> => {
     setError(null);
     try {
-      console.log("Attempting Google login");
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({
         prompt: 'select_account'
       });
       const result = await signInWithPopup(auth, provider);
-      console.log("Google login successful, user:", result.user.email);
       
       // Explicitly sync with backend right after login
       await syncUserWithBackend(result.user);
@@ -171,10 +162,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       
       return result;
     } catch (error: any) {
-      console.error("Google login error:", error);
-      console.error("Error code:", error.code);
-      console.error("Error message:", error.message);
-      
       // Handle specific error cases
       if (error.code === 'auth/popup-closed-by-user') {
         setError("Login cancelled. Please try again.");
@@ -195,13 +182,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const loginWithFacebook = async (): Promise<UserCredential> => {
     setError(null);
     try {
-      console.log("Attempting Facebook login");
       const provider = new FacebookAuthProvider();
       provider.setCustomParameters({
         display: 'popup'
       });
       const result = await signInWithPopup(auth, provider);
-      console.log("Facebook login successful, user:", result.user.email);
       
       // Explicitly sync with backend right after login
       await syncUserWithBackend(result.user);
@@ -211,10 +196,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       
       return result;
     } catch (error: any) {
-      console.error("Facebook login error:", error);
-      console.error("Error code:", error.code);
-      console.error("Error message:", error.message);
-      
       // Handle specific error cases
       if (error.code === 'auth/account-exists-with-different-credential') {
         setError("An account already exists with the same email address but different login credentials.");
@@ -242,7 +223,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         size: 'invisible',
         callback: () => {
           // reCAPTCHA solved, allow signInWithPhoneNumber.
-          console.log("reCAPTCHA verified");
         },
         'expired-callback': () => {
           // Response expired. Ask user to solve reCAPTCHA again.
@@ -264,7 +244,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       
       return confirmationResult;
     } catch (error: any) {
-      console.error("Phone login error:", error);
       // Handle specific error cases
       if (error.code === 'auth/invalid-phone-number') {
         setError("The phone number is not valid. Please check and try again.");
@@ -287,7 +266,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setError(null);
     try {
       const result = await confirmationResult.confirm(otp);
-      console.log("Phone login successful, user:", result.user.phoneNumber);
       
       // Explicitly sync with backend right after login
       await syncUserWithBackend(result.user);
@@ -297,7 +275,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       
       return result;
     } catch (error: any) {
-      console.error("OTP verification error:", error);
       // Handle specific error cases
       if (error.code === 'auth/invalid-verification-code') {
         setError("Invalid verification code. Please check and try again.");
@@ -315,7 +292,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setError(null);
     try {
       const result = await signInAnonymously(auth);
-      console.log("Guest login successful, anonymous user created");
       
       // Generate a random guest name
       if (result.user) {
@@ -328,13 +304,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             displayName: guestName
           });
           
-          console.log("Guest display name set:", guestName);
-          
           // Force refresh the user to get the updated display name
           // This triggers the onAuthStateChanged event
           setUser({...result.user});
         } catch (profileError) {
-          console.error("Failed to set guest display name:", profileError);
           // Continue anyway, as this is not critical
         }
       }
@@ -344,7 +317,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       
       return result;
     } catch (error: any) {
-      console.error("Guest login error:", error);
       setError("Failed to continue as guest. Please try again.");
       throw error;
     }
@@ -355,12 +327,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setError(null);
     try {
       await signOut(auth);
-      console.log("User logged out successfully");
       
       // Explicitly set user to null
       setUser(null);
     } catch (error: any) {
-      console.error("Logout error:", error);
       setError("Failed to log out. Please try again.");
       throw error;
     }
@@ -400,7 +370,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           // No setIsAuthenticated needed
         } catch (err) {
           // If sync fails, just log the error but don't log out
-          console.error('User sync with backend failed:', err);
           // We'll continue with the login flow anyway
         }
       });

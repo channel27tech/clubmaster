@@ -37,19 +37,14 @@ export const connectActivitySocket = (uid: string): Socket => {
 
     // Add connection handlers
     activitySocket.on('connect', () => {
-      console.log('Activity socket connected');
-      
       // Start sending heartbeats when connected
       startHeartbeat();
     });
 
     activitySocket.on('connect_error', (error) => {
-      console.error('Activity socket connection error:', error);
     });
 
     activitySocket.on('disconnect', () => {
-      console.log('Activity socket disconnected');
-      
       // Stop heartbeats when disconnected
       stopHeartbeat();
     });

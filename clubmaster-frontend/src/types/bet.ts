@@ -46,12 +46,17 @@ export interface BetChallengeResponse {
 
 // Result of a bet after game completion
 export interface BetResult {
-  betId: string;              // ID of the bet
-  gameId: string;             // ID of the game
-  winnerId: string;           // ID of the winner (or null for draw)
-  loserId?: string;           // ID of the loser (or null for draw)
-  isDraw: boolean;            // Whether the game was a draw
-  ratingChange?: number;      // Rating points transferred (for RATING_STAKE)
-  profileControlExpiry?: Date; // When profile control expires (for PROFILE_CONTROL)
-  profileLockExpiry?: Date;   // When profile lock expires (for PROFILE_LOCK)
+  betId: string;
+  gameId: string;
+  winnerId?: string;
+  loserId?: string;
+  isDraw: boolean;
+  isWinner?: boolean;
+  opponentName?: string;
+  perspective?: 'challenger' | 'opponent';
+  betType?: BetType;
+  opponentDbId?: string;
+  ratingChange?: number;
+  profileControlExpiry?: Date;
+  profileLockExpiry?: Date;
 } 

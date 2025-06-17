@@ -9,14 +9,12 @@ export async function checkIfFriends(userId: string, friendId: string): Promise<
     const response = await fetch(`/api/friends/check?userId=${userId}&friendId=${friendId}`);
     
     if (!response.ok) {
-      console.error('Failed to check friend status:', response.statusText);
       return false;
     }
     
     const data = await response.json();
     return data.isFriend;
   } catch (error) {
-    console.error('Error checking friend status:', error);
     return false;
   }
 }
@@ -37,13 +35,11 @@ export async function addFriend(friendId: string): Promise<boolean> {
     });
     
     if (!response.ok) {
-      console.error('Failed to add friend:', response.statusText);
       return false;
     }
     
     return true;
   } catch (error) {
-    console.error('Error adding friend:', error);
     return false;
   }
 } 

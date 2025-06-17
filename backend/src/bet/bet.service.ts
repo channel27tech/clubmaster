@@ -25,6 +25,7 @@ export class BetService {
   private readonly CHALLENGE_EXPIRY_MS = 60000; // 1 minute before challenge expires
   private readonly PROFILE_CONTROL_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+  // Inject the UsersService and GameManagerService
   constructor(
     private readonly usersService: UsersService,
     @Inject(forwardRef(() => GameManagerService))
@@ -199,18 +200,28 @@ export class BetService {
     winnerId: string | null,
     isDraw: boolean
   ): Promise<BetResult | null> {
+
+    // Get the bet ID from the game ID
     const betId = this.betsByGameId.get(gameId);
     if (!betId) {
       this.logger.warn(`No bet found for game ${gameId}`);
       return null;
     }
 
+    // Get the bet challenge
     const challenge = this.activeBetChallenges.get(betId);
     if (!challenge) {
       this.logger.warn(`Bet challenge ${betId} not found for game result`);
       return null;
     }
 
+    // Ensure challenge.challengerId and challenge.opponentId are populated DB User IDs
+    if (!challenge.challengerId || (challenge.opponentId === undefined && !isDraw)) {
+      this.logger.error(`[BetService] Bet challenge ${betId} is missing critical player IDs (challengerId: ${challenge.challengerId}, opponentId: ${challenge.opponentId})`);
+      return null;
+    }
+
+    // Check if the bet challenge is accepted
     if (challenge.status !== BetStatus.ACCEPTED) {
       this.logger.warn(`Cannot record result for bet ${betId} with status ${challenge.status}`);
       return null;
@@ -234,6 +245,7 @@ export class BetService {
       winnerId: winnerId === null ? undefined : winnerId,
       loserId,
       isDraw,
+      betType: challenge.betType, // Include betType in the core result
     };
 
     // Apply appropriate effects based on bet type
@@ -268,16 +280,51 @@ export class BetService {
     }
 
     challenge.resultApplied = true;
-    this.logger.log(`Recorded result for bet ${betId} - Winner: ${winnerId}, Draw: ${isDraw}`);
+    this.logger.log(`Recorded result for bet ${betId} - Winner DB ID: ${winnerId}, Loser DB ID: ${loserId}, Draw: ${isDraw}`);
     
     // Notify both players of the bet result
     const server = this.gameManagerService.getServer();
     if (server) {
-      if (challenge.challengerSocketId) {
-        server.to(challenge.challengerSocketId).emit('bet_result', betResult);
-      }
-      if (challenge.opponentSocketId) {
-        server.to(challenge.opponentSocketId).emit('bet_result', betResult);
+      // Fetch user display names for personalization
+      const challengerUser = await this.usersService.findOne(challenge.challengerId);
+      const opponentUser = challenge.opponentId ? await this.usersService.findOne(challenge.opponentId) : null;
+      const challengerName = challengerUser?.displayName || challengerUser?.username || 'Challenger';
+      const opponentName = opponentUser?.displayName || opponentUser?.username || 'Opponent';
+
+      // Prepare payload for the Challenger
+      const payloadForChallenger = {
+        ...betResult,
+        isWinner: betResult.winnerId === challenge.challengerId,
+        opponentName: opponentName, // For challenger, opponent is opponentUser
+        perspective: 'challenger',
+        // Pass IDs that might be useful for UI, like opponent's DB ID
+        opponentDbId: challenge.opponentId,
+      };
+      
+      // Emit to challenger's user room (using DB User ID)
+      this.logger.log(`[BetService] Emitting bet_result to Challenger's room: ${challenge.challengerId}`, {
+        payload: payloadForChallenger
+      });
+      server.to(challenge.challengerId).emit('bet_result', payloadForChallenger);
+
+      // Prepare payload for the Opponent (if opponentId exists)
+      if (challenge.opponentId) {
+        const payloadForOpponent = {
+          ...betResult,
+          isWinner: betResult.winnerId === challenge.opponentId,
+          opponentName: challengerName, // For opponent, opponent is challengerUser
+          perspective: 'opponent',
+          // Pass IDs that might be useful for UI
+          opponentDbId: challenge.challengerId,
+        };
+        
+        // Emit to opponent's user room (using DB User ID)
+        this.logger.log(`[BetService] Emitting bet_result to Opponent's room: ${challenge.opponentId}`, {
+          payload: payloadForOpponent
+        });
+        server.to(challenge.opponentId).emit('bet_result', payloadForOpponent);
+      } else {
+        this.logger.warn(`[BetService] No opponentId found for bet ${betId}. Cannot emit bet_result to opponent.`);
       }
     }
 
@@ -371,4 +418,4 @@ export class BetService {
       this.logger.error(`Error applying profile lock: ${error.message}`);
     }
   }
-} 
+}
