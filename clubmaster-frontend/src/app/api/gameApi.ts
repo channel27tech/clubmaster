@@ -1,11 +1,5 @@
 import { auth } from "@/firebase";
-
-// Interface for player data returned from the API
-export interface PlayerData {
-  username: string;
-  rating: number;
-  photoURL: string | null;
-}
+import { PlayerData } from '../utils/types';
 
 // Interface for detailed player data with rating changes
 export interface PlayerResultData extends PlayerData {
@@ -38,11 +32,12 @@ export interface GameResultResponse {
 
 /**
  * Fetches player data for a specific game
- * @param gameId The ID of the game to fetch player data for
+ * @param gameId The ID of the game to fetch player data for (MUST be the same as received from the server, can be customId or UUID)
  * @returns Promise resolving to player data for white and black players
  */
 export async function fetchGamePlayers(gameId: string): Promise<GamePlayersResponse> {
   // Use the full game ID as received - the backend will handle the extraction if needed
+  // DO NOT transform or truncate the gameId here!
   console.log('Using full gameId for API call:', gameId);
 
   // Use the same port as the socket service (3001) instead of trying multiple ports
@@ -59,7 +54,11 @@ export async function fetchGamePlayers(gameId: string): Promise<GamePlayersRespo
     const token = await user.getIdToken();
     
     console.log(`Connecting to backend API at ${apiUrl}...`);
-    const response = await fetch(`${apiUrl}/games/${gameId}/players`, {
+    
+    // Ensure gameId is properly encoded for URL
+    const encodedGameId = encodeURIComponent(gameId);
+    
+    const response = await fetch(`${apiUrl}/games/${encodedGameId}/players`, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -106,7 +105,7 @@ export async function fetchGamePlayers(gameId: string): Promise<GamePlayersRespo
 
 /**
  * Fetches game result data including player details and rating changes
- * @param gameId The ID of the game to fetch result data for
+ * @param gameId The ID of the game to fetch result data for (MUST be the same as received from the server)
  * @returns Promise resolving to game result data with player details and rating changes
  */
 export async function fetchGameResult(gameId: string): Promise<GameResultResponse> {
@@ -126,7 +125,11 @@ export async function fetchGameResult(gameId: string): Promise<GameResultRespons
     const token = await user.getIdToken();
     
     console.log(`Connecting to backend API at ${apiUrl} for game result...`);
-    const response = await fetch(`${apiUrl}/games/${gameId}/result`, {
+    
+    // Ensure gameId is properly encoded for URL
+    const encodedGameId = encodeURIComponent(gameId);
+    
+    const response = await fetch(`${apiUrl}/games/${encodedGameId}/result`, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${token}`,

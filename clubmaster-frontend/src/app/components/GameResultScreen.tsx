@@ -1,15 +1,22 @@
 'use client';
 import React, { useEffect, useState } from 'react';
 import { GameResultType, GameEndReason, GameResult } from '../utils/types';
-import { fetchGameResult, GameResultResponse } from '../api/gameApi';
+import { fetchGameResult } from '../api/gameApi';
+import BetResultDialogueBox, { BetType } from './BetResultDialogueBox';
 
-interface GameResultScreenProps extends Omit<GameResult, 'result' | 'reason'> {
+interface GameResultScreenProps extends Omit<GameResult, 'result' | 'reason' | 'betType'> {
   result: GameResultType;
   reason: GameEndReason;
   gameId: string;
   playerPhotoURL?: string | null;
   opponentPhotoURL?: string | null;
   onClose: () => void;
+  // Bet game integration
+  isBetGame?: boolean;
+  isBetWinner?: boolean;
+  betOpponentName?: string;
+  onEditProfileClick?: () => void;
+  betType?: BetType;
 }
 
 const GameResultScreen: React.FC<GameResultScreenProps> = ({
@@ -24,7 +31,13 @@ const GameResultScreen: React.FC<GameResultScreenProps> = ({
   opponentRatingChange: initialOpponentRatingChange = 0,
   playerPhotoURL: initialPlayerPhotoURL = null,
   opponentPhotoURL: initialOpponentPhotoURL = null,
-  onClose
+  onClose,
+  // Bet game props
+  isBetGame,
+  isBetWinner,
+  betOpponentName,
+  onEditProfileClick,
+  betType,
 }) => {
   // State for player data that will be fetched from API
   const [playerName, setPlayerName] = useState<string>(initialPlayerName);
@@ -129,6 +142,8 @@ const GameResultScreen: React.FC<GameResultScreenProps> = ({
       isMounted = false;
     };
   }, [gameId, result]);
+
+  console.log("The current value of isBetGame is: ", isBetGame);
   
   // Log current state
   console.log('GameResultScreen state:', {
@@ -351,6 +366,17 @@ const GameResultScreen: React.FC<GameResultScreenProps> = ({
             </>
           )}
         </div>
+
+        {/* Bet-specific dialogue box - only for bet games */}
+        {isBetGame && (
+          <BetResultDialogueBox
+            isWinner={!!isBetWinner}
+            opponentName={betOpponentName || 'Opponent'}
+            onEditProfileClick={onEditProfileClick}
+            betType={betType}
+            result={result as 'win' | 'loss' | 'draw'}
+          />
+        )}
 
         {/* Action buttons */}
         <div className="px-4 pb-4">

@@ -85,27 +85,6 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
 
   // Process game end event data
   const processGameEndEvent = (data: any, reason: GameEndReason, winner: 'you' | 'opponent' | 'draw') => {
-    console.log('Game ended:', { reason, winner, data });
-    
-    // For resignations, ensure explicit handling by result and add extra safety
-    if (reason === 'resignation') {
-      // Log all values for debugging
-      console.log('RESIGNATION HANDLING - detailed data:', {
-        winner,
-        reason,
-        socketId: socket?.id,
-        winnerSocketId: data.winnerSocketId || data.winnerId || data.winner,
-        loserSocketId: data.loserSocketId || data.loserId || data.loser,
-        explicitResult: data.result
-      });
-      
-      // Safety check: NEVER allow draw for resignations
-      if (winner === 'draw') {
-        console.warn('CRITICAL: Resignation result was "draw" - forcing to "opponent" (loss)');
-        winner = 'opponent'; // Default to loss if somehow marked as draw
-      }
-    }
-    
     const processedData: GameEndData = {
       winner: winner,
       reason: reason,
@@ -141,12 +120,9 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
         }
       });
       
-      console.log('Dispatching game_ended event:', customEvent.detail);
       window.dispatchEvent(customEvent);
       
-      console.log(`Successfully dispatched game_ended with result: ${resultType}`);
     } catch (err) {
-      console.error('Error dispatching game_ended event:', err);
     }
   };
 
@@ -187,7 +163,6 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
   // Initialize socket connection
   const connect = () => {
     try {
-      console.log('SocketContext: connect function called.');
       // Set connecting status initially
       setConnectionStatus('connecting');
       // Set isConnected to false initially, will be true after auth
@@ -198,11 +173,8 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
         const auth = getAuth();
         const currentUser = auth.currentUser;
         
-        console.log('SocketContext: Firebase currentUser:', currentUser ? 'Exists' : 'Does not exist');
-
         // Check if user is logged in and get ID token
         if (!currentUser) {
-          console.warn('SocketContext: No authenticated user found. Socket will connect unauthenticated.');
           // Proceed without auth, protected events will be blocked by backend guards
           const socketInstance = socketService.getSocket({
             reconnectionAttempts: 10,
@@ -223,8 +195,6 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
         }
 
         currentUser.getIdToken().then((idToken) => {
-          console.log('SocketContext: Obtained Firebase ID Token.');
-          
           // Get the socket instance (don't pass token here for handshake)
           const socketInstance = socketService.getSocket({
             reconnectionAttempts: 10,
@@ -238,42 +208,32 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
 
           // Update connection states based on the basic socket connection
           socketInstance.on('connect', async () => {
-            console.log('SocketContext: Basic socket connected. Attempting authentication...');
             setConnectionStatus('connected'); // Socket is physically connected
             try {
               const authResult = await socketService.authenticateSocket(idToken);
               if (authResult.success) {
                 setIsConnected(true); // Authenticated successfully
-                console.log(`SocketContext: Authentication successful. Socket ID: ${socketInstance.id}`, authResult);
-                
-                // Log socket ID for reference in debugging
-                console.log(`SocketContext: Connected with Socket ID: ${socketInstance.id}`);
               } else {
                 setIsConnected(false); // Not authenticated
-                console.warn('SocketContext: Authentication failed.', authResult.message);
               }
             } catch (error) {
-              console.error('SocketContext: Error during authentication event:', error);
               setIsConnected(false); // Authentication failed
             }
           });
           
           socketInstance.on('disconnect', (reason) => {
-            console.log(`SocketContext: Socket disconnected due to: ${reason}`);
             setIsConnected(false); // Not connected/authenticated
             setConnectionStatus('disconnected');
             startDisconnectionTimer();
           });
           
           socketInstance.on('reconnect_attempt', (attemptNumber) => {
-            console.log(`SocketContext: Reconnection attempt #${attemptNumber} - Socket ID: ${socketInstance.id || 'none'}`);
             setIsReconnecting(true);
             setConnectionStatus('connecting');
             setIsConnected(false); // Not authenticated during reconnect
           });
           
           socketInstance.on('reconnect', async (attemptNumber) => {
-            console.log(`SocketContext: Reconnected after ${attemptNumber} attempts. Attempting authentication...`);
             setIsReconnecting(false);
             setConnectionStatus('connected');
             stopDisconnectionTimer();
@@ -282,34 +242,27 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
               const authResult = await socketService.authenticateSocket(idToken);
               if (authResult.success) {
                 setIsConnected(true); // Authenticated successfully
-                console.log('SocketContext: Authentication successful after reconnect.', authResult);
               } else {
                 setIsConnected(false); // Not authenticated
-                console.warn('SocketContext: Authentication failed after reconnect.', authResult.message);
               }
             } catch (error) {
-              console.error('SocketContext: Error during authentication event after reconnect:', error);
               setIsConnected(false); // Authentication failed
             }
           });
           
           socketInstance.on('reconnect_failed', () => {
-            console.error('SocketContext: Reconnection failed after all attempts');
             setIsReconnecting(false);
             setConnectionStatus('disconnected');
             setIsConnected(false); // Not connected/authenticated
           });
           
           socketInstance.on('reconnect_error', (error) => {
-            console.error('SocketContext: Reconnection error:', error);
             // Keep connectionStatus as is, isConnected becomes false
             setIsConnected(false); // Not authenticated
           });
 
           // Generic game end event
           socketInstance.on('game_end', (data) => {
-            console.log('RECEIVED GENERIC game_end EVENT:', data);
-            
             // Enhance with additional handling for resignation events
             if (data.reason === 'resignation') {
               // Check if we have explicit winner/loser IDs
@@ -317,16 +270,8 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
               const winnerSocketId = data.winnerSocketId || data.winnerId || data.winner;
               const loserSocketId = data.loserSocketId || data.loserId || data.loser;
               
-              console.log('SOCKET ID COMPARISON FOR RESIGNATION game_end:', {
-                mySocketId,
-                winnerSocketId,
-                loserSocketId,
-                explicitResult: data.result // Check for explicit result field
-              });
-              
               // If we have an explicit result from the server, use it
               if (data.result === 'win' || data.result === 'loss') {
-                console.log('Using server-provided explicit result:', data.result);
                 const winner = data.result === 'win' ? 'you' : 'opponent';
                 processGameEndEvent(data, 'resignation', winner);
                 return;
@@ -343,28 +288,16 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
             
             // Add specific handling for checkmate
             if (data.reason === 'checkmate') {
-              console.log('RECEIVED CHECKMATE event:', data);
-              
               // Determine winner based on winnerColor/loserColor for player color matching
               if (data.winnerColor && data.loserColor) {
                 // We'll need to get the player's color from the context - might require passing playerColor to the socket context
                 // For now, we'll continue using socketId comparison as fallback
-                console.log('CHECKMATE has winnerColor/loserColor data:', {
-                  winnerColor: data.winnerColor,
-                  loserColor: data.loserColor
-                });
               }
               
               // Fallback to socket ID comparison if color approach isn't explicitly used by the component
               const mySocketId = socketInstance.id;
               const winnerSocketId = data.winnerSocketId || data.winnerId || data.winner;
               const loserSocketId = data.loserSocketId || data.loserId || data.loser;
-              
-              console.log('SOCKET ID COMPARISON FOR CHECKMATE game_end:', {
-                mySocketId,
-                winnerSocketId,
-                loserSocketId
-              });
               
               // Determine winner based on socket IDs
               if (winnerSocketId && loserSocketId) {
@@ -397,9 +330,6 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
           
           // Add gameResigned event handler
           socketInstance.on('gameResigned', (data) => {
-            console.log('========= RECEIVED gameResigned EVENT =========');
-            console.log('Raw gameResigned payload:', JSON.stringify(data));
-            
             // Determine winner/loser status using all available information
             const mySocketId = socketInstance.id;
             
@@ -415,52 +345,28 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
             const isResigning = data.resigning === true;
             const explicitResult = data.result; // Check if server sent an explicit result
             
-            console.log('Socket ID comparison for gameResigned:', {
-              mySocketId,
-              winnerSocketId,
-              loserSocketId,
-              isWinner,
-              isLoser,
-              isResigning,
-              explicitResult
-            });
-            
             // Default result - will be overridden if we have better information
             let finalResult: 'you' | 'opponent' | 'draw' = 'opponent'; // For resignations, default to loss
             
             // If we have an explicit result from the server, use it
             if (explicitResult === 'win' || explicitResult === 'loss' || explicitResult === 'draw') {
-              console.log('Using server-provided explicit result:', explicitResult);
               finalResult = explicitResult === 'win' ? 'you' : 
                            explicitResult === 'loss' ? 'opponent' : 'draw';
             }
             // If socket IDs match, use that match
             else if (isWinner || isLoser) {
-              console.log('Using socket ID match for winner/loser determination');
               finalResult = isWinner ? 'you' : 'opponent';
             }
             // If this client is the resigning player, they always lose
             else if (isResigning) {
-              console.log('This client is the resigning player - marking as loss');
               finalResult = 'opponent'; // "opponent" means the opponent won, so the current player lost
             }
             // Last resort fallback with warning when we can't determine winner/loser
             else {
-              console.warn('WARNING: Cannot reliably determine winner/loser from socket IDs', {
-                mySocketId,
-                winnerSocketId,
-                loserSocketId,
-                rawData: JSON.stringify(data)
-              });
-              
               // For resignations, NEVER default to draw
               // Instead, check if there's any indication this is the resigning player
               if (data.isResigningPlayer || data.resigner === mySocketId) {
-                console.log('Detected resigning player from additional fields');
                 finalResult = 'opponent'; // Current player loses
-              } else {
-                // If we're still not sure, log an error but maintain the default "opponent" (loss)
-                console.error('CRITICAL ERROR: Cannot determine winner/loser reliably - defaulting to loss');
               }
             }
             
@@ -471,45 +377,19 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
             // This is crucial - even if the server event is correctly received but not processed,
             // this will ensure the UI shows the result
             if (typeof window !== 'undefined') {
-              console.log('FORCE DISPATCHING game_ended event for resignation');
-              try {
-                // Important: Never default to 'draw' for resignations
-                // Map our internal result to the game_ended event format
-                let resultType: GameResultType = 
-                  finalResult === 'you' ? 'win' : 
-                  finalResult === 'opponent' ? 'loss' : 'draw';
-                
-                // Log what we're dispatching
-                console.log(`Dispatching game_ended event with result: ${resultType}`);
-                
+              setTimeout(() => {
                 window.dispatchEvent(new CustomEvent('game_ended', { 
                   detail: { 
                     reason: 'resignation',
-                    result: resultType,
+                    result: finalResult === 'you' ? 'win' : 
+                            finalResult === 'opponent' ? 'loss' : 'draw',
                     timestamp: Date.now(), 
                     source: 'socketContext',
                     winnerSocketId, 
                     loserSocketId
                   } 
                 }));
-                
-                // Set a backup timer to ensure the result screen appears
-                setTimeout(() => {
-                  console.log('BACKUP: Dispatching secondary game_ended event after timeout');
-                  window.dispatchEvent(new CustomEvent('game_ended', { 
-                    detail: { 
-                      reason: 'resignation',
-                      result: resultType,
-                      timestamp: Date.now(),
-                      source: 'socketContext-backup',
-                      winnerSocketId, 
-                      loserSocketId
-                    } 
-                  }));
-                }, 1000);
-              } catch (error) {
-                console.error('Error dispatching game_ended event:', error);
-              }
+              }, 1000);
             }
           });
           
@@ -531,12 +411,10 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
           
           // Add explicit handler for game_aborted
           socketInstance.on('game_aborted', (data) => {
-            console.log('⚠️ game_aborted event received directly in socket init:', data);
             // The detailed handling is done in another useEffect, this is just for debugging
           });
           
         }).catch((error) => {
-          console.error('SocketContext: Error getting Firebase ID token:', error);
           // Proceed with unauthenticated socket
            const socketInstance = socketService.getSocket({
             reconnectionAttempts: 10,
@@ -556,7 +434,6 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
         });
         
       }).catch((error) => {
-        console.error('SocketContext: Error importing Firebase Auth:', error);
         // Proceed with unauthenticated socket
          const socketInstance = socketService.getSocket({
           reconnectionAttempts: 10,
@@ -576,7 +453,6 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
       });
       
     } catch (error) {
-      console.error('Error connecting to socket server:', error);
       setConnectionStatus('disconnected');
       setIsConnected(false); // Not connected/authenticated
     }
@@ -619,8 +495,6 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     if (!socket) return;
     
     try {
-      console.log('Resigning game with ID:', gameId);
-      
       // First, dispatch local event to immediately update UI
       const localGameEndEvent = new CustomEvent('game_ended', {
         detail: {
@@ -642,30 +516,22 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
         'opponent' // When user resigns, opponent wins
       );
       
-      console.log('Resignation processed');
     } catch (error) {
-      console.error('Error during resignation:', error);
     }
   };
 
   // Abort a game
   const abortGame = (gameId: string) => {
     if (socket?.connected) {
-      console.log(`Emitting abort_game event for gameId: ${gameId}`);
       socket.emit('abort_game', { gameId });
       
       // Add listener for abort response
       socket.once('abortGameResponse', (response: any) => {
-        console.log('Received abortGameResponse:', response);
-        
         if (response.data.success) {
-          console.log('Abort game request successful');
         } else {
-          console.error('Abort game request failed:', response.data.message);
         }
       });
     } else {
-      console.error('Cannot abort game: socket not connected');
     }
   };
   
@@ -673,9 +539,7 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
   const rejoinGame = (gameId: string, playerId: string) => {
     if (socket?.connected) {
       socket.emit('rejoin_game', { gameId, playerId });
-      console.log(`Attempting to rejoin game ${gameId}`);
     } else {
-      console.warn('Cannot rejoin game: socket not connected');
     }
   };
 
@@ -688,8 +552,6 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     socket.on = function(event: string, handler: (...args: any[]) => void) {
       if (event === 'game_state') {
         const enhancedHandler = (data: any) => {
-          console.log('SOCKET RECEIVED game_state with data:', JSON.stringify(data));
-          console.log('hasWhiteMoved in game_state event:', data.hasWhiteMoved);
           return handler(data);
         };
         return originalOn.call(this, event, enhancedHandler);
@@ -700,13 +562,8 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     
     // Listen for game state updates
     const handleGameState = (data: any) => {
-      console.log('Game state received:', data);
-      
       // If the game state includes hasWhiteMoved, update our local state tracking
       if (data.hasWhiteMoved !== undefined) {
-        // You could trigger a game state update here or use a ref to track this
-        console.log('Setting hasWhiteMoved to:', data.hasWhiteMoved);
-        
         // Notify other components via a custom event that they can listen for
         const gameStateEvent = new CustomEvent('game_state_updated', { 
           detail: { 
@@ -722,8 +579,6 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     
     // Listen for game abort event
     const handleGameAborted = (data: any) => {
-      console.log('Game aborted event received:', data);
-      
       // Extract player names from the more detailed data
       let playerName = 'You';
       let opponentName = 'Opponent';
@@ -785,10 +640,6 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     
     // Clean up event listeners when component unmounts or socket changes
     return () => {
-      socket.off('game_state', handleGameState);
-      socket.off('game_aborted', handleGameAborted);
-      
-      // Restore original socket.on method
       if (socket) {
         socket.on = originalOn;
       }
@@ -816,7 +667,6 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     socket.emit = function(...args) {
       const [event, ...rest] = args;
       if (event === 'enter_game') {
-        console.log('Emitting enter_game with data:', rest[0]);
       }
       return originalEmit.apply(this, args);
     };

@@ -63,25 +63,16 @@ const useBoardSync = ({
         fen: getFen(),
         boardState: boardState
       };
-      console.log('BoardSync: Updated stable board reference with FEN:', boardStateRef.current.fen);
     }
   }, [boardState]);
   
   // Add a recovery mechanism that runs periodically to ensure board state consistency
   useEffect(() => {
     const checkBoardConsistency = () => {
-      // Only check if we have a stored state
       if (boardStateRef.current.fen) {
         const currentFen = getFen();
-        
-        // If the FEN has changed unexpectedly (not due to a move), restore it
         if (currentFen !== boardStateRef.current.fen && 
             boardState === boardStateRef.current.boardState) {
-          console.log('BoardSync: Detected unexpected board state change. Restoring from reference.');
-          console.log('Current:', currentFen);
-          console.log('Expected:', boardStateRef.current.fen);
-          
-          // Reset the chess engine with the stored FEN
           setChessPosition(boardStateRef.current.fen);
         }
       }

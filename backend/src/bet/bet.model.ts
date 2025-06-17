@@ -50,6 +50,7 @@ export interface BetResult {
   winnerId?: string;          // ID of the winner (undefined for draw)
   loserId?: string;           // ID of the loser (undefined for draw)
   isDraw: boolean;            // Whether the game was a draw
+  betType: BetType;           // Type of bet
   ratingChange?: number;      // Rating points transferred (for RATING_STAKE)
   profileControlExpiry?: Date; // When profile control expires (for PROFILE_CONTROL)
   profileLockExpiry?: Date;   // When profile lock expires (for PROFILE_LOCK)

@@ -38,12 +38,10 @@ export const getSoundSettings = async (userId: string): Promise<PlayerSoundSetti
           .then(serverSettings => {
             // Only update localStorage if server setting differs and only after a delay
             if (serverSettings.soundEnabled !== localSoundEnabled) {
-              console.log('Background update of sound setting from server:', serverSettings);
               localStorage.setItem('soundEnabled', serverSettings.soundEnabled.toString());
             }
           })
-          .catch(err => {
-            console.warn('Could not get settings from server (background):', err);
+          .catch(() => {
             // No action needed - local settings remain unchanged
           });
       }, 500); // Half-second delay to avoid any potential WebSocket conflicts
@@ -54,7 +52,6 @@ export const getSoundSettings = async (userId: string): Promise<PlayerSoundSetti
     // If localStorage is not available, try the server
     return await fetchSettingsFromServer(userId);
   } catch (error) {
-    console.error('Error getting sound settings:', error);
     // Return default settings if all methods fail
     return { userId, soundEnabled: true };
   }
@@ -106,9 +103,7 @@ export const updateSoundSettings = async (userId: string, enabled: boolean): Pro
     setTimeout(async () => {
       try {
         await updateSoundSettingsViaRest(userId, enabled);
-        console.log('Successfully updated server sound settings in background');
       } catch (error) {
-        console.warn('Background server update failed, local settings remain valid:', error);
         // No action needed - local settings were already updated
       }
     }, 500); // Significant delay to ensure no interference with game state
@@ -116,7 +111,6 @@ export const updateSoundSettings = async (userId: string, enabled: boolean): Pro
     // Return immediately with local settings
     return { userId, soundEnabled: enabled };
   } catch (error) {
-    console.error('Error updating sound settings:', error);
     // Return local settings even if there was an error
     return { userId, soundEnabled: enabled };
   }
@@ -151,7 +145,6 @@ const updateSoundSettingsViaRest = async (userId: string, enabled: boolean): Pro
     
     return await response.json();
   } catch (error) {
-    console.error('REST update error:', error);
     throw error;
   }
 }; 

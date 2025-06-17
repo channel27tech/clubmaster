@@ -135,47 +135,94 @@ export class GameManagerService {
     timeControl: string,
     rated: boolean,
   ): GameState {
-    // Parse time control string (e.g., '5+0' for 5 minutes with 0 increment)
-    const [baseMinutes] = timeControl.split('+').map(Number);
-    const baseTimeMs = baseMinutes * 60 * 1000;
-    
-    // Create a new chess instance
-    const chessInstance = new Chess();
-    
-    // Create game state
-    const gameState: GameState = {
-      gameId,
-      whitePlayer,
-      blackPlayer,
-      chessInstance,
-      pgn: '',
-      gameMode,
-      timeControl,
-      rated,
-      started: false,
-      ended: false,
-      startTime: new Date(),
-      whiteTimeRemaining: baseTimeMs,
-      blackTimeRemaining: baseTimeMs,
-      whiteTurn: true, // White always starts
-      isFirstMove: true,
-    };
-    
-    // Add game to active games
-    this.activeGames.set(gameId, gameState);
-    
-    // Map players to game
-    this.playerGameMap.set(whitePlayer.socketId, gameId);
-    this.playerGameMap.set(blackPlayer.socketId, gameId);
-    
-    this.logger.log(`Game created: ${gameId}`);
-    
-    // Immediately persist the game to the database
-    this.persistGameToDatabase(gameState).catch(error => {
-      this.logger.error(`Failed to persist game to database: ${error.message}`, error.stack);
-    });
-    
-    return gameState;
+    try {
+      this.logger.log(
+        `Creating game ${gameId} - White: ${whitePlayer.socketId}${whitePlayer.userId ? ` (${whitePlayer.userId})` : ' (guest)'}, ` +
+        `Black: ${blackPlayer.socketId}${blackPlayer.userId ? ` (${blackPlayer.userId})` : ' (guest)'}, ` +
+        `Mode: ${gameMode}, Time: ${timeControl}, Rated: ${rated}`
+      );
+      
+      // Validate input parameters
+      if (!gameId || !whitePlayer || !blackPlayer || !gameMode || !timeControl) {
+        this.logger.error(`Invalid parameters for game creation: gameId=${gameId}`);
+        throw new Error('Invalid parameters for game creation');
+      }
+      
+      // Ensure socketIds are present
+      if (!whitePlayer.socketId || !blackPlayer.socketId) {
+        this.logger.error(`Missing socketId for players in game ${gameId}`);
+        throw new Error('Missing socketId for players');
+      }
+
+      // Parse time control string (e.g., '5+0' for 5 minutes with 0 increment)
+      const [baseMinutes] = timeControl.split('+').map(Number);
+      
+      // Validate time control format
+      if (isNaN(baseMinutes)) {
+        this.logger.error(`Invalid time control format: ${timeControl}`);
+        throw new Error(`Invalid time control format: ${timeControl}`);
+      }
+      
+      const baseTimeMs = baseMinutes * 60 * 1000;
+      
+      // Create a new chess instance
+      const chessInstance = new Chess();
+      
+      // Create game state
+      const gameState: GameState = {
+        gameId,
+        whitePlayer,
+        blackPlayer,
+        chessInstance,
+        pgn: '',
+        gameMode,
+        timeControl,
+        rated,
+        started: false,
+        ended: false,
+        startTime: new Date(),
+        whiteTimeRemaining: baseTimeMs,
+        blackTimeRemaining: baseTimeMs,
+        whiteTurn: true, // White always starts
+        isFirstMove: true,
+      };
+      
+      // Add game to active games
+      this.activeGames.set(gameId, gameState);
+      
+      // Map players to game
+      this.playerGameMap.set(whitePlayer.socketId, gameId);
+      this.playerGameMap.set(blackPlayer.socketId, gameId);
+      
+      this.logger.log(`Game created successfully: ${gameId}`);
+      
+      // Immediately persist the game to the database
+      // But don't wait for it to complete - we'll handle errors in the persistGameToDatabase method
+      this.persistGameToDatabase(gameState).catch(error => {
+        this.logger.error(`Failed to persist game to database: ${error.message}`, error.stack);
+        // Note: We don't throw here because we want the game to be playable even if DB persistence fails
+      });
+      
+      return gameState;
+    } catch (error) {
+      this.logger.error(`Error creating game ${gameId}: ${error.message}`, error.stack);
+      
+      // Clean up any partial game state that might have been created
+      if (this.activeGames.has(gameId)) {
+        this.activeGames.delete(gameId);
+      }
+      
+      // Clean up player mappings if they were created
+      if (whitePlayer?.socketId && this.playerGameMap.has(whitePlayer.socketId)) {
+        this.playerGameMap.delete(whitePlayer.socketId);
+      }
+      
+      if (blackPlayer?.socketId && this.playerGameMap.has(blackPlayer.socketId)) {
+        this.playerGameMap.delete(blackPlayer.socketId);
+      }
+      
+      throw error; // Re-throw for the caller to handle
+    }
   }
   
   /**
@@ -255,30 +302,43 @@ export class GameManagerService {
     const game = this.activeGames.get(gameId);
     if (!game) return false;
     
-    // Validate that it's the player's turn
-    if (
-      (game.whiteTurn && game.whitePlayer.socketId !== socketId) ||
-      (!game.whiteTurn && game.blackPlayer.socketId !== socketId)
-    ) {
+    // Helper to get userId from socketId
+    const getUserIdBySocket = (sid: string): string | undefined => {
+      if (game.whitePlayer.socketId === sid) return game.whitePlayer.userId;
+      if (game.blackPlayer.socketId === sid) return game.blackPlayer.userId;
+      return undefined;
+    };
+    // Validate that it's the player's turn (allow by socketId or userId)
+    let isValidTurn = false;
+    if (game.whiteTurn) {
+      isValidTurn = (game.whitePlayer.socketId === socketId);
+      if (!isValidTurn && game.whitePlayer.userId && getUserIdBySocket(socketId) === game.whitePlayer.userId) {
+        isValidTurn = true;
+      }
+    } else {
+      isValidTurn = (game.blackPlayer.socketId === socketId);
+      if (!isValidTurn && game.blackPlayer.userId && getUserIdBySocket(socketId) === game.blackPlayer.userId) {
+        isValidTurn = true;
+      }
+    }
+    if (!isValidTurn) {
+      this.logger.warn(`[makeMove] Move rejected: Not player's turn. gameId=${gameId}, expectedSocket=${game.whiteTurn ? game.whitePlayer.socketId : game.blackPlayer.socketId}, gotSocket=${socketId}, expectedUserId=${game.whiteTurn ? game.whitePlayer.userId : game.blackPlayer.userId}, gotUserId=${getUserIdBySocket(socketId)}`);
       return false;
     }
-    
     try {
       // Make the move
       const result = game.chessInstance.move(move) as Move | null;
       if (!result) {
+        this.logger.warn(`[makeMove] Move rejected: Invalid move string. gameId=${gameId}, move=${move}`);
         return false;
       }
-      
       // Update game state
       game.pgn = game.chessInstance.pgn();
       game.lastMoveTime = new Date();
       game.whiteTurn = !game.whiteTurn;
-      
       // If this was the first move of the game, mark it
       if (game.isFirstMove) {
         game.isFirstMove = false;
-        
         // If this is a registered game with a database record, update the database
         if (game.dbGameId) {
           // Attempt to update move in database asynchronously - no need to await
@@ -287,7 +347,6 @@ export class GameManagerService {
           });
         }
       }
-      
       return true;
     } catch (error) {
       this.logger.error(`Invalid move in game ${gameId}: ${move}`, error);

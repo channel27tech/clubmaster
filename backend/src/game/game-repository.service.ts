@@ -139,9 +139,20 @@ export class GameRepositoryService {
       gameData.customId = `game_${timestamp}_${shortId}`;
       this.logger.log(`Generated customId: ${gameData.customId}`);
     }
-    
-    const game = this.gamesRepository.create(gameData);
-    return this.gamesRepository.save(game);
+    this.logger.log(`[GameRepositoryService] Attempting to save game record to DB with customId: ${gameData.customId} and dbId: ${gameData.id}`);
+    try {
+      const game = this.gamesRepository.create(gameData);
+      const savedGame = await this.gamesRepository.save(game);
+      if (!savedGame) {
+        this.logger.error(`[GameRepositoryService] ERROR saving game record to DB: save returned null/undefined`);
+        throw new Error('Failed to save game record to database');
+      }
+      this.logger.log(`[GameRepositoryService] Game record successfully saved to DB.`);
+      return savedGame;
+    } catch (error) {
+      this.logger.error(`[GameRepositoryService] ERROR saving game record to DB: ${error.message}`);
+      throw new Error(`Failed to save game record to database: ${error.message}`);
+    }
   }
 
   async update(id: string, gameData: Partial<Game>): Promise<Game | null> {
@@ -297,5 +308,18 @@ export class GameRepositoryService {
   // Helper method to validate UUID format
   private isValidUuid(id: string): boolean {
     return uuidValidate(id);
+  }
+
+  // Find a game by customId (used for client-facing gameId)
+  async findOneByCustomId(customId: string): Promise<Game | null> {
+    try {
+      return await this.gamesRepository.findOne({
+        where: { customId },
+        relations: ['whitePlayer', 'blackPlayer'],
+      });
+    } catch (error) {
+      this.logger.error(`Error finding game with customId ${customId}: ${error.message}`);
+      return null;
+    }
   }
 } 

@@ -43,7 +43,11 @@ export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ child
 
   // Create and connect to the socket
   useEffect(() => {
-    if (!user) return; // Don't connect if no user
+    // Check if user is authenticated and has<<<<<<< HEAD
+    // Check if user is authenticated and has an ID property
+    if (!user || !user.uid) {
+      return;
+    }
 
     let notificationsSocket: Socket | null = null;
 

@@ -47,7 +47,6 @@ const soundAvailabilityCheck = async (soundPath: string): Promise<boolean> => {
     loadSuccessStatus[soundPath] = isValid;
     return isValid;
   } catch (error) {
-    console.warn(`Sound file check failed for ${soundPath}:`, error);
     loadSuccessStatus[soundPath] = false;
     return false;
   }
@@ -97,7 +96,6 @@ export const playSound = (
     generateClickSound(volume);
     return; // If successful, we're done
   } catch (error) {
-    console.warn("Failed to generate click sound:", error);
     // Continue to try the file-based approach as fallback
   }
   
@@ -116,7 +114,6 @@ export const playSound = (
       
       // Add error handler
       audioCache[soundPath].addEventListener('error', (e) => {
-        console.warn(`Failed to load sound ${soundName}:`, e);
         loadSuccessStatus[soundPath] = false;
         
         // Remove from cache to save memory
@@ -140,7 +137,7 @@ export const playSound = (
     // Play the sound with error handling
     const playPromise = audio.play();
     if (playPromise !== undefined) {
-      playPromise.catch(error => {
+      playPromise.catch(() => {
         // Silently fail - we don't need to log this as it's already handled
         // This prevents filling the console with errors
         loadSuccessStatus[soundPath] = false;

@@ -116,93 +116,82 @@ export const useChessMultiplayer = ({
       }
     };
 
-    // Handle receiving moves from opponent
-    const handleOpponentMove = (data: { 
+    // Handle receiving moves from server (process all moves, not just opponent's)
+    const handleMoveFromServer = (data: { 
       from: string, 
       to: string, 
       player: string, 
-      notation: string,
+      notation?: string,
+      san?: string,
       gameId: string,
       promotion?: PieceType,
       isCapture?: boolean,
       fen?: string,
       pgn?: string
     }) => {
-      console.log('Received move from opponent:', data);
+      console.log('Received move from server:', data);
       
-      // Only process opponent's moves
-      if (playerColor && data.player !== playerColor) {
-        console.log(`Processing opponent move. Our color: ${playerColor}, move made by: ${data.player}`);
-        
-        // Try FEN synchronization first if available
-        if (data.fen) {
-          try {
-            console.log('Using provided FEN for synchronization:', data.fen);
-            
-            // Synchronize using FEN
-            const newBoardState = synchronizeBoardFromFen(data.fen);
-            
-            // Extract piece information from the move
-            const movingPiece = extractPieceInfoFromNotation(data.notation, data.player as PieceColor);
-            
-            if (movingPiece) {
-              // Check if we're in a rewound state
-              const isRewound = moveHistory.currentMoveIndex < moveHistory.moves.length - 1;
-              
-              // Create a new array for the updated move history without truncating
-              const updatedMoves = [...moveHistory.moves];
-              
-              // Create the new move to append
-              const newMove = {
-                from: data.from,
-                to: data.to,
-                piece: movingPiece,
-                notation: data.notation,
-                promotion: data.promotion,
-                boardState: newBoardState
-              };
-              
-              // Check if this exact move already exists at the end of our history
-              const lastMove = updatedMoves.length > 0 ? updatedMoves[updatedMoves.length - 1] : null;
-              if (!lastMove || lastMove.notation !== data.notation) {
-                updatedMoves.push(newMove);
-              }
-              
-              // Create the new history object
-              const newHistory = {
-                ...moveHistory,
-                moves: updatedMoves,
-                currentMoveIndex: updatedMoves.length - 1
-              };
-              
-              // Update all the state through callbacks
-              onMoveHistoryUpdate(newHistory);
-              onBoardStateUpdate(newBoardState);
-              onLastMoveUpdate({ from: data.from, to: data.to });
-              onPlayerTurnChange(data.player === 'white' ? 'black' : 'white');
-              
-              console.log('Successfully synchronized with FEN');
-              return; // Success! Exit early
-            }
-          } catch (error) {
-            console.error('Error synchronizing from FEN:', error);
-            // Continue to fallback methods
-            requestSync('fen_sync_failed');
+      // Process the move regardless of who made it
+      if (data.fen) {
+        try {
+          console.log('Using provided FEN for synchronization:', data.fen);
+          
+          // Synchronize using FEN
+          const newBoardState = synchronizeBoardFromFen(data.fen);
+          
+          // Extract piece information from the move (try san first, then notation)
+          const movingPiece = extractPieceInfoFromNotation(data.san || data.notation, data.player as PieceColor);
+          
+          // Create a new array for the updated move history
+          const updatedMoves = [...moveHistory.moves];
+          
+          // Create the new move to append
+          const newMove = {
+            from: data.from,
+            to: data.to,
+            piece: movingPiece || { type: 'pawn', color: data.player as PieceColor }, // Default to pawn if extraction fails
+            notation: data.san || data.notation || `${data.from}-${data.to}`, // Fallback notation
+            promotion: data.promotion,
+            boardState: newBoardState
+          };
+          
+          // Check if this exact move already exists at the end of our history
+          const lastMove = updatedMoves.length > 0 ? updatedMoves[updatedMoves.length - 1] : null;
+          if (!lastMove || lastMove.notation !== newMove.notation) {
+            updatedMoves.push(newMove);
           }
-        } else {
-          // No FEN provided, request sync
-          requestSync('no_fen_provided');
+          
+          // Create the new history object
+          const newHistory = {
+            ...moveHistory,
+            moves: updatedMoves,
+            currentMoveIndex: updatedMoves.length - 1
+          };
+          
+          // Update all the state through callbacks
+          onMoveHistoryUpdate(newHistory);
+          onBoardStateUpdate(newBoardState);
+          onLastMoveUpdate({ from: data.from, to: data.to });
+          onPlayerTurnChange(data.player === 'white' ? 'black' : 'white');
+          
+          console.log('Successfully synchronized with FEN');
+        } catch (error) {
+          console.error('Error synchronizing from FEN:', error);
+          requestSync('fen_sync_failed');
         }
+      } else {
+        console.warn('No FEN provided in move_made event');
+        requestSync('no_fen_provided');
       }
     };
 
     // Register socket event handlers
-    socket.on('move_made', handleOpponentMove);
+    socket.on('move_made', handleMoveFromServer);
     socket.on('board_sync', handleBoardSync);
 
     // Cleanup on unmount
     return () => {
-      socket.off('move_made', handleOpponentMove);
+      socket.off('move_made', handleMoveFromServer);
       socket.off('board_sync', handleBoardSync);
     };
   }, [
@@ -217,6 +206,55 @@ export const useChessMultiplayer = ({
     onPlayerTurnChange,
     requestSync
   ]);
+
+  // Handle board updates from server
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleBoardUpdate = (data: {
+      gameId: string;
+      fen: string;
+      pgn: string;
+      moveHistory: string[];
+      lastMove: string;
+      whiteTurn: boolean;
+      isCapture: boolean;
+      isCheck: boolean;
+      moveCount: number;
+      isGameOver: boolean;
+      timestamp: number;
+    }) => {
+      console.log('Received board update:', data);
+      
+      try {
+        // Synchronize board state using FEN
+        const newBoardState = synchronizeBoardFromFen(data.fen);
+        onBoardStateUpdate(newBoardState);
+        
+        // Update whose turn it is based on whiteTurn from server
+        onPlayerTurnChange(data.whiteTurn ? 'white' : 'black');
+        
+        // Update last move if provided
+        if (data.lastMove) {
+          const [from, to] = data.lastMove.match(/[a-h][1-8]/g) || [];
+          if (from && to) {
+            onLastMoveUpdate({ from, to });
+          }
+        }
+        
+        console.log('Successfully processed board update');
+      } catch (error) {
+        console.error('Error processing board update:', error);
+        requestSync('board_update_processing_failed');
+      }
+    };
+
+    socket.on('board_updated', handleBoardUpdate);
+    
+    return () => {
+      socket.off('board_updated', handleBoardUpdate);
+    };
+  }, [socket, onBoardStateUpdate, onPlayerTurnChange, onLastMoveUpdate, requestSync]);
 
   return {
     sendMove,
