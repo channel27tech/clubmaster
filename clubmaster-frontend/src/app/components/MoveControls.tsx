@@ -47,6 +47,15 @@ interface MoveControlsProps {
     length: number;
     currentMoveIndex: number;
   };
+  whitePlayer?: {
+    username: string;
+    userId?: string;
+  };
+  blackPlayer?: {
+    username: string;
+    userId?: string;
+  };
+  playerColor?: 'white' | 'black' | null;
 }
 
 const MoveControls: React.FC<MoveControlsProps> = ({
@@ -58,7 +67,10 @@ const MoveControls: React.FC<MoveControlsProps> = ({
   gameState,
   onResign,
   onAbortGame,
-  moveHistory
+  moveHistory,
+  whitePlayer,
+  blackPlayer,
+  playerColor
 }) => {
   // Socket context for game actions
   const { socket } = useSocket();
@@ -291,7 +303,16 @@ const MoveControls: React.FC<MoveControlsProps> = ({
       } else {
         // I am the recipient (data.playerId is someone else's ID).
         console.log(`[${myCurrentSocketId}] Received draw_request from opponent ${data.playerId}. Showing 'Accept/Decline' modal.`);
-        setDrawOfferFromOpponent(data.playerId); // Store who sent it for the modal text
+        
+        // Find the opponent's username based on their ID
+        let opponentUsername = "Your opponent";
+        if (whitePlayer?.userId === data.playerId) {
+          opponentUsername = whitePlayer.username;
+        } else if (blackPlayer?.userId === data.playerId) {
+          opponentUsername = blackPlayer.username;
+        }
+        
+        setDrawOfferFromOpponent(opponentUsername); // Store opponent's username instead of ID
         setShowDrawOfferModal(true);             // Show "Opponent offered a draw" modal
         setIsDrawOfferPending(false);            // Recipient is not pending their own offer.
         setAmOfferingDraw(false);                // Recipient is not in the process of offering.

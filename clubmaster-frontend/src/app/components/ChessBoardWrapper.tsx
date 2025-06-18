@@ -3139,6 +3139,9 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
           length: moveHistory.moves.length,
           currentMoveIndex: moveHistory.currentMoveIndex
         } : undefined}
+        whitePlayer={whitePlayer}
+        blackPlayer={blackPlayer}
+        playerColor={playerColor}
       />
       
       {/* Disconnection Notification */}
