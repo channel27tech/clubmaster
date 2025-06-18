@@ -379,127 +379,130 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     preloadSoundEffects(soundEnabled);
   }, [soundEnabled]);
   
+  // Define the updateCapturedPieces function at component level
+  const updateCapturedPieces = useCallback(() => {
+    try {
+      if (!moveHistory) return;
+      
+      // Get the current position from Chess.js
+      const chess = getChessEngine();
+      const board = chess.board();
+      
+      // Count pieces on the board
+      const piecesOnBoard = {
+        'wp': 0, 'wn': 0, 'wb': 0, 'wr': 0, 'wq': 0, 'wk': 0,
+        'bp': 0, 'bn': 0, 'bb': 0, 'br': 0, 'bq': 0, 'bk': 0
+      };
+      
+      // Count pieces on the board
+      for (let row = 0; row < 8; row++) {
+        for (let col = 0; col < 8; col++) {
+          const piece = board[row][col];
+          if (piece) {
+            const key = piece.color + piece.type;
+            piecesOnBoard[key as keyof typeof piecesOnBoard]++;
+          }
+        }
+      }
+      
+      // Initial pieces counts
+      const initialPieces = {
+        'wp': 8, 'wn': 2, 'wb': 2, 'wr': 2, 'wq': 1, 'wk': 1,
+        'bp': 8, 'bn': 2, 'bb': 2, 'br': 2, 'bq': 1, 'bk': 1
+      };
+      
+      // Adjust for promotions - track all pawn promotions from move history
+      const promotions: { fromColor: string, toType: string }[] = [];
+      if (moveHistory.moves) {
+        moveHistory.moves.forEach(move => {
+          if (move.promotion) {
+            const fromColor = move.piece.color === 'white' ? 'w' : 'b';
+            const toType = move.promotion === 'queen' ? 'q' : 
+                           move.promotion === 'rook' ? 'r' : 
+                           move.promotion === 'bishop' ? 'b' : 
+                           move.promotion === 'knight' ? 'n' : '';
+            
+            if (toType) {
+              promotions.push({ fromColor, toType });
+            }
+          }
+        });
+      }
+      
+      // Adjust initial counts based on promotions
+      promotions.forEach(({ fromColor, toType }) => {
+        // Decrement pawn count
+        const pawnKey = `${fromColor}p` as keyof typeof initialPieces;
+        initialPieces[pawnKey]--;
+        
+        // Increment promoted piece count
+        const pieceKey = `${fromColor}${toType}` as keyof typeof initialPieces;
+        initialPieces[pieceKey]++;
+      });
+      
+      // Calculate captured pieces
+      const newCapturedByWhite: CapturedPiece[] = [];
+      const newCapturedByBlack: CapturedPiece[] = [];
+      
+      // Map from chess.js piece notation to our piece types
+      const pieceTypeMap: Record<string, 'pawn' | 'knight' | 'bishop' | 'rook' | 'queen' | 'king'> = {
+        'p': 'pawn',
+        'n': 'knight',
+        'b': 'bishop',
+        'r': 'rook',
+        'q': 'queen',
+        'k': 'king'
+      };
+      
+      // Calculate pieces captured by white (black pieces missing from board)
+      Object.entries(initialPieces)
+        .filter(([key]) => key.startsWith('b')) // Only black pieces
+        .forEach(([key, count]) => {
+          const pieceType = key[1];
+          const onBoardCount = piecesOnBoard[key as keyof typeof piecesOnBoard];
+          const capturedCount = count - onBoardCount;
+          
+          for (let i = 0; i < capturedCount; i++) {
+            newCapturedByWhite.push({
+              type: pieceTypeMap[pieceType],
+              color: 'black',
+              id: `black-${pieceType}-${i}-${Date.now()}`
+            });
+          }
+        });
+      
+      // Calculate pieces captured by black (white pieces missing from board)
+      Object.entries(initialPieces)
+        .filter(([key]) => key.startsWith('w')) // Only white pieces
+        .forEach(([key, count]) => {
+          const pieceType = key[1];
+          const onBoardCount = piecesOnBoard[key as keyof typeof piecesOnBoard];
+          const capturedCount = count - onBoardCount;
+          
+          for (let i = 0; i < capturedCount; i++) {
+            newCapturedByBlack.push({
+              type: pieceTypeMap[pieceType],
+              color: 'white',
+              id: `white-${pieceType}-${i}-${Date.now()}`
+            });
+          }
+        });
+      
+      // Update state
+      setCapturedByWhite(newCapturedByWhite);
+      setCapturedByBlack(newCapturedByBlack);
+    } catch (error) {
+      console.error('Error updating captured pieces:', error);
+    }
+  }, [moveHistory, setCapturedByWhite, setCapturedByBlack]);
+  
   // Track captured pieces
   useEffect(() => {
     if (!moveHistory) return;
     
-    const updateCapturedPieces = () => {
-      try {
-        // Get the current position from Chess.js
-        const chess = getChessEngine();
-        const board = chess.board();
-        
-        // Count pieces on the board
-        const piecesOnBoard = {
-          'wp': 0, 'wn': 0, 'wb': 0, 'wr': 0, 'wq': 0, 'wk': 0,
-          'bp': 0, 'bn': 0, 'bb': 0, 'br': 0, 'bq': 0, 'bk': 0
-        };
-        
-        // Count pieces on the board
-        for (let row = 0; row < 8; row++) {
-          for (let col = 0; col < 8; col++) {
-            const piece = board[row][col];
-            if (piece) {
-              const key = piece.color + piece.type;
-              piecesOnBoard[key as keyof typeof piecesOnBoard]++;
-            }
-          }
-        }
-        
-        // Initial pieces counts
-        const initialPieces = {
-          'wp': 8, 'wn': 2, 'wb': 2, 'wr': 2, 'wq': 1, 'wk': 1,
-          'bp': 8, 'bn': 2, 'bb': 2, 'br': 2, 'bq': 1, 'bk': 1
-        };
-        
-        // Adjust for promotions - track all pawn promotions from move history
-        const promotions: { fromColor: string, toType: string }[] = [];
-        if (moveHistory.moves) {
-          moveHistory.moves.forEach(move => {
-            if (move.promotion) {
-              const fromColor = move.piece.color === 'white' ? 'w' : 'b';
-              const toType = move.promotion === 'queen' ? 'q' : 
-                             move.promotion === 'rook' ? 'r' : 
-                             move.promotion === 'bishop' ? 'b' : 
-                             move.promotion === 'knight' ? 'n' : '';
-              
-              if (toType) {
-                promotions.push({ fromColor, toType });
-              }
-            }
-          });
-        }
-        
-        // Adjust initial counts based on promotions
-        promotions.forEach(({ fromColor, toType }) => {
-          // Decrement pawn count
-          const pawnKey = `${fromColor}p` as keyof typeof initialPieces;
-          initialPieces[pawnKey]--;
-          
-          // Increment promoted piece count
-          const pieceKey = `${fromColor}${toType}` as keyof typeof initialPieces;
-          initialPieces[pieceKey]++;
-        });
-        
-        // Calculate captured pieces
-        const newCapturedByWhite: CapturedPiece[] = [];
-        const newCapturedByBlack: CapturedPiece[] = [];
-        
-        // Map from chess.js piece notation to our piece types
-        const pieceTypeMap: Record<string, 'pawn' | 'knight' | 'bishop' | 'rook' | 'queen' | 'king'> = {
-          'p': 'pawn',
-          'n': 'knight',
-          'b': 'bishop',
-          'r': 'rook',
-          'q': 'queen',
-          'k': 'king'
-        };
-        
-        // Calculate pieces captured by white (black pieces missing from board)
-        Object.entries(initialPieces)
-          .filter(([key]) => key.startsWith('b')) // Only black pieces
-          .forEach(([key, count]) => {
-            const pieceType = key[1];
-            const onBoardCount = piecesOnBoard[key as keyof typeof piecesOnBoard];
-            const capturedCount = count - onBoardCount;
-            
-            for (let i = 0; i < capturedCount; i++) {
-              newCapturedByWhite.push({
-                type: pieceTypeMap[pieceType],
-                color: 'black',
-                id: `black-${pieceType}-${i}-${Date.now()}`
-              });
-            }
-          });
-        
-        // Calculate pieces captured by black (white pieces missing from board)
-        Object.entries(initialPieces)
-          .filter(([key]) => key.startsWith('w')) // Only white pieces
-          .forEach(([key, count]) => {
-            const pieceType = key[1];
-            const onBoardCount = piecesOnBoard[key as keyof typeof piecesOnBoard];
-            const capturedCount = count - onBoardCount;
-            
-            for (let i = 0; i < capturedCount; i++) {
-              newCapturedByBlack.push({
-                type: pieceTypeMap[pieceType],
-                color: 'white',
-                id: `white-${pieceType}-${i}-${Date.now()}`
-              });
-            }
-          });
-        
-        // Update state
-        setCapturedByWhite(newCapturedByWhite);
-        setCapturedByBlack(newCapturedByBlack);
-      } catch (error) {
-        console.error('Error updating captured pieces:', error);
-      }
-    };
-    
     // Update captured pieces whenever move history changes
     updateCapturedPieces();
-  }, [moveHistory]);
+  }, [moveHistory, updateCapturedPieces]);
 
   // Socket event listeners
   useEffect(() => {
@@ -583,79 +586,106 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
           console.log(`[SYNC] Using SAN notation for move: ${san}`);
           chess.move(san);
         }
-        // Or use from/to coordinates with promotion if needed
-        else if (from && to) {
-          console.log(`[SYNC] Using from/to coordinates for move: ${from} to ${to}${promotion ? ' with promotion: ' + promotion : ''}`);
+        // Or try to reconstruct the move
+        else {
+          console.log(`[SYNC] Reconstructing move from: ${from}, to: ${to}, promotion: ${promotion || 'none'}`);
           
-          // Create the move object
-          const moveObj: any = {
-            from,
-            to
-          };
-          
-          // Add promotion if specified
+          // If this is a promotion move, include the promotion piece
           if (promotion) {
-            moveObj.promotion = promotion;
-          }
-          
-          // Make the move
-          const result = chess.move(moveObj);
-          
-          if (!result) {
-            console.error(`[ERROR] Failed to make move from ${from} to ${to}${promotion ? ' with promotion: ' + promotion : ''}`);
-            
-            // Request a board sync from the server
-            safeSocket.emit('request_board_sync', {
-              gameId,
-              reason: 'move_application_failed',
-              clientState: chess.fen()
+            chess.move({
+              from,
+              to,
+              promotion: promotion.toLowerCase().charAt(0)
+            });
+          } else {
+            chess.move({
+              from,
+              to
             });
           }
         }
         
-        // Update the board state from the new position
-        const newBoardState = getCurrentBoardState();
-        setBoardState(newBoardState);
+        // Get the current FEN after applying the move
+        const currentFen = chess.fen();
         
-        // Update the last move for highlighting
+        // Get the current move history
+        const history = chess.history();
+        
+        // Update the SAN move list
+        setSanMoveList(history);
+        
+        // Notify parent component if callback is provided
+        if (onSanMoveListChange) {
+          onSanMoveListChange(history);
+        }
+        
+        // Update the active player
+        setActivePlayer(chess.turn() === 'w' ? 'white' : 'black');
+        
+        // Update the last move
         setLastMove({ from, to });
         
-        // Update whose turn it is
-        const isWhiteTurn = chess.turn() === 'w';
-        setActivePlayer(isWhiteTurn ? 'white' : 'black');
+        // Play move sound
+        playSound(isCapture ? 'CAPTURE' : 'MOVE', soundEnabledRef.current);
         
-        // Update game state
-        setGameState(prev => ({
-          ...prev,
-          isWhiteTurn,
-          hasWhiteMoved: true,
-          isCheck: chess.isCheck(),
-          isCheckmate: chess.isCheckmate(),
-          isStalemate: chess.isStalemate(),
-          isDraw: chess.isDraw(),
-          isGameOver: chess.isGameOver(),
-          isThreefoldRepetition: chess.isThreefoldRepetition(),
-          isInsufficientMaterial: chess.isInsufficientMaterial()
-        }));
+        // Check if the game is over after this move
+        const isGameOver = chess.isGameOver();
         
-        // Update the move history
-        const sanMoves = chess.history();
-        setSanMoveList(sanMoves);
-        if (onSanMoveListChange) onSanMoveListChange(sanMoves);
+        if (isGameOver) {
+          console.log('[GAME OVER] Game is over after move');
+          
+          // Determine the reason for game over
+          let gameOverReason = '';
+          
+          if (chess.isCheckmate()) {
+            gameOverReason = 'checkmate';
+            playSound('CHECKMATE', soundEnabledRef.current);
+          } else if (chess.isDraw()) {
+            if (chess.isStalemate()) {
+              gameOverReason = 'stalemate';
+            } else if (chess.isThreefoldRepetition()) {
+              gameOverReason = 'repetition';
+            } else if (chess.isInsufficientMaterial()) {
+              gameOverReason = 'insufficient_material';
+            } else {
+              gameOverReason = 'draw';
+            }
+            playSound('DRAW', soundEnabledRef.current);
+          }
+          
+          // Update game state
+          setGameState({
+            ...gameState,
+            isGameOver: true,
+            gameOverReason
+          });
+          
+          // Stop the clocks
+          setActivePlayer(null);
+        }
+        // If not game over but check, play check sound
+        else if (isCheck) {
+          playSound('CHECK', soundEnabledRef.current);
+        }
         
         // Update captured pieces
         updateCapturedPieces();
         
-        // Play move sound if enabled
-        if (soundEnabledRef.current) {
-          playMoveSound(isCapture, isCheck);
-        }
+        // Dispatch a game state updated event
+        window.dispatchEvent(new CustomEvent('game_state_updated', {
+          detail: {
+            fen: currentFen,
+            isGameOver,
+            gameOverReason: isGameOver ? (chess.isCheckmate() ? 'checkmate' : chess.isDraw() ? 'draw' : '') : '',
+            activePlayer: chess.turn() === 'w' ? 'white' : 'black'
+          }
+        }));
       } catch (error) {
-        console.error('[ERROR] Failed to process move_made event:', error);
+        console.error('[ERROR] Failed to process move from server:', error);
         
         // Request a board sync from the server
-        safeSocket.emit('request_board_sync', {
-          gameId,
+        socket.emit('request_board_sync', {
+          gameId: gameRoomId,
           reason: 'move_processing_failed',
           clientState: getChessEngine().fen()
         });
@@ -1712,11 +1742,27 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
           setChessPosition(data.fen, gameRoomId);
         }
       
+        // Check if the move history has actually changed
+        const moveHistoryChanged = JSON.stringify(data.moveHistory) !== JSON.stringify(sanMoveList);
+        
+        if (!moveHistoryChanged) {
+          console.log('Move history unchanged, skipping update');
+          return;
+        }
+        
         // Synchronize the board using move history as the primary source of truth
         const syncResult = synchronizeBoardFromMoveHistory(data.moveHistory);
         if (syncResult) {
           // Update the board state from the new position
           const newBoardState = getCurrentBoardState();
+          
+          // Check if the board state has actually changed
+          const boardStateChanged = JSON.stringify(newBoardState) !== JSON.stringify(boardState);
+          
+          if (!boardStateChanged && data.moveHistory.length === sanMoveList.length) {
+            console.log('Board state unchanged, skipping update');
+            return;
+          }
           
           // Update move history
           setSanMoveList(data.moveHistory);
@@ -1807,12 +1853,26 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         // If move history is available, use it to update the move list
         if (data.moveHistory && data.moveHistory.length > 0) {
           console.log(`Using move history from board_sync event (${data.moveHistory.length} moves)`);
-          setSanMoveList(data.moveHistory);
-          if (onSanMoveListChange) onSanMoveListChange(data.moveHistory);
+          
+          // Check if the move history has actually changed
+          const moveHistoryChanged = JSON.stringify(data.moveHistory) !== JSON.stringify(sanMoveList);
+          
+          if (moveHistoryChanged) {
+            setSanMoveList(data.moveHistory);
+            if (onSanMoveListChange) onSanMoveListChange(data.moveHistory);
+          }
         }
         
         // Update the board state from the new position
         const newBoardState = getCurrentBoardState();
+        
+        // Check if the board state has actually changed to prevent unnecessary updates
+        const boardStateChanged = JSON.stringify(newBoardState) !== JSON.stringify(boardState);
+        
+        if (!boardStateChanged) {
+          console.log('Board state unchanged, skipping update');
+          return;
+        }
         
         // Batch state updates to prevent excessive renders
         const updates: any = {
@@ -1853,6 +1913,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     // Handle game_end event from server
     const handleGameEnd = (data: any) => {
       console.log('Received game_end event:', data);
+      console.log('Player color:', playerColor);
       
       // Check if this update is for our current game
       if (data.gameId !== gameRoomId) {
@@ -1878,14 +1939,73 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       
       // Determine the result from the player's perspective
       let playerResult: GameResultType = 'draw';
-      if (data.result === 'draw' || data.reason === 'threefold_repetition') {
+      
+      // Debug log all data fields to help diagnose the issue
+      console.log('Game end data fields:', {
+        reason: data.reason,
+        winner: data.winner,
+        resigner: data.resigner,
+        timedOut: data.timedOut,
+        playerColor,
+        whitePlayer: whitePlayer.username,
+        blackPlayer: blackPlayer.username
+      });
+      
+      // Handle specific game end reasons
+      if (data.reason === 'checkmate') {
+        // For checkmate, determine the winner based on the data from the server
+        // If data.winner is not specified, infer it from the last move
+        let winner = data.winner;
+        
+        // If winner is not explicitly provided, determine it based on who made the last move
+        if (!winner && data.lastMoveBy) {
+          // The player who made the last move is the winner in checkmate
+          winner = data.lastMoveBy;
+          console.log(`Winner not explicitly provided, inferring from lastMoveBy: ${winner}`);
+        }
+        
+        // If we still don't have a winner, try to determine from the game state
+        if (!winner) {
+          // In checkmate, the player whose turn it is has lost (they're in checkmate)
+          const isWhiteTurn = data.whiteTurn !== undefined ? data.whiteTurn : (moveHistory?.moves?.length % 2 === 0);
+          winner = isWhiteTurn ? 'black' : 'white';
+          console.log(`Winner still not determined, inferring from turn: ${winner} (whiteTurn: ${isWhiteTurn})`);
+        }
+        
+        const isPlayerWinner = 
+          (playerColor === 'white' && winner === 'white') ||
+          (playerColor === 'black' && winner === 'black');
+        playerResult = isPlayerWinner ? 'win' : 'loss';
+        console.log(`Checkmate detected. Player is ${playerColor}, winner is ${winner}, playerResult: ${playerResult}`);
+      }
+      else if (data.reason === 'resignation') {
+        // For resignation, the winner is the opposite of the resigner
+        const isPlayerResigned = 
+          (playerColor === 'white' && data.resigner === 'white') ||
+          (playerColor === 'black' && data.resigner === 'black');
+        playerResult = isPlayerResigned ? 'loss' : 'win';
+        console.log(`Resignation detected. Player is ${playerColor}, resigner is ${data.resigner}, playerResult: ${playerResult}`);
+      }
+      else if (data.reason === 'timeout') {
+        // For timeout, the winner is the opposite of who timed out
+        const isPlayerTimedOut = 
+          (playerColor === 'white' && data.timedOut === 'white') ||
+          (playerColor === 'black' && data.timedOut === 'black');
+        playerResult = isPlayerTimedOut ? 'loss' : 'win';
+        console.log(`Timeout detected. Player is ${playerColor}, timedOut is ${data.timedOut}, playerResult: ${playerResult}`);
+      }
+      else if (['draw_agreement', 'stalemate', 'insufficient_material', 'threefold_repetition', 'fifty_move_rule'].includes(data.reason)) {
+        // These are all draw conditions
         playerResult = 'draw';
-      } else if (data.winner) {
-        // If there's a winner, determine if it's the player
+        console.log(`Draw condition detected: ${data.reason}`);
+      }
+      else if (data.winner) {
+        // Generic winner determination for other cases
         const isPlayerWinner = 
           (playerColor === 'white' && data.winner === 'white') ||
           (playerColor === 'black' && data.winner === 'black');
         playerResult = isPlayerWinner ? 'win' : 'loss';
+        console.log(`Generic winner determination. Player is ${playerColor}, winner is ${data.winner}, playerResult: ${playerResult}`);
       }
       
       // Set the game result for display
@@ -1903,6 +2023,16 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         opponentRatingChange: data.whitePlayer?.ratingChange !== undefined ? 
           (playerColor === 'white' ? data.blackPlayer.ratingChange : data.whitePlayer.ratingChange) : 0
       };
+      
+      console.log('Final result data:', resultData);
+      
+      // Save the game result to localStorage for the result page to use
+      try {
+        localStorage.setItem(`gameResult_${gameRoomId}`, JSON.stringify(resultData));
+        console.log('Saved game result to localStorage:', resultData);
+      } catch (error) {
+        console.error('Failed to save game result to localStorage:', error);
+      }
       
       // Create game result data for the window event
       const gameEndedEvent = new CustomEvent('game_ended', {
@@ -2813,7 +2943,9 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         from: moveData.from,
         to: moveData.to,
         promotion: moveData.promotion,
-        player: moveData.player
+        player: moveData.player,
+        notation: moveData.notation,
+        isCapture: moveData.isCapture
       }]);
     };
     
