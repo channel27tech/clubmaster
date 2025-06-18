@@ -52,17 +52,25 @@ export class GameController {
     const whiteRating = game.whitePlayerRating || whitePlayer.rating || 1500;
     const blackRating = game.blackPlayerRating || blackPlayer.rating || 1500;
 
+    // Create effective photo URLs that prioritize custom photos over Firebase photos
+    const whitePlayerPhotoURL = whitePlayer.custom_photo_base64 || whitePlayer.photoURL;
+    const blackPlayerPhotoURL = blackPlayer.custom_photo_base64 || blackPlayer.photoURL;
+    
+    // Prioritize custom usernames over displayName
+    const whitePlayerUsername = whitePlayer.username || whitePlayer.displayName;
+    const blackPlayerUsername = blackPlayer.username || blackPlayer.displayName;
+
     const response = {
       whitePlayer: { 
-        username: whitePlayer.displayName, 
+        username: whitePlayerUsername, 
         rating: whiteRating,
-        photoURL: whitePlayer.photoURL || null,
+        photoURL: whitePlayerPhotoURL,
         userId: whitePlayer.id
       },
       blackPlayer: { 
-        username: blackPlayer.displayName, 
+        username: blackPlayerUsername, 
         rating: blackRating,
-        photoURL: blackPlayer.photoURL || null,
+        photoURL: blackPlayerPhotoURL,
         userId: blackPlayer.id
       }
     };

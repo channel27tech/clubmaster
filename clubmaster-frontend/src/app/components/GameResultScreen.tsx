@@ -53,18 +53,49 @@ const GameResultScreen: React.FC<GameResultScreenProps> = ({
   
   // Helper function to get the best available profile image
   const getBestProfileImage = (apiImage: string | null | undefined, initialImage: string | null | undefined, defaultLetter: string): string | null => {
-    // First priority: API provided image (from database)
-    if (apiImage) {
+    // Check if apiImage is a base64 string (custom uploaded photo)
+    const isBase64Image = apiImage?.startsWith('data:image');
+    
+    // First priority: API provided image that is a base64 string (custom uploaded photo)
+    if (apiImage && isBase64Image) {
+      console.log(`Using custom uploaded photo for ${defaultLetter}`);
       return apiImage;
     }
     
-    // Second priority: Initial image (from props, usually from Firebase)
+    // Second priority: API provided image from database (may be from Firebase but chosen by backend)
+    if (apiImage) {
+      console.log(`Using database photo for ${defaultLetter}`);
+      return apiImage;
+    }
+    
+    // Third priority: Initial image (from props, usually from Firebase)
     if (initialImage) {
+      console.log(`Using initial photo for ${defaultLetter}`);
       return initialImage;
     }
     
     // No image available
+    console.log(`No photo available for ${defaultLetter}, will use fallback`);
     return null;
+  };
+  
+  // Helper function to get the best username to display
+  const getBestUsername = (apiUsername: string | null | undefined, initialUsername: string | null | undefined, defaultName: string): string => {
+    // First priority: API provided username (from database, which may be custom)
+    if (apiUsername && apiUsername !== 'Loading...') {
+      console.log(`Using API username: ${apiUsername}`);
+      return apiUsername;
+    }
+    
+    // Second priority: Initial username (from props)
+    if (initialUsername && initialUsername !== 'Loading...') {
+      console.log(`Using initial username: ${initialUsername}`);
+      return initialUsername;
+    }
+    
+    // Fallback to default
+    console.log(`No valid username found, using default: ${defaultName}`);
+    return defaultName;
   };
   
   // Fetch game result data when component mounts
@@ -115,8 +146,42 @@ const GameResultScreen: React.FC<GameResultScreenProps> = ({
           // Determine which player is "you" based on the result
           if (result === 'win' && gameResultData.resultType === 'white_win') {
             // You are white and won
-            setPlayerName(gameResultData.whitePlayer?.username || initialPlayerName);
-            setOpponentName(gameResultData.blackPlayer?.username || initialOpponentName);
+            setPlayerName(getBestUsername(
+              gameResultData.whitePlayer?.username,
+              initialPlayerName,
+              'You'
+            ));
+            setOpponentName(getBestUsername(
+              gameResultData.blackPlayer?.username,
+              initialOpponentName,
+              'Opponent'
+            ));
+            setPlayerRating(gameResultData.whitePlayer?.rating || initialPlayerRating);
+            setOpponentRating(gameResultData.blackPlayer?.rating || initialOpponentRating);
+            setPlayerRatingChange(gameResultData.whitePlayer?.ratingChange || initialPlayerRatingChange);
+            setOpponentRatingChange(gameResultData.blackPlayer?.ratingChange || initialOpponentRatingChange);
+            setPlayerPhotoURL(getBestProfileImage(
+              gameResultData.whitePlayer?.photoURL, 
+              initialPlayerPhotoURL,
+              gameResultData.whitePlayer?.username?.[0] || 'P'
+            ));
+            setOpponentPhotoURL(getBestProfileImage(
+              gameResultData.blackPlayer?.photoURL,
+              initialOpponentPhotoURL,
+              gameResultData.blackPlayer?.username?.[0] || 'O'
+            ));
+          } else if (result === 'loss' && gameResultData.resultType === 'black_win') {
+            // You are white and lost
+            setPlayerName(getBestUsername(
+              gameResultData.whitePlayer?.username,
+              initialPlayerName,
+              'You'
+            ));
+            setOpponentName(getBestUsername(
+              gameResultData.blackPlayer?.username,
+              initialOpponentName,
+              'Opponent'
+            ));
             setPlayerRating(gameResultData.whitePlayer?.rating || initialPlayerRating);
             setOpponentRating(gameResultData.blackPlayer?.rating || initialOpponentRating);
             setPlayerRatingChange(gameResultData.whitePlayer?.ratingChange || initialPlayerRatingChange);
@@ -133,14 +198,22 @@ const GameResultScreen: React.FC<GameResultScreenProps> = ({
             ));
           } else if (result === 'win' && gameResultData.resultType === 'black_win') {
             // You are black and won
-            setPlayerName(gameResultData.blackPlayer?.username || initialPlayerName);
-            setOpponentName(gameResultData.whitePlayer?.username || initialOpponentName);
+            setPlayerName(getBestUsername(
+              gameResultData.blackPlayer?.username,
+              initialPlayerName,
+              'You'
+            ));
+            setOpponentName(getBestUsername(
+              gameResultData.whitePlayer?.username,
+              initialOpponentName,
+              'Opponent'
+            ));
             setPlayerRating(gameResultData.blackPlayer?.rating || initialPlayerRating);
             setOpponentRating(gameResultData.whitePlayer?.rating || initialOpponentRating);
             setPlayerRatingChange(gameResultData.blackPlayer?.ratingChange || initialPlayerRatingChange);
             setOpponentRatingChange(gameResultData.whitePlayer?.ratingChange || initialOpponentRatingChange);
             setPlayerPhotoURL(getBestProfileImage(
-              gameResultData.blackPlayer?.photoURL,
+              gameResultData.blackPlayer?.photoURL, 
               initialPlayerPhotoURL,
               gameResultData.blackPlayer?.username?.[0] || 'P'
             ));
@@ -151,14 +224,22 @@ const GameResultScreen: React.FC<GameResultScreenProps> = ({
             ));
           } else if (result === 'loss' && gameResultData.resultType === 'white_win') {
             // You are black and lost
-            setPlayerName(gameResultData.blackPlayer?.username || initialPlayerName);
-            setOpponentName(gameResultData.whitePlayer?.username || initialOpponentName);
+            setPlayerName(getBestUsername(
+              gameResultData.blackPlayer?.username,
+              initialPlayerName,
+              'You'
+            ));
+            setOpponentName(getBestUsername(
+              gameResultData.whitePlayer?.username,
+              initialOpponentName,
+              'Opponent'
+            ));
             setPlayerRating(gameResultData.blackPlayer?.rating || initialPlayerRating);
             setOpponentRating(gameResultData.whitePlayer?.rating || initialOpponentRating);
             setPlayerRatingChange(gameResultData.blackPlayer?.ratingChange || initialPlayerRatingChange);
             setOpponentRatingChange(gameResultData.whitePlayer?.ratingChange || initialOpponentRatingChange);
             setPlayerPhotoURL(getBestProfileImage(
-              gameResultData.blackPlayer?.photoURL,
+              gameResultData.blackPlayer?.photoURL, 
               initialPlayerPhotoURL,
               gameResultData.blackPlayer?.username?.[0] || 'P'
             ));
@@ -167,28 +248,18 @@ const GameResultScreen: React.FC<GameResultScreenProps> = ({
               initialOpponentPhotoURL,
               gameResultData.whitePlayer?.username?.[0] || 'O'
             ));
-          } else if (result === 'loss' && gameResultData.resultType === 'black_win') {
-            // You are white and lost
-            setPlayerName(gameResultData.whitePlayer?.username || initialPlayerName);
-            setOpponentName(gameResultData.blackPlayer?.username || initialOpponentName);
-            setPlayerRating(gameResultData.whitePlayer?.rating || initialPlayerRating);
-            setOpponentRating(gameResultData.blackPlayer?.rating || initialOpponentRating);
-            setPlayerRatingChange(gameResultData.whitePlayer?.ratingChange || initialPlayerRatingChange);
-            setOpponentRatingChange(gameResultData.blackPlayer?.ratingChange || initialOpponentRatingChange);
-            setPlayerPhotoURL(getBestProfileImage(
-              gameResultData.whitePlayer?.photoURL,
-              initialPlayerPhotoURL,
-              gameResultData.whitePlayer?.username?.[0] || 'P'
-            ));
-            setOpponentPhotoURL(getBestProfileImage(
-              gameResultData.blackPlayer?.photoURL,
-              initialOpponentPhotoURL,
-              gameResultData.blackPlayer?.username?.[0] || 'O'
-            ));
           } else {
             // Draw or other result - use default mapping
-            setPlayerName(gameResultData.whitePlayer?.username || initialPlayerName);
-            setOpponentName(gameResultData.blackPlayer?.username || initialOpponentName);
+            setPlayerName(getBestUsername(
+              gameResultData.whitePlayer?.username,
+              initialPlayerName,
+              'You'
+            ));
+            setOpponentName(getBestUsername(
+              gameResultData.blackPlayer?.username,
+              initialOpponentName,
+              'Opponent'
+            ));
             setPlayerRating(gameResultData.whitePlayer?.rating || initialPlayerRating);
             setOpponentRating(gameResultData.blackPlayer?.rating || initialOpponentRating);
             setPlayerRatingChange(gameResultData.whitePlayer?.ratingChange || initialPlayerRatingChange);
