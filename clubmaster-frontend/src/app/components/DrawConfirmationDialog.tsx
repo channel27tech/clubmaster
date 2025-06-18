@@ -16,6 +16,13 @@ const DrawConfirmationDialog: React.FC<DrawConfirmationDialogProps> = ({
   opponentName,
 }) => {
   const dialogRef = useRef<HTMLDivElement>(null);
+  
+  // Debug log to check opponentName value
+  useEffect(() => {
+    if (isOpen && isIncoming) {
+      console.log('DrawConfirmationDialog received opponentName:', opponentName);
+    }
+  }, [isOpen, isIncoming, opponentName]);
 
   // Handle click outside dialog to close
   useEffect(() => {
