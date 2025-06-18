@@ -107,9 +107,17 @@ const GameClock: React.FC<GameClockProps> = ({
   // Handle time out in a separate effect to avoid state updates during render
   useEffect(() => {
     if (isTimeOutRef.current && !hasCalledTimeOut.current && onTimeOut) {
+      console.log('[GameClock] Time out detected, calling onTimeOut handler');
+      console.log('[GameClock] Current remaining time:', remainingTime);
+      
+      // Mark as called before calling the handler to prevent double calls
       hasCalledTimeOut.current = true;
-      onTimeOut();
       isTimeOutRef.current = false;
+      
+      // Call the timeout handler
+      onTimeOut();
+      
+      console.log('[GameClock] onTimeOut handler called successfully');
     }
   }, [remainingTime, onTimeOut]);
   
