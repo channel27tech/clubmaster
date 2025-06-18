@@ -8,6 +8,7 @@ interface GameClockProps {
   isDarkTheme?: boolean;
   onTimeOut?: () => void;
   playLowTimeSound?: () => void;
+  onTimeUpdate?: (newTime: number) => void;
 }
 
 /**
@@ -19,26 +20,89 @@ const GameClock: React.FC<GameClockProps> = ({
   isActive,
   isDarkTheme = false,
   onTimeOut,
-  playLowTimeSound
+  playLowTimeSound,
+  onTimeUpdate
 }) => {
   const [remainingTime, setRemainingTime] = useState(initialTime);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const hasCalledTimeOut = useRef(false);
   const hasPlayedLowTimeSound = useRef(false);
   const isMountedRef = useRef(true); // Track if component is mounted
+  const isActiveRef = useRef(isActive); // Track isActive changes
+  const lastInitialTimeRef = useRef(initialTime); // Track initial time changes
   
   // Use a ref to track when callbacks should be called
   const isTimeOutRef = useRef(false);
   const shouldPlaySoundRef = useRef(false);
 
+  // Only update the remainingTime state when initialTime changes AND it's different from our last value
+  // This prevents resetting the clock when the component re-renders with the same initialTime
   useEffect(() => {
-    // Reset the timer when we get a new initial time
-    setRemainingTime(initialTime);
-    hasCalledTimeOut.current = false;
-    hasPlayedLowTimeSound.current = false;
-    isTimeOutRef.current = false;
-    shouldPlaySoundRef.current = false;
+    if (initialTime !== lastInitialTimeRef.current) {
+      console.log(`[GameClock] initialTime changed from ${lastInitialTimeRef.current} to ${initialTime}`);
+      setRemainingTime(initialTime);
+      lastInitialTimeRef.current = initialTime;
+      hasCalledTimeOut.current = false;
+      hasPlayedLowTimeSound.current = false;
+      isTimeOutRef.current = false;
+      shouldPlaySoundRef.current = false;
+    }
   }, [initialTime]);
+
+  // Sync remainingTime with parent component via onTimeUpdate, but only when the value actually changes
+  // This prevents the "setState during render" error
+  const prevTimeRef = useRef(remainingTime);
+  useEffect(() => {
+    // Only call onTimeUpdate when remainingTime actually changes and not during initial render
+    if (prevTimeRef.current !== remainingTime && onTimeUpdate) {
+      prevTimeRef.current = remainingTime;
+      onTimeUpdate(remainingTime);
+    }
+  }, [remainingTime, onTimeUpdate]);
+
+  // Log when isActive changes
+  useEffect(() => {
+    console.log(`[GameClock] isActive changed to ${isActive}, remainingTime=${remainingTime}`);
+    isActiveRef.current = isActive;
+    
+    // Clear any existing timer when isActive changes
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+      console.log(`[GameClock] Cleared timer due to isActive change to ${isActive}`);
+    }
+    
+    // Start a new timer if this clock is now active
+    if (isActive && remainingTime > 0) {
+      console.log(`[GameClock] Starting new timer, remainingTime=${remainingTime}`);
+      timerRef.current = setInterval(() => {
+        if (isMountedRef.current && isActiveRef.current) {
+          setRemainingTime((prevTime: number) => {
+            const newTime = prevTime - 1;
+            
+            // Check if time is about to run low
+            if (newTime === 60 && !hasPlayedLowTimeSound.current) {
+              shouldPlaySoundRef.current = true;
+            }
+            
+            // If time reaches zero, clear interval and mark for timeout
+            if (newTime <= 0 && !hasCalledTimeOut.current) {
+              if (timerRef.current) {
+                clearInterval(timerRef.current);
+                timerRef.current = null;
+              }
+              
+              // Mark for timeout instead of calling directly
+              isTimeOutRef.current = true;
+              return 0;
+            }
+            
+            return newTime;
+          });
+        }
+      }, 1000);
+    }
+  }, [isActive, remainingTime]);
 
   // Handle time out in a separate effect to avoid state updates during render
   useEffect(() => {
@@ -64,54 +128,12 @@ const GameClock: React.FC<GameClockProps> = ({
     
     return () => {
       isMountedRef.current = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    // Clear any existing timer
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-
-    // If active and time is greater than 0, start the timer
-    if (isActive && remainingTime > 0) {
-      timerRef.current = setInterval(() => {
-        if (isMountedRef.current) { // Only update state if component is still mounted
-        setRemainingTime((prevTime: number) => {
-          const newTime = prevTime - 1;
-          
-          // Check if time is about to run low
-            if (newTime === 60 && !hasPlayedLowTimeSound.current) {
-              shouldPlaySoundRef.current = true;
-          }
-          
-            // If time reaches zero, clear interval and mark for timeout
-          if (newTime <= 0 && !hasCalledTimeOut.current) {
-            if (timerRef.current) {
-              clearInterval(timerRef.current);
-              timerRef.current = null;
-            }
-            
-              // Mark for timeout instead of calling directly
-              isTimeOutRef.current = true;
-            return 0;
-          }
-          
-          return newTime;
-        });
-        }
-      }, 1000);
-    }
-
-    // Clean up timer on unmount or when isActive changes
-    return () => {
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
       }
     };
-  }, [isActive, remainingTime]);
+  }, []);
 
   // Format time as mm:ss
   const formatTime = (seconds: number): string => {

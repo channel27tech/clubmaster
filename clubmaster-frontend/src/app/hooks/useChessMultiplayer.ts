@@ -80,7 +80,11 @@ export const useChessMultiplayer = ({
     
     // Dispatch the event to be handled by ChessBoardWrapper
     window.dispatchEvent(moveEvent);
-  }, [socket, playerColor, boardState, gameId]);
+    
+    // Immediately update the player turn locally to prevent UI lag
+    // The server will confirm this later
+    onPlayerTurnChange(piece.color === 'white' ? 'black' : 'white');
+  }, [socket, playerColor, boardState, gameId, onPlayerTurnChange]);
 
   // Request board synchronization from server
   const requestSync = useCallback((reason: string) => {
@@ -148,11 +152,17 @@ export const useChessMultiplayer = ({
           currentMoveIndex: updatedMoves.length - 1
         };
         
+        // Determine the next player's turn based on who just moved
+        const nextPlayerTurn = data.player === 'white' ? 'black' : 'white';
+        
         // Update all the state through callbacks
         onMoveHistoryUpdate(newHistory);
         onBoardStateUpdate(newBoardState);
         onLastMoveUpdate({ from: data.from, to: data.to });
-        onPlayerTurnChange(data.player === 'white' ? 'black' : 'white');
+        
+        // CRITICAL: Always update the player turn after a move
+        console.log(`[TURN] Setting active player to ${nextPlayerTurn} after move from ${data.player}`);
+        onPlayerTurnChange(nextPlayerTurn);
         
         console.log('[SYNC] Successfully synchronized with FEN');
       } catch (error) {
@@ -163,10 +173,14 @@ export const useChessMultiplayer = ({
       console.warn('[WARN] No FEN provided in move_made event');
       requestSync('no_fen_provided');
     }
-  }, [moveHistory, onBoardStateUpdate, onMoveHistoryUpdate, onLastMoveUpdate, onPlayerTurnChange, requestSync, synchronizeBoardFromFen]);
+  }, [moveHistory, onBoardStateUpdate, onMoveHistoryUpdate, onLastMoveUpdate, onPlayerTurnChange, requestSync]);
 
   // Handle board sync from server
-  const handleBoardSync = useCallback((data: { fen: string, gameId: string }) => {
+  const handleBoardSync = useCallback((data: { 
+    fen: string, 
+    gameId: string,
+    whiteTurn?: boolean 
+  }) => {
     if (data.gameId !== gameId) return;
     
     console.log('Received board sync:', data);
@@ -192,13 +206,20 @@ export const useChessMultiplayer = ({
         
         // Update the move history
         onMoveHistoryUpdate(newHistory);
+        
+        // Update player turn if provided
+        if (data.whiteTurn !== undefined) {
+          const activePlayer = data.whiteTurn ? 'white' : 'black';
+          console.log(`[TURN] Setting active player to ${activePlayer} from board sync`);
+          onPlayerTurnChange(activePlayer);
+        }
       } else {
         console.log('Board state unchanged, skipping update');
       }
     } catch (error) {
       console.error('Failed to synchronize board state:', error);
     }
-  }, [gameId, moveHistory, boardState, onBoardStateUpdate, onMoveHistoryUpdate, synchronizeBoardFromFen]);
+  }, [gameId, moveHistory, boardState, onBoardStateUpdate, onMoveHistoryUpdate, onPlayerTurnChange]);
 
   // Handle board updates from server
   const handleBoardUpdate = useCallback((data: {
@@ -216,9 +237,15 @@ export const useChessMultiplayer = ({
   }) => {
     if (data.gameId !== gameId) return;
     
-    console.log(`Received board_updated event for game ${data.gameId}`);
+    console.log(`Received board_updated event for game ${data.gameId}, whiteTurn=${data.whiteTurn}`);
     
     try {
+      // CRITICAL: Always update the active player first based on whiteTurn
+      // This ensures clocks and turn indicators stay in sync
+      const activePlayer = data.whiteTurn ? 'white' : 'black';
+      console.log(`[TURN] Setting active player to ${activePlayer} from board update`);
+      onPlayerTurnChange(activePlayer);
+      
       // Synchronize the board using the provided FEN
       const newBoardState = synchronizeBoardFromFen(data.fen);
       
@@ -235,17 +262,16 @@ export const useChessMultiplayer = ({
         // Update all the state through callbacks
         onBoardStateUpdate(newBoardState);
         if (lastMove) onLastMoveUpdate(lastMove);
-        onPlayerTurnChange(data.whiteTurn ? 'white' : 'black');
         
         console.log('Successfully processed board update');
       } else {
-        console.log('Board state unchanged, skipping update');
+        console.log('Board state unchanged, skipping board state update');
       }
     } catch (error) {
       console.error('Error processing board update:', error);
       requestSync('board_update_failed');
     }
-  }, [gameId, boardState, onBoardStateUpdate, onLastMoveUpdate, onPlayerTurnChange, requestSync, synchronizeBoardFromFen]);
+  }, [gameId, boardState, onBoardStateUpdate, onLastMoveUpdate, onPlayerTurnChange, requestSync]);
   
   // Register socket event handlers
   useEffect(() => {
