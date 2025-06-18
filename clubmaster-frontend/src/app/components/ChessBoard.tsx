@@ -255,8 +255,8 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
         piece: { type: promotionPiece, color: piece.color },
         notation,
         promotion: promotionPiece,
-        isCapture: isCapture,
-        capturedPiece: capturedPiece,
+        isCapture,
+        capturedPiece,
         boardState: newBoardState
       });
 

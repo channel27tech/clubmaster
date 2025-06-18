@@ -62,7 +62,7 @@ export const useChessMultiplayer = ({
     
     // Instead of emitting directly, dispatch an event to add this move to the moveQueue
     // This ensures all moves go through a single path
-    console.log('[ChessMultiplayer] Adding move to queue:', { from, to, player: piece.color });
+    console.log('[ChessMultiplayer] Adding move to queue:', { from, to, player: piece.color, promotion });
     
     // Create a custom event to add the move to the queue
     const moveEvent = new CustomEvent('add_move_to_queue', {
@@ -167,29 +167,38 @@ export const useChessMultiplayer = ({
 
   // Handle board sync from server
   const handleBoardSync = useCallback((data: { fen: string, gameId: string }) => {
+    if (data.gameId !== gameId) return;
+    
     console.log('Received board sync:', data);
     try {
       // Synchronize the board state from the FEN
       const newBoardState = synchronizeBoardFromFen(data.fen);
       
-      // Update the board state
-      onBoardStateUpdate(newBoardState);
-      console.log('Board synchronized successfully with FEN:', data.fen);
+      // Check if the board state has actually changed to prevent unnecessary updates
+      const isBoardStateChanged = JSON.stringify(newBoardState) !== JSON.stringify(boardState);
       
-      // Create a new move history based on this state
-      const newHistory = {
-        ...moveHistory,
-        moves: moveHistory.moves,
-        currentMoveIndex: moveHistory.moves.length - 1,
-        initialBoardState: newBoardState,
-      };
-      
-      // Update the move history
-      onMoveHistoryUpdate(newHistory);
+      if (isBoardStateChanged) {
+        // Update the board state only if it has changed
+        onBoardStateUpdate(newBoardState);
+        console.log('Board synchronized successfully with FEN:', data.fen);
+        
+        // Create a new move history based on this state
+        const newHistory = {
+          ...moveHistory,
+          moves: moveHistory.moves,
+          currentMoveIndex: moveHistory.moves.length - 1,
+          initialBoardState: newBoardState,
+        };
+        
+        // Update the move history
+        onMoveHistoryUpdate(newHistory);
+      } else {
+        console.log('Board state unchanged, skipping update');
+      }
     } catch (error) {
       console.error('Failed to synchronize board state:', error);
     }
-  }, [moveHistory, onBoardStateUpdate, onMoveHistoryUpdate, synchronizeBoardFromFen]);
+  }, [gameId, moveHistory, boardState, onBoardStateUpdate, onMoveHistoryUpdate, synchronizeBoardFromFen]);
 
   // Handle board updates from server
   const handleBoardUpdate = useCallback((data: {
@@ -213,23 +222,30 @@ export const useChessMultiplayer = ({
       // Synchronize the board using the provided FEN
       const newBoardState = synchronizeBoardFromFen(data.fen);
       
-      // Extract last move information
-      const lastMove = data.lastMove ? {
-        from: data.lastMove.substring(0, 2),
-        to: data.lastMove.substring(2, 4)
-      } : null;
+      // Check if the board state has actually changed to prevent unnecessary updates
+      const isBoardStateChanged = JSON.stringify(newBoardState) !== JSON.stringify(boardState);
       
-      // Update all the state through callbacks
-      onBoardStateUpdate(newBoardState);
-      if (lastMove) onLastMoveUpdate(lastMove);
-      onPlayerTurnChange(data.whiteTurn ? 'white' : 'black');
-      
-      console.log('Successfully processed board update');
+      if (isBoardStateChanged) {
+        // Extract last move information
+        const lastMove = data.lastMove ? {
+          from: data.lastMove.substring(0, 2),
+          to: data.lastMove.substring(2, 4)
+        } : null;
+        
+        // Update all the state through callbacks
+        onBoardStateUpdate(newBoardState);
+        if (lastMove) onLastMoveUpdate(lastMove);
+        onPlayerTurnChange(data.whiteTurn ? 'white' : 'black');
+        
+        console.log('Successfully processed board update');
+      } else {
+        console.log('Board state unchanged, skipping update');
+      }
     } catch (error) {
       console.error('Error processing board update:', error);
       requestSync('board_update_failed');
     }
-  }, [gameId, onBoardStateUpdate, onLastMoveUpdate, onPlayerTurnChange, requestSync, synchronizeBoardFromFen]);
+  }, [gameId, boardState, onBoardStateUpdate, onLastMoveUpdate, onPlayerTurnChange, requestSync, synchronizeBoardFromFen]);
   
   // Register socket event handlers
   useEffect(() => {
