@@ -558,7 +558,8 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     };
 
     // Listen for draw offers
-    safeSocket.on('offer_draw', () => {
+    safeSocket.on('draw_request', (data) => {
+      console.log('Received draw request from opponent:', data);
       setDrawOfferReceived(true);
       
       // Play notification sound if enabled
@@ -568,13 +569,18 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       
       // Set a timeout to auto-decline after 30 seconds
       const timeout = setTimeout(() => {
+        console.log('Draw offer timed out, auto-declining');
         setDrawOfferReceived(false);
-        safeSocket.emit('decline_draw', { gameId: gameRoomId });
+        safeSocket.emit('draw_response', { 
+          gameId: gameRoomId,
+          accepted: false 
+        });
       }, 30000);
       
       setDrawOfferTimeout(timeout);
       
-      // Start countdown
+      // Reset and start countdown
+      setDrawOfferTimeRemaining(30);
       const countdownInterval = setInterval(() => {
         setDrawOfferTimeRemaining((prev) => {
           if (prev <= 1) {
@@ -813,7 +819,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       }
       
       // Clean up all event listeners to prevent memory leaks
-      safeSocket.off('offer_draw');
+      safeSocket.off('draw_request');
       safeSocket.off('game_started');
       safeSocket.off('move_made');
       safeSocket.off('checkmate');
@@ -1362,7 +1368,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     // Threefold repetition handling is now integrated into the main game_end handler above
 
     return () => {
-      safeSocket.off('offer_draw');
+      safeSocket.off('draw_request');
       safeSocket.off('game_started');
       safeSocket.off('move_made');
       safeSocket.off('checkmate');
@@ -1951,6 +1957,17 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       console.log('Received game_end event:', data);
       console.log('Player color:', playerColor);
       
+      // Additional logging for timeout events
+      if (data.reason === 'timeout') {
+        console.log('[TIMEOUT] Received game_end with timeout reason', {
+          winnerColor: data.winnerColor,
+          loserColor: data.loserColor,
+          playerColor,
+          shouldWin: (playerColor === 'white' && data.winnerColor === 'white') || 
+                     (playerColor === 'black' && data.winnerColor === 'black')
+        });
+      }
+      
       // Check if this update is for our current game
       if (data.gameId !== gameRoomId) {
         console.log(`Ignoring game_end for different game (${data.gameId} vs ${gameRoomId})`);
@@ -2023,12 +2040,58 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         console.log(`Resignation detected. Player is ${playerColor}, resigner is ${data.resigner}, playerResult: ${playerResult}`);
       }
       else if (data.reason === 'timeout') {
-        // For timeout, the winner is the opposite of who timed out
-        const isPlayerTimedOut = 
-          (playerColor === 'white' && data.timedOut === 'white') ||
-          (playerColor === 'black' && data.timedOut === 'black');
-        playerResult = isPlayerTimedOut ? 'loss' : 'win';
-        console.log(`Timeout detected. Player is ${playerColor}, timedOut is ${data.timedOut}, playerResult: ${playerResult}`);
+        // For timeout events, we've already shown the appropriate screen in handleTimeOut
+        // We'll just use this event to update rating changes if available
+        console.log(`Received game_end with timeout reason - using for rating updates only`);
+        console.log(`Game end data:`, data);
+        
+        try {
+          // Get the stored timeout player from localStorage
+          const timedOutPlayer = localStorage.getItem(`timeout_player_${gameRoomId}`);
+          console.log(`Retrieved timedOutPlayer from localStorage: ${timedOutPlayer}`);
+          
+          // Skip showing another result screen since we already showed it in handleTimeOut
+          console.log(`Skipping result screen for timeout since it was already shown`);
+          
+          // Just update the rating changes if they're available
+          if (data.whitePlayer?.ratingChange !== undefined && data.blackPlayer?.ratingChange !== undefined) {
+            console.log(`Updating rating changes: white=${data.whitePlayer.ratingChange}, black=${data.blackPlayer.ratingChange}`);
+            
+            // Get the current result data
+            const currentResultData = { ...gameResultData };
+            
+            // Update rating changes
+            currentResultData.playerRatingChange = playerColor === 'white' ? 
+              data.whitePlayer.ratingChange : data.blackPlayer.ratingChange;
+            currentResultData.opponentRatingChange = playerColor === 'white' ? 
+              data.blackPlayer.ratingChange : data.whitePlayer.ratingChange;
+            
+            // Update the result data
+            setGameResultData(currentResultData);
+            
+            console.log(`Updated result data with rating changes:`, currentResultData);
+          }
+          
+          // Return early to skip showing another result screen
+          return;
+        } catch (error) {
+          console.error('Error handling timeout game_end event:', error);
+          
+          // Fallback to the old method if there's an error
+          const isPlayerTimedOut = 
+            (playerColor === 'white' && (data.timedOut === 'white' || data.loserColor === 'white')) ||
+            (playerColor === 'black' && (data.timedOut === 'black' || data.loserColor === 'black'));
+          
+          playerResult = isPlayerTimedOut ? 'loss' : 'win';
+          
+          // Only show the result screen if it's not already showing
+          if (showResultScreen) {
+            console.log(`Result screen already showing, skipping`);
+            return;
+          }
+          
+          console.log(`Fallback timeout handling. Player is ${playerColor}, isTimedOut: ${isPlayerTimedOut}, playerResult: ${playerResult}`);
+        }
       }
       else if (['draw_agreement', 'stalemate', 'insufficient_material', 'threefold_repetition', 'fifty_move_rule'].includes(data.reason)) {
         // These are all draw conditions
@@ -2242,64 +2305,103 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     console.log('Using gameId:', gameRoomId);
   }, [playerColor, gameState.timeControl, gameTimeInSeconds, gameRoomId]);
   
-  // Mock handler for time out events
+  // Handler for time out events
   const handleTimeOut = (player: 'white' | 'black') => {
     console.log(`${player} player ran out of time`);
     
-    // Emit timeout event to the server
-    if (socket) {
-      socket.emit('timeout_occurred', {
-        gameId: gameRoomId,
-        playerColor: player
-      });
-      console.log(`Emitted timeout_occurred event for ${player} in game ${gameRoomId}`);
-    }
+    // Immediately stop both clocks
+    setActivePlayer(null);
     
-    // Use setState callback to avoid referencing current state directly
-    setActivePlayer(() => null); // Stop both clocks
-    
-    // Update game state
+    // Update game state to mark it as over
     setGameState(prev => ({
       ...prev,
       isGameOver: true,
     }));
-    
-    // Create game result data for timeout
-    const timeoutResultData = {
-      result: player === playerColor ? 'loss' : 'win' as GameResultType,
-      reason: 'timeout' as GameEndReason,
-      playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
-      opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-      playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-      opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
-      playerRatingChange: player === playerColor ? -10 : 10,
-      opponentRatingChange: player === playerColor ? 10 : -10
-    };
-    
-    // Set result data and show result screen
-    setGameResultData(timeoutResultData);
-    setShowResultScreen(true);
     
     // Play time out sound
     if (soundEnabledRef.current) {
       playSound('GAME_END', true);
     }
     
-    // Set game result data based on the player who timed out
-    const resultType = playerColor === player ? 'loss' : 'win';
-    setGameResultData({
-      result: resultType as GameResultType,
-      reason: 'timeout' as GameEndReason,
-      playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
-      opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-      playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-      opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
-      playerRatingChange: resultType === 'win' ? 10 : -10,
-      opponentRatingChange: resultType === 'win' ? -10 : 10
-    });
-    
-    // Show result screen
-    setShowResultScreen(true);
+    // Emit timeout event to the server using the correct event name 'report_timeout'
+    if (socket) {
+      // Convert 'white'/'black' to 'w'/'b' for the backend
+      const color = player === 'white' ? 'w' : 'b';
+      
+      // Store which player timed out in localStorage
+      try {
+        localStorage.setItem(`timeout_player_${gameRoomId}`, player);
+        console.log(`Stored timeout player ${player} in localStorage for game ${gameRoomId}`);
+      } catch (error) {
+        console.error('Failed to store timeout player in localStorage:', error);
+      }
+      
+      console.log(`Emitting report_timeout event for ${player} (${color}) in game ${gameRoomId}`);
+      
+      // CRITICAL FIX: We need to determine if this client is reporting their own timeout or the opponent's
+      const isReportingOwnTimeout = playerColor === player;
+      console.log(`isReportingOwnTimeout: ${isReportingOwnTimeout}, playerColor: ${playerColor}, timedOutPlayer: ${player}`);
+      
+      // If this is the player who timed out, show loss screen
+      if (isReportingOwnTimeout) {
+        console.log(`This player (${playerColor}) timed out - showing loss screen`);
+        
+        // Create game result data for timeout - this player lost
+        const timeoutResultData = {
+          result: 'loss' as GameResultType,
+          reason: 'timeout' as GameEndReason,
+          playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
+          opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
+          playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
+          opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
+          playerRatingChange: -10, // Loss for timing out
+          opponentRatingChange: 10  // Win for opponent
+        };
+        
+        // Set result data and show result screen
+        setGameResultData(timeoutResultData);
+        setShowResultScreen(true);
+        
+        // Emit the timeout event to the server with a flag indicating this player timed out
+        socket.emit('report_timeout', {
+          gameId: gameRoomId,
+          color: color,
+          reporterIsTimedOutPlayer: true
+        });
+        
+        console.log(`Emitted report_timeout event with reporterIsTimedOutPlayer=true`);
+      } else {
+        // This client is reporting the opponent's timeout
+        console.log(`Opponent (${player}) timed out - showing win screen`);
+        
+        // Create game result data for timeout - this player won
+        const timeoutResultData = {
+          result: 'win' as GameResultType,
+          reason: 'timeout' as GameEndReason,
+          playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
+          opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
+          playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
+          opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
+          playerRatingChange: 10, // Win because opponent timed out
+          opponentRatingChange: -10  // Loss for opponent
+        };
+        
+        // Set result data and show result screen
+        setGameResultData(timeoutResultData);
+        setShowResultScreen(true);
+        
+        // Emit the timeout event to the server with a flag indicating this player is reporting the opponent's timeout
+        socket.emit('report_timeout', {
+          gameId: gameRoomId,
+          color: color,
+          reporterIsTimedOutPlayer: false
+        });
+        
+        console.log(`Emitted report_timeout event with reporterIsTimedOutPlayer=false`);
+      }
+    } else {
+      console.error('Socket not available, cannot report timeout to server');
+    }
   };
 
   // Handle draw offer responses
@@ -2307,57 +2409,63 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   const handleAcceptDraw = useCallback(() => {
     if (!socket) return;
     
-    socket.emit('accept_draw', { gameId: gameRoomId });
-    setDrawOfferReceived(false);
+    console.log('Accepting draw offer and notifying server');
     
     // Play button click sound using ref
     playSound('BUTTON_CLICK', soundEnabledRef.current, 1.0, 'Accept');
     
+    // Clear any draw offer timeout
     if (drawOfferTimeout) {
       clearTimeout(drawOfferTimeout);
       setDrawOfferTimeout(null);
     }
     
-    // Update game state
-    setGameState(prev => ({
-      ...prev,
-      isGameOver: true,
-    }));
+    // Clear the draw offer UI
+    setDrawOfferReceived(false);
     
-    // Create game result data for draw
-    const drawResultData = {
-      result: 'draw' as GameResultType,
-      reason: 'agreement' as GameEndReason,
-      playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
-      opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-      playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-      opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
-      playerRatingChange: 0,
-      opponentRatingChange: 0
-    };
-    
-    // Set result data and show result screen
-    setGameResultData(drawResultData);
-    setShowResultScreen(true);
-    
-    // Stop the clocks
+    // Stop the clocks immediately
     setActivePlayer(null);
+    
+    // Notify the server about the draw acceptance
+    // The server will broadcast a game_end event to both players
+    // which will trigger the result screen for both players consistently
+    socket.emit('draw_response', { 
+      gameId: gameRoomId,
+      accepted: true 
+    });
+    
+    console.log('Sent draw_response with accepted=true to server');
+    console.log('Waiting for server to broadcast game_end event');
+    
+    // We don't set game over state or show result screen here
+    // Instead, we wait for the server's game_end event which will be handled by handleGameEnd
   }, [socket, gameRoomId, drawOfferTimeout, playSound]); // Remove soundEnabled dependency
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleDeclineDraw = useCallback(() => {
     if (!socket) return;
     
-    socket.emit('decline_draw', { gameId: gameRoomId });
+    console.log('Declining draw offer');
+    
+    // Clear the draw offer UI
     setDrawOfferReceived(false);
     
     // Play button click sound using ref
     playSound('BUTTON_CLICK', soundEnabledRef.current, 1.0, 'Decline');
     
+    // Clear any timeout
     if (drawOfferTimeout) {
       clearTimeout(drawOfferTimeout);
       setDrawOfferTimeout(null);
     }
+    
+    // Send decline response to server
+    socket.emit('draw_response', { 
+      gameId: gameRoomId,
+      accepted: false 
+    });
+    
+    console.log('Sent draw_response with accepted=false to server');
   }, [socket, gameRoomId, drawOfferTimeout, playSound]); // Remove soundEnabled dependency
 
   // Handle resignation from the current player
@@ -2412,8 +2520,12 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   const handleOfferDraw = useCallback(() => {
     if (!socket) return;
     
-    socket.emit('offer_draw', { gameId: gameRoomId });
-  }, [socket, gameRoomId]);
+    console.log('Offering draw to opponent');
+    socket.emit('draw_request', { gameId: gameRoomId });
+    
+    // Play button click sound
+    playSound('BUTTON_CLICK', soundEnabledRef.current, 1.0, 'Draw Offer');
+  }, [socket, gameRoomId, playSound]);
 
   // Handle aborting the game
   const handleAbortGame = () => {
