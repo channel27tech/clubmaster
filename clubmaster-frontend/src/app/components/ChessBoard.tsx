@@ -99,7 +99,7 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
       console.log("Not your turn");
       return;
     }
-
+    
     // If a square was already selected (making a move)
     if (selectedSquare) {
       // Check if the clicked square is in legal moves
@@ -184,10 +184,10 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
               movingPiece, 
               notation
             );
-            
-            // Clear selection
-            clearSelection();
-          }
+      
+      // Clear selection
+      clearSelection();
+    } 
         }
       } else {
         // If clicking on an invalid square, clear selection
@@ -196,7 +196,7 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
     } else {
       // Selecting a new square
       if (piece && piece.color === playerColor) {
-        selectSquare(position, piece);
+      selectSquare(position, piece);
       }
     }
   };
@@ -232,7 +232,7 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
       // Get the new board state after the promotion
       const newBoardState = getCurrentBoardState();
       const gameStatus = getGameStatus();
-      
+
       // Generate notation
       const notation = generateNotation(
         from, to, piece, isCapture, promotionPiece, 
