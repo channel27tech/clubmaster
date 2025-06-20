@@ -1,14 +1,18 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards, Request, HttpStatus, HttpCode, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards, Request, HttpStatus, HttpCode, NotFoundException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { NotificationsService } from './notifications.service';
 import { CreateNotificationDto } from './dto/create-notification.dto';
 import { NotificationQueryDto } from './dto/notification-query.dto';
-import { AuthGuard } from '@nestjs/passport';
+import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
 import { Notification } from './entities/notification.entity';
+import { UsersService } from '../users/users.service';
 
 @Controller('notifications')
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(FirebaseAuthGuard)
 export class NotificationsController {
-  constructor(private readonly notificationsService: NotificationsService) {}
+  constructor(
+    private readonly notificationsService: NotificationsService,
+    private readonly usersService: UsersService,
+  ) {}
 
   /**
    * Get notifications for the authenticated user with optional filtering and pagination
@@ -18,8 +22,14 @@ export class NotificationsController {
     @Query() query: NotificationQueryDto,
     @Request() req,
   ): Promise<{ notifications: Notification[]; total: number }> {
-    const userId = req.user.id;
-    return this.notificationsService.getNotificationsForUser(userId, query);
+    console.log('NotificationsController: req.user:', req.user);
+    const firebaseUid = req.user.uid;
+    const user = await this.usersService.findByFirebaseUid(firebaseUid);
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+    console.log('NotificationsController: internal user id:', user.id);
+    return this.notificationsService.getNotificationsForUser(user.id, query);
   }
 
   /**

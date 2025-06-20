@@ -120,9 +120,12 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
       return;
     }
 
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
     const fetchNotifications = async () => {
       try {
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/notifications?limit=20`);
+        const url = `${API_URL}/notifications?limit=20`;
+        console.log('Fetching notifications from:', url);
+        const response = await fetch(url);
         if (response.ok) {
           const data = await response.json();
           setNotifications(
@@ -144,18 +147,17 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
   // Mark a notification as read
   const markAsRead = async (notificationId: string) => {
     try {
-      // Update local state optimistically
       setNotifications(prev => 
         prev.map(n => n.id === notificationId ? { ...n, read: true } : n)
       );
-
-      // Call API to update server state
-      await fetch(`${process.env.NEXT_PUBLIC_API_URL}/notifications/${notificationId}/read`, {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+      const url = `${API_URL}/notifications/${notificationId}/read`;
+      console.log('Marking notification as read:', url);
+      await fetch(url, {
         method: 'PATCH',
       });
     } catch (error) {
       console.error('Failed to mark notification as read:', error);
-      // Revert optimistic update on error
       setNotifications(prev => 
         prev.map(n => n.id === notificationId ? { ...n, read: false } : n)
       );
@@ -165,36 +167,34 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
   // Mark all notifications as read
   const markAllAsRead = async () => {
     try {
-      // Update local state optimistically
       setNotifications(prev => 
         prev.map(n => ({ ...n, read: true }))
       );
-
-      // Call API to update server state
-      await fetch(`${process.env.NEXT_PUBLIC_API_URL}/notifications/read-all`, {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+      const url = `${API_URL}/notifications/read-all`;
+      console.log('Marking all notifications as read:', url);
+      await fetch(url, {
         method: 'PATCH',
       });
     } catch (error) {
       console.error('Failed to mark all notifications as read:', error);
-      // No revert needed here, just log the error
     }
   };
 
   // Clear/delete a notification
   const clearNotification = async (notificationId: string) => {
     try {
-      // Update local state optimistically
       setNotifications(prev => 
         prev.filter(n => n.id !== notificationId)
       );
-
-      // Call API to delete from server
-      await fetch(`${process.env.NEXT_PUBLIC_API_URL}/notifications/${notificationId}`, {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+      const url = `${API_URL}/notifications/${notificationId}`;
+      console.log('Deleting notification:', url);
+      await fetch(url, {
         method: 'DELETE',
       });
     } catch (error) {
       console.error('Failed to delete notification:', error);
-      // No revert needed here, just log the error
     }
   };
 

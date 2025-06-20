@@ -23,6 +23,24 @@ export class NotificationsService {
    * @returns The created notification
    */
   async createNotification(createNotificationDto: CreateNotificationDto): Promise<Notification> {
+    // Duplicate prevention for CLUB_MEMBER_LEFT
+    if (createNotificationDto.type === NotificationType.CLUB_MEMBER_LEFT) {
+      const existing = await this.notificationsRepository.findOne({
+        where: {
+          recipientUserId: createNotificationDto.recipientUserId,
+          type: createNotificationDto.type,
+          status: NotificationStatus.UNREAD,
+          // Check for same clubId and memberName in data
+          data: {
+            clubId: createNotificationDto.data?.clubId,
+            memberName: createNotificationDto.data?.memberName,
+          },
+        },
+      });
+      if (existing) {
+        return existing;
+      }
+    }
     const notification = this.notificationsRepository.create({
       recipientUserId: createNotificationDto.recipientUserId,
       senderUserId: createNotificationDto.senderUserId || null,

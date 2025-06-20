@@ -41,6 +41,7 @@ export class ClubNotificationHelper {
     memberUsername: string,
     clubId: string,
     clubName: string,
+    memberAvatar: string,
   ): Promise<void> {
     const promises = adminUserIds.map((adminId) =>
       this.notificationsService.sendNotification(
@@ -50,11 +51,11 @@ export class ClubNotificationHelper {
           senderUserId: memberUserId,
           clubId,
           clubName,
-          memberUsername,
+          memberName: memberUsername,
+          memberAvatar,
         },
       ),
     );
-
     await Promise.all(promises);
   }
 
@@ -81,22 +82,41 @@ export class ClubNotificationHelper {
   }
 
   /**
-   * Notify a user when they are made super admin of a club
+   * Send a notification for super admin transfer events (request/accept/decline)
    */
   async sendSuperAdminTransferNotification(
-    userId: string,
-    previousAdminId: string,
+    recipientUserId: string,
+    senderUserId: string,
+    clubName: string
+  ): Promise<void> {
+    const message = `You are the new club member of this ${clubName}`;
+    await this.notificationsService.sendNotification(
+      recipientUserId,
+      NotificationType.SUPER_ADMIN_TRANSFER,
+      { senderUserId, clubName, message }
+    );
+  }
+
+  /**
+   * Notify a user when they are removed from a club by the super admin
+   */
+  async sendMemberRemovedNotification(
+    removedUserId: string,
     clubId: string,
     clubName: string,
+    removedByName: string,
+    clubLogo: string
   ): Promise<void> {
     await this.notificationsService.sendNotification(
-      userId,
-      NotificationType.SUPER_ADMIN_TRANSFER,
+      removedUserId,
+      NotificationType.CLUB_MEMBER_REMOVED,
       {
-        senderUserId: previousAdminId,
         clubId,
         clubName,
-      },
+        removedByName,
+        clubLogo,
+        message: `You have been removed from the club ${clubName} by ${removedByName}.`
+      }
     );
   }
 } 

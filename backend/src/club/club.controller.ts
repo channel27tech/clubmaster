@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Req, UsePipes, ValidationPipe, UseGuards, UnauthorizedException, Param, NotFoundException, Patch } from '@nestjs/common';
+import { Controller, Get, Post, Body, Req, UsePipes, ValidationPipe, UseGuards, UnauthorizedException, Param, NotFoundException, Patch, Delete } from '@nestjs/common';
 import { ClubService } from './club.service';
 import { CreateClubDto } from './dto/create-club.dto';
 import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
@@ -51,5 +51,11 @@ export class ClubController {
     @Req() req: FirebaseRequest
   ) {
     return this.clubService.updateClub(Number(id), updateClubDto, req.user.uid);
+  }
+
+  @Delete(':id')
+  @UseGuards(FirebaseAuthGuard)
+  async deleteClub(@Param('id') id: string, @Req() req: any) {
+    return this.clubService.deleteClubWithChecks(Number(id), req.user.uid);
   }
 } 

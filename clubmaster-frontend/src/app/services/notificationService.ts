@@ -1,6 +1,7 @@
 import { Notification } from '../../context/NotificationsContext';
+import { getAuth } from 'firebase/auth';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 /**
  * Fetch notifications from the API
@@ -8,57 +9,66 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
  * @param offset - Offset for pagination
  * @param status - Filter by notification status
  */
-export const fetchNotifications = async (
-  limit: number = 20, 
-  offset: number = 0, 
-  status?: 'READ' | 'UNREAD'
-): Promise<{ notifications: Notification[]; total: number }> => {
-  try {
-    // Build the query parameters
-    const params = new URLSearchParams();
-    params.append('limit', limit.toString());
-    params.append('offset', offset.toString());
-    if (status) {
-      params.append('status', status);
-    }
+export async function fetchNotifications(limit = 50, offset = 0, status?: 'READ' | 'UNREAD') {
+  const auth = getAuth();
+  let user = auth.currentUser;
 
-    const response = await fetch(`${API_URL}/notifications?${params.toString()}`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      credentials: 'include' // Include cookies for authentication
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch notifications: ${response.status} ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    
-    // Transform the data to match the Notification interface
-    const notifications: Notification[] = data.notifications.map((n: any) => ({
-      id: n.id,
-      type: n.type,
-      message: n.data.message || '',
-      data: n.data,
-      timestamp: new Date(n.createdAt),
-      senderUserId: n.senderUserId,
-      read: n.status === 'READ'
-    }));
-
-    return {
-      notifications,
-      total: data.total
-    };
-  } catch (error) {
-    console.error('Error fetching notifications:', error);
-    return {
-      notifications: [],
-      total: 0
-    };
+  // Wait for user to be loaded if not available yet
+  if (!user) {
+    // Try to wait for Firebase to finish initializing
+    await new Promise(resolve => setTimeout(resolve, 500));
+    user = auth.currentUser;
   }
-};
+
+  if (!user) {
+    console.warn('fetchNotifications: No authenticated user found.');
+    return { notifications: [], total: 0 };
+  }
+
+  const token = await user.getIdToken();
+  console.log('fetchNotifications: user', user);
+  console.log('fetchNotifications: token', token);
+
+  // Build the query parameters
+  const params = new URLSearchParams();
+  params.append('limit', limit.toString());
+  params.append('offset', offset.toString());
+  if (status) {
+    params.append('status', status);
+  }
+  const url = `${API_URL}/notifications?${params.toString()}`;
+  console.log('Fetching notifications from:', url);
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    credentials: 'include' // Include cookies for authentication
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch notifications: ${response.status} ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  
+  // Transform the data to match the Notification interface
+  const notifications: Notification[] = data.notifications.map((n: any) => ({
+    id: n.id,
+    type: n.type,
+    message: n.data.message || '',
+    data: n.data,
+    timestamp: new Date(n.createdAt),
+    senderUserId: n.senderUserId,
+    read: n.status === 'READ'
+  }));
+
+  return {
+    notifications,
+    total: data.total
+  };
+}
 
 /**
  * Mark a notification as read
@@ -141,6 +151,28 @@ export const handleNotificationAction = async (
   type: string
 ): Promise<boolean> => {
   try {
+    const auth = getAuth();
+    const user = auth.currentUser;
+    if (!user) throw new Error('No authenticated user');
+    const token = await user.getIdToken();
+
+    // Super admin transfer accept/decline
+    if (type === 'SUPER_ADMIN_TRANSFER_REQUEST' && (action === 'accept' || action === 'reject')) {
+      const endpoint = `${API_URL}/club-member/transfer-super-admin/${notificationId}/${action === 'accept' ? 'accept' : 'decline'}`;
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        credentials: 'include'
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to ${action} super admin transfer: ${response.status}`);
+      }
+      await markNotificationAsRead(notificationId);
+      return true;
+    }
     // Different actions based on notification type
     if (type.includes('TOURNAMENT') && action === 'accept') {
       // Accept tournament invitation

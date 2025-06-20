@@ -121,10 +121,25 @@ export default function ClubDetailPage() {
     }
   };
 
-  const handleLeaveConfirm = () => {
+  const handleLeaveConfirm = async () => {
     setShowLeaveConfirm(false);
-    // Handle leave club logic here
-    router.push('/club/clubs'); // Navigate back to clubs page after leaving
+    if (!user || !club) return;
+    try {
+      const token = await user.getIdToken();
+      const res = await fetch(`http://localhost:3001/club-member/club/${club.id}/leave`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.message || 'Failed to leave club.');
+        return;
+      }
+      alert('You have left the club.');
+      router.push('/club');
+    } catch (err) {
+      alert('Failed to leave club.');
+    }
   };
 
   // Join handler (replace with actual join logic as needed)
@@ -238,7 +253,7 @@ export default function ClubDetailPage() {
           />
         </div>
         {/* Only render admin controls after user and club members are loaded */}
-        {user && Array.isArray(club?.members) && club.members.length > 0 && isSuperAdmin && (
+        {user && Array.isArray(club?.members) && club.members.length > 0 &&  (
           <button 
             className="text-[#BFC0C0]"
             onClick={() => setShowMenu(!showMenu)}
@@ -399,36 +414,43 @@ export default function ClubDetailPage() {
       )}
 
       {/* Bottom Sheet Menu */}
-      {showMenu && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[388px] h-[225px] bg-[#1F2323] rounded-[10px] z-50 overflow-hidden">
-          <div className="flex flex-col h-full">
-            <button
-              onClick={() => handleMenuClick('invite')}
-              className="w-full text-center py-4 text-[#D9D9D9] text-base border-b border-[#3A393C]"
-            >
-              Invite
-            </button>
-            <button
-              onClick={() => handleMenuClick('share')}
-              className="w-full text-center py-4 text-[#D9D9D9] text-base border-b border-[#3A393C]"
-            >
-              Share Link
-            </button>
-            <button
-              onClick={() => handleMenuClick('invite')}
-              className="w-full text-center py-4 text-[#D9D9D9] text-base border-b border-[#3A393C]"
-            >
-              Edit Club
-            </button>
-            <button
-              onClick={() => handleMenuClick('leave')}
-              className="w-full text-center py-4 text-[#D9D9D9] text-base"
-            >
-              Leave Club
-            </button>
-          </div>
-        </div>
+   
+{showMenu && (
+  <div className="fixed bottom-14 left-1/2 -translate-x-1/2 w-[388px]  bg-[#1F2323] rounded-[10px] z-50 overflow-hidden">
+    <div className="flex flex-col h-full">
+      {isSuperAdmin ? (
+        <>
+          <button
+            onClick={() => handleMenuClick('invite')}
+            className="w-full text-center py-4 text-[#D9D9D9] text-base border-b border-[#3A393C]"
+          >
+            Invite
+          </button>
+          <button
+            onClick={() => handleMenuClick('share')}
+            className="w-full text-center py-4 text-[#D9D9D9] text-base border-b border-[#3A393C]"
+          >
+            Share Link
+          </button>
+         
+          <button
+            onClick={() => handleMenuClick('leave')}
+            className="w-full text-center py-4 text-[#D9D9D9] text-base"
+          >
+            Leave Club
+          </button>
+        </>
+      ) : (
+        <button
+          onClick={() => handleMenuClick('leave')}
+          className="w-full text-center py-4 text-[#D9D9D9] text-base"
+        >
+          Leave Club
+        </button>
       )}
+    </div>
+  </div>
+)}
 
       {/* Leave Confirmation Dialog */}
       {showLeaveConfirm && (
@@ -464,7 +486,7 @@ export default function ClubDetailPage() {
 
       {/* Join Button fixed at the bottom */}
       {showJoinButton && (
-        <div className="fixed bottom-16 left-1/2 -translate-x-1/2 w-full max-w-[400px] z-10 px-4">
+        <div className="fixed bottom-14 left-1/2 -translate-x-1/2 w-full max-w-[400px] z-10 px-4">
           <button 
             onClick={handleJoin} 
             className="w-full py-3 rounded-lg bg-[#4A7C59] text-[#FAF3DD] font-medium border border-[#E9CB6B]"

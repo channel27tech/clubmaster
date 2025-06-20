@@ -10,7 +10,7 @@ import * as notificationService from '../services/notificationService';
 // Notification data types based on the NotificationsContext
 interface NotificationData {
   id: string;
-  type: 'GAME_INVITE' | 'FRIEND_REQUEST' | 'CLUB_MEMBER_JOINED' | 'CLUB_ROLE_UPDATE' | 'TOURNAMENT_ALERT' | 'TOURNAMENT_REMINDER';
+  type: 'GAME_INVITE' | 'FRIEND_REQUEST' | 'CLUB_MEMBER_JOINED' | 'CLUB_ROLE_UPDATE' | 'TOURNAMENT_ALERT' | 'TOURNAMENT_REMINDER' | 'CLUB_MEMBER_LEFT' | 'CLUB_MEMBER_REMOVED' | 'SUPER_ADMIN_TRANSFER_REQUEST' | 'SUPER_ADMIN_TRANSFER';
   title: string;
   message: string;
   avatarUrl: string;
@@ -43,133 +43,64 @@ export default function NotificationPage() {
   useEffect(() => {
     const fetchNotificationsData = async () => {
       setIsLoading(true);
-      
       try {
-        // Try to fetch from API first
+        // Fetch from API
         const result = await notificationService.fetchNotifications(50, 0);
-        
+        console.log('Fetched notifications:', result.notifications);
         if (result.notifications.length > 0) {
           // Map API data to the format we need
           const mappedNotifications = result.notifications.map(n => {
-            // Determine actions based on notification type
-            let actions: ('accept' | 'reject' | 'view')[] = ['view'];
-            
-            if (n.type === 'GAME_INVITE' || n.type === 'FRIEND_REQUEST') {
-              actions = ['accept', 'reject'];
-            } else if (n.type === 'TOURNAMENT_ALERT' && n.data.requiresAction) {
-              actions = ['accept', 'reject'];
-            }
-            
-            // Get avatar URL based on the notification type
             let avatarUrl = '/images/avatars/default.jpg';
-            
-            if (n.type.includes('CLUB')) {
-              avatarUrl = n.data.clubLogo || '/images/club-logos/clubmaster-gold.svg';
-            } else if (n.type.includes('TOURNAMENT')) {
-              avatarUrl = n.data.tournamentLogo || '/images/club-logos/kings-gambit.svg';
-            } else if (n.type === 'FRIEND_REQUEST' || n.type === 'GAME_INVITE') {
-              avatarUrl = n.data.senderAvatar || '/images/avatars/default.jpg';
+            let title = n.data.memberName || n.data.title || 'Member';
+            let message = n.message || n.data.message || '';
+            let type = n.type as NotificationData['type'];
+            let actions: ('accept' | 'reject' | 'view')[] = ['view'];
+
+            if (n.type === 'CLUB_MEMBER_LEFT') {
+              avatarUrl = n.data.memberAvatar || '/images/avatars/default.jpg';
+              title = n.data.memberName || 'Member';
+              message = `${title} has left the club ${n.data.clubName}.`;
+              type = 'CLUB_MEMBER_LEFT';
             }
-            
+            if (n.type === 'CLUB_MEMBER_REMOVED') {
+              avatarUrl = n.data.clubLogo || '/images/avatars/default.jpg';
+              title = n.data.clubName || 'Club';
+              if (n.data.removedByName) {
+                message = `You have been removed from the club ${n.data.clubName} by ${n.data.removedByName} (super admin).`;
+              } else {
+                message = n.data.message || `You have been removed from the club ${n.data.clubName}.`;
+              }
+              type = 'CLUB_MEMBER_REMOVED';
+            }
+            // Add super admin transfer request actions
+            if (n.type === 'SUPER_ADMIN_TRANSFER') {
+              actions = [];
+              title = n.data.clubName || 'Club';
+              message = n.data.message || `You are the new club member of this ${title}`;
+              type = 'SUPER_ADMIN_TRANSFER' as any;
+            }
+            // ...other types can be handled here
             return {
               id: n.id,
-              type: n.type as any,
-              title: n.data.title || n.type,
-              message: n.message || n.data.message || '',
+              type,
+              title,
+              message,
               avatarUrl,
               timestamp: n.timestamp,
               actions,
               read: n.read
             };
           });
-          
           setNotifications(mappedNotifications);
           setIsLoading(false);
           return;
         }
       } catch (error) {
         console.error("Error fetching notifications:", error);
-        // Fall back to mock data if API call fails
       }
-      
-      // Fallback to mock data
-      const mockNotifications: NotificationData[] = [
-        {
-          id: '1',
-          type: 'CLUB_ROLE_UPDATE',
-          title: 'Clubmaster premier league',
-          message: 'Congrats. You are the one of the player to play in Champions league. Best of luck.',
-          avatarUrl: '/images/club-logos/clubmaster-gold.svg',
-          timestamp: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // 30 days ago
-          actions: ['view'],
-          read: false
-        },
-        {
-          id: '2',
-          type: 'CLUB_MEMBER_JOINED',
-          title: 'Clubmaster premier league',
-          message: 'Admin added you to the Champions League.',
-          avatarUrl: '/images/club-logos/clubmaster-gold.svg',
-          timestamp: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-          actions: ['view'],
-          read: false
-        },
-        {
-          id: '3',
-          type: 'TOURNAMENT_ALERT',
-          title: 'King\'s Gambit',
-          message: 'Admin added you to the tournament.',
-          avatarUrl: '/images/club-logos/kings-gambit.svg',
-          timestamp: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-          actions: ['accept', 'reject'],
-          read: false
-        },
-        {
-          id: '4',
-          type: 'TOURNAMENT_ALERT',
-          title: 'Athani Club',
-          message: 'Athani club invited you to join King\'s Gambit Tournament.',
-          avatarUrl: '/images/club-logos/athani.svg',
-          timestamp: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-          actions: ['accept', 'reject'],
-          read: false
-        },
-        {
-          id: '5',
-          type: 'TOURNAMENT_REMINDER',
-          title: 'Akhil',
-          message: 'I need to quit from tournament Add another player, so I can left.',
-          avatarUrl: '/images/avatars/akhil.jpg',
-          timestamp: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-          actions: ['view'],
-          read: false
-        },
-        {
-          id: '6',
-          type: 'TOURNAMENT_ALERT',
-          title: 'Athani Club',
-          message: 'The admin removed you from the tournament.',
-          avatarUrl: '/images/club-logos/athani.svg',
-          timestamp: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-          actions: ['view'],
-          read: false
-        },
-        {
-          id: '7',
-          type: 'CLUB_ROLE_UPDATE',
-          title: 'Athani Club',
-          message: 'Congrats. You are the one of the player to play in Champions league. Best of luck.',
-          avatarUrl: '/images/club-logos/athani.svg',
-          timestamp: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-          actions: ['view'],
-          read: false
-        }
-      ];
-
-      setNotifications(mockNotifications);
+      setNotifications([]);
       setIsLoading(false);
     };
-
     fetchNotificationsData();
   }, []);
 
@@ -258,22 +189,6 @@ export default function NotificationPage() {
                   className="bg-[#4A7C59] text-[#FAF3DD] text-sm font-medium px-4 py-2 rounded-md hover:bg-[#3D6A4A] transition-colors"
                 >
                   View
-                </button>
-              )}
-              {notification.actions.includes('accept') && (
-                <button 
-                  onClick={() => handleAction(notification.id, 'accept')}
-                  className="bg-[#4A7C59] text-[#FAF3DD] text-sm font-medium px-4 py-2 rounded-md hover:bg-[#3D6A4A] transition-colors"
-                >
-                  Accept
-                </button>
-              )}
-              {notification.actions.includes('reject') && (
-                <button 
-                  onClick={() => handleAction(notification.id, 'reject')}
-                  className="bg-[#979797] text-[#FAF3DD] text-sm font-medium px-4 py-2 rounded-md hover:bg-[#878787] transition-colors"
-                >
-                  Reject
                 </button>
               )}
             </div>
