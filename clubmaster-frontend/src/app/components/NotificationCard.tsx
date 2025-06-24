@@ -42,12 +42,13 @@ const NotificationCard: React.FC<NotificationCardProps> = ({
         {/* Avatar */}
         <div className="relative mr-3 flex-shrink-0">
           <div className="w-12 h-12 rounded-full overflow-hidden bg-[#3E4546] flex items-center justify-center">
-            <Image 
+            <img 
               src={avatarUrl} 
               alt={title}
               width={48}
               height={48}
               className="w-full h-full object-cover"
+              style={{ borderRadius: '50%' }}
             />
           </div>
         </div>

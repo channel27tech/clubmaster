@@ -222,4 +222,29 @@ export class ClubService {
     Object.assign(club, updateClubDto);
     return this.clubRepository.save(club);
   }
+
+  async deleteClubWithChecks(clubId: number, firebaseUid: string) {
+    const club = await this.clubRepository.findOne({ where: { id: clubId } });
+    if (!club) throw new NotFoundException('Club not found');
+
+    // Find user by Firebase UID
+    const user = await this.userRepository.findOne({ where: { firebaseUid } });
+    if (!user || club.superAdminId !== user.id) throw new ForbiddenException('Only super admin can delete');
+
+    // Fetch all members for the club
+    const members = await this.clubMemberRepository.find({ where: { clubId } });
+    // Enforce precondition: only super admin can remain
+    if (members.length > 1) throw new BadRequestException('Remove all members before deleting the club');
+
+    // Delete all club-related records in a transaction
+    await this.clubMemberRepository.manager.transaction(async manager => {
+      // Remove all memberships (including super admin)
+      await manager.getRepository(ClubMember).delete({ clubId });
+      // (Optional) Delete other related records here if needed
+      // Delete the club itself
+      await manager.getRepository(Club).delete(clubId);
+    });
+
+    return { message: 'Club and all memberships deleted successfully' };
+  }
 } 
