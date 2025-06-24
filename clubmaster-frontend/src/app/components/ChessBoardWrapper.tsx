@@ -7,14 +7,19 @@ import MoveControls from './MoveControls';
 import GameClock from './GameClock';
 import GameResultScreen from './GameResultScreen';
 import { MoveHistoryState } from '../utils/moveHistory';
-import { getChessEngine, makeMove, resetChessEngine, setChessPosition, getGameStatus, getCurrentBoardState, isThreefoldRepetition, getFen } from '../utils/chessEngine';
+import { getChessEngine, makeMove, resetChessEngine, setChessPosition, getGameStatus, getCurrentBoardState, isThreefoldRepetition, getFen, clearChessState } from '../utils/chessEngine';
 import { useSound } from '../../context/SoundContext';
 import { useSocket } from '../../context/SocketContext';
 import { playSound, preloadSoundEffects } from '../utils/soundEffects';
-import { CapturedPiece, GameResultType, GameEndReason, GameResult } from '../utils/types';
+import { CapturedPiece, GameResultType, GameEndReason, GameResult, PlayerData } from '../utils/types';
 import DisconnectionNotification from './DisconnectionNotification';
 import { fetchGamePlayers } from '../api/gameApi';
 import { Chess } from 'chess.js';
+import { onBetResult, offBetResult } from '@/services/betService';
+import { saveBetResult } from '@/services/betResultService';
+import { useBet } from '../../context/BetContext';
+import { useAuth } from '../../context/AuthContext';
+import { BetResult } from '@/types/bet';
 
 // Use dynamic import in a client component
 const ChessBoard = dynamic(() => import('./ChessBoard'), {
@@ -66,16 +71,6 @@ interface ChessBoardWrapperProps {
   onSanMoveListChange?: (sanMoves: string[]) => void;
 }
 
-// Player data type definition
-interface PlayerData {
-  username: string;
-  rating: number;
-  capturedPieces?: CapturedPiece[];
-  isGuest?: boolean;
-  clubAffiliation?: string;
-  photoURL?: string | null;
-}
-
 export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', gameId = '', onSanMoveListChange }: ChessBoardWrapperProps) {
   // Get game ID from props or use derived from URL if available
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -114,7 +109,8 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     rating: 0,
     capturedPieces: [],
     isGuest: false,
-    photoURL: null
+    photoURL: null,
+    userId: undefined
   });
   
   const [blackPlayer, setBlackPlayer] = useState<PlayerData>({
@@ -122,17 +118,32 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     rating: 0,
     capturedPieces: [],
     isGuest: false,
-    photoURL: null
+    photoURL: null,
+    userId: undefined
   });
   
   // Debug player data changes
   useEffect(() => {
-    console.log('White player data updated:', whitePlayer);
+    // Remove noisy log
+    // console.log('White player data updated:', whitePlayer);
   }, [whitePlayer]);
-  
   useEffect(() => {
-    console.log('Black player data updated:', blackPlayer);
+    // Remove noisy log
+    // console.log('Black player data updated:', blackPlayer);
   }, [blackPlayer]);
+  
+  // Board state
+  const [boardState, setBoardState] = useState<BoardState>({
+    squares: Array(8).fill(null).map((_, rowIndex) => 
+      Array(8).fill(null).map((_, colIndex) => ({
+        position: `${String.fromCharCode(97 + colIndex)}${8 - rowIndex}`,
+        piece: null
+      }))
+    )
+  });
+  
+  // Last move for highlighting
+  const [lastMove, setLastMove] = useState<{ from: string, to: string } | null>(null);
   
   // Loading state for player data
   const [loadingPlayers, setLoadingPlayers] = useState<boolean>(true);
@@ -151,13 +162,15 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   
   // Add debugging log when component first renders
   useEffect(() => {
-    console.log('ChessBoardWrapper initial gameState with hasWhiteMoved=false:', gameState);
+    // Remove noisy log
+    // console.log('ChessBoardWrapper initial gameState with hasWhiteMoved=false:', gameState);
   }, []);
   
   // Fetch real player data for the game
   useEffect(() => {
     if (!gameRoomId) {
-      console.log('No gameRoomId provided, skipping player data fetch');
+      // Remove noisy log
+      // console.log('No gameRoomId provided, skipping player data fetch');
       return;
     }
     
@@ -171,7 +184,8 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       
       for (let attempt = 0; attempt < retries; attempt++) {
         try {
-          console.log(`Fetching player data for game ID: ${gameRoomId} (Attempt ${attempt + 1}/${retries})`);
+          // Only keep warning for invalid/incomplete data
+          // console.log(`Fetching player data for game ID: ${gameRoomId} (Attempt ${attempt + 1}/${retries})`);
           const data = await fetchGamePlayers(gameRoomId);
           
           // Validate that we have real player data
@@ -191,10 +205,11 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
             throw new Error('Incomplete player data received');
           }
           
-          console.log('Player data fetched successfully:', {
-            white: `${data.whitePlayer.username} (${data.whitePlayer.rating})`,
-            black: `${data.blackPlayer.username} (${data.blackPlayer.rating})`
-          });
+          // Only keep log for successful fetch if needed for debugging
+          // console.log('Player data fetched successfully:', {
+          //   white: `${data.whitePlayer.username} (${data.whitePlayer.rating})`,
+          //   black: `${data.blackPlayer.username} (${data.blackPlayer.rating})`
+          // });
           
           // Update player states with real data
           setWhitePlayer({
@@ -202,7 +217,8 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
             rating: typeof data.whitePlayer.rating === 'number' ? data.whitePlayer.rating : 1500,
             capturedPieces: capturedByWhite,
             isGuest: false,
-            photoURL: data.whitePlayer.photoURL
+            photoURL: data.whitePlayer.photoURL,
+            userId: data.whitePlayer.userId // Always set userId from API
           });
           
           setBlackPlayer({
@@ -210,7 +226,8 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
             rating: typeof data.blackPlayer.rating === 'number' ? data.blackPlayer.rating : 1500,
             capturedPieces: capturedByBlack,
             isGuest: false,
-            photoURL: data.blackPlayer.photoURL
+            photoURL: data.blackPlayer.photoURL,
+            userId: data.blackPlayer.userId // Always set userId from API
           });
           
           setLoadingPlayers(false);
@@ -241,7 +258,8 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         rating: 1500,
         capturedPieces: capturedByWhite,
         isGuest: false,
-        photoURL: null
+        photoURL: null,
+        userId: undefined
       });
       
       setBlackPlayer({
@@ -249,7 +267,8 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         rating: 1500,
         capturedPieces: capturedByBlack,
         isGuest: false,
-        photoURL: null
+        photoURL: null,
+        userId: undefined
       });
     };
     
@@ -330,6 +349,41 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     return seconds;
   }, [timeControl]);
   
+  // Track remaining time for each player separately
+  const [whiteTimeRemaining, setWhiteTimeRemaining] = useState<number>(gameTimeInSeconds);
+  const [blackTimeRemaining, setBlackTimeRemaining] = useState<number>(gameTimeInSeconds);
+  
+  // Use refs to track the latest time values (for use in callbacks)
+  const whiteTimeRemainingRef = useRef<number>(gameTimeInSeconds);
+  const blackTimeRemainingRef = useRef<number>(gameTimeInSeconds);
+  
+  // Update refs when state changes
+  useEffect(() => {
+    whiteTimeRemainingRef.current = whiteTimeRemaining;
+  }, [whiteTimeRemaining]);
+  
+  useEffect(() => {
+    blackTimeRemainingRef.current = blackTimeRemaining;
+  }, [blackTimeRemaining]);
+  
+  // Handle time updates from the GameClock component
+  const handleWhiteTimeUpdate = useCallback((newTime: number) => {
+    setWhiteTimeRemaining(newTime);
+  }, []);
+  
+  const handleBlackTimeUpdate = useCallback((newTime: number) => {
+    setBlackTimeRemaining(newTime);
+  }, []);
+  
+  // Reset times when game starts or time control changes
+  useEffect(() => {
+    setWhiteTimeRemaining(gameTimeInSeconds);
+    setBlackTimeRemaining(gameTimeInSeconds);
+    whiteTimeRemainingRef.current = gameTimeInSeconds;
+    blackTimeRemainingRef.current = gameTimeInSeconds;
+    console.log(`[TIME] Reset both player clocks to ${gameTimeInSeconds} seconds`);
+  }, [gameTimeInSeconds]);
+  
   // Draw offer state
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [drawOfferReceived, setDrawOfferReceived] = useState(false);
@@ -360,12 +414,11 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     preloadSoundEffects(soundEnabled);
   }, [soundEnabled]);
   
-  // Track captured pieces
-  useEffect(() => {
+  // Define the updateCapturedPieces function at component level
+  const updateCapturedPieces = useCallback(() => {
+    try {
     if (!moveHistory) return;
     
-    const updateCapturedPieces = () => {
-      try {
         // Get the current position from Chess.js
         const chess = getChessEngine();
         const board = chess.board();
@@ -476,11 +529,15 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       } catch (error) {
         console.error('Error updating captured pieces:', error);
       }
-    };
+  }, [moveHistory, setCapturedByWhite, setCapturedByBlack]);
+  
+  // Track captured pieces
+  useEffect(() => {
+    if (!moveHistory) return;
     
     // Update captured pieces whenever move history changes
     updateCapturedPieces();
-  }, [moveHistory]);
+  }, [moveHistory, updateCapturedPieces]);
 
   // Socket event listeners
   useEffect(() => {
@@ -501,7 +558,8 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     };
 
     // Listen for draw offers
-    safeSocket.on('offer_draw', () => {
+    safeSocket.on('draw_request', (data) => {
+      console.log('Received draw request from opponent:', data);
       setDrawOfferReceived(true);
       
       // Play notification sound if enabled
@@ -511,13 +569,18 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       
       // Set a timeout to auto-decline after 30 seconds
       const timeout = setTimeout(() => {
+        console.log('Draw offer timed out, auto-declining');
         setDrawOfferReceived(false);
-        safeSocket.emit('decline_draw', { gameId: gameRoomId });
+        safeSocket.emit('draw_response', { 
+          gameId: gameRoomId,
+          accepted: false 
+        });
       }, 30000);
       
       setDrawOfferTimeout(timeout);
       
-      // Start countdown
+      // Reset and start countdown
+      setDrawOfferTimeRemaining(30);
       const countdownInterval = setInterval(() => {
         setDrawOfferTimeRemaining((prev) => {
           if (prev <= 1) {
@@ -545,47 +608,128 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       }
     });
     
-    safeSocket.on('move_made', ({ player, isCapture, isCheck }) => {
-      // Update our game state tracker
-      gameStateTracker.lastUpdateTime = Date.now();
+    safeSocket.on('move_made', ({ player, isCapture, isCheck, from, to, san, notation, fen, moveId, promotion }) => {
+      console.log(`[SERVER EVENT] Received move_made broadcast - player: ${player}, from: ${from}, to: ${to}, promotion: ${promotion}`);
       
-      // First update game state
-      if (player === 'white') {
-        gameStateTracker.isWhiteTurn = false;
-        gameStateTracker.activePlayer = 'black';
-        
-        setGameState(prev => ({ 
-          ...prev, 
-          isWhiteTurn: false,
-          hasWhiteMoved: true 
-        }));
-        
-        // Also ensure activePlayer state is synchronized
-        setActivePlayer('black');
-      } else {
-        gameStateTracker.isWhiteTurn = true;
-        gameStateTracker.activePlayer = 'white';
-        
-        setGameState(prev => ({ 
-          ...prev, 
-          isWhiteTurn: true,
-          // Always mark hasWhiteMoved as true after any move (even black's moves)
-          hasWhiteMoved: true
-        }));
-        
-        // Also ensure activePlayer state is synchronized
-        setActivePlayer('white');
-      }
+      // CRITICAL: Do NOT add this server-broadcast move to the moveQueue
+      // Instead, directly apply it to our local chess engine
       
-      // Then play sounds if enabled
-      if (soundEnabledRef.current) {
-        if (isCheck) {
-          playSound('CHECK', true);
-        } else if (isCapture) {
-          playSound('CAPTURE', true);
-        } else {
-          playSound('MOVE', true);
+      try {
+        const chess = getChessEngine();
+        
+        // If we have a FEN, use it for full synchronization (most reliable)
+        if (fen) {
+          console.log(`[SYNC] Using server-provided FEN for synchronization: ${fen}`);
+          chess.load(fen);
         }
+        // Otherwise try SAN notation
+        else if (san) {
+          console.log(`[SYNC] Using SAN notation for move: ${san}`);
+          chess.move(san);
+        }
+        // Or try to reconstruct the move
+        else {
+          console.log(`[SYNC] Reconstructing move from: ${from}, to: ${to}, promotion: ${promotion || 'none'}`);
+          
+          // If this is a promotion move, include the promotion piece
+          if (promotion) {
+            chess.move({
+              from,
+              to,
+              promotion: promotion.toLowerCase().charAt(0)
+            });
+      } else {
+            chess.move({
+              from,
+              to
+            });
+          }
+        }
+        
+        // Get the current FEN after applying the move
+        const currentFen = chess.fen();
+        
+        // Get the current move history
+        const history = chess.history();
+        
+        // Update the SAN move list
+        setSanMoveList(history);
+        
+        // Notify parent component if callback is provided
+        if (onSanMoveListChange) {
+          onSanMoveListChange(history);
+        }
+        
+        // Update the active player
+        setActivePlayer(chess.turn() === 'w' ? 'white' : 'black');
+        
+        // Update the last move
+        setLastMove({ from, to });
+        
+        // Play move sound
+        playSound(isCapture ? 'CAPTURE' : 'MOVE', soundEnabledRef.current);
+        
+        // Check if the game is over after this move
+        const isGameOver = chess.isGameOver();
+        
+        if (isGameOver) {
+          console.log('[GAME OVER] Game is over after move');
+          
+          // Determine the reason for game over
+          let gameOverReason = '';
+          
+          if (chess.isCheckmate()) {
+            gameOverReason = 'checkmate';
+            playSound('CHECKMATE', soundEnabledRef.current);
+          } else if (chess.isDraw()) {
+            if (chess.isStalemate()) {
+              gameOverReason = 'stalemate';
+            } else if (chess.isThreefoldRepetition()) {
+              gameOverReason = 'repetition';
+            } else if (chess.isInsufficientMaterial()) {
+              gameOverReason = 'insufficient_material';
+        } else {
+              gameOverReason = 'draw';
+            }
+            playSound('DRAW', soundEnabledRef.current);
+          }
+          
+          // Update game state
+          setGameState({
+            ...gameState,
+            isGameOver: true,
+            gameOverReason
+          });
+          
+          // Stop the clocks
+          setActivePlayer(null);
+        }
+        // If not game over but check, play check sound
+        else if (isCheck) {
+          playSound('CHECK', soundEnabledRef.current);
+        }
+        
+        // Update captured pieces
+        updateCapturedPieces();
+        
+        // Dispatch a game state updated event
+        window.dispatchEvent(new CustomEvent('game_state_updated', {
+          detail: {
+            fen: currentFen,
+            isGameOver,
+            gameOverReason: isGameOver ? (chess.isCheckmate() ? 'checkmate' : chess.isDraw() ? 'draw' : '') : '',
+            activePlayer: chess.turn() === 'w' ? 'white' : 'black'
+          }
+        }));
+      } catch (error) {
+        console.error('[ERROR] Failed to process move from server:', error);
+        
+        // Request a board sync from the server
+        socket.emit('request_board_sync', {
+          gameId: gameRoomId,
+          reason: 'move_processing_failed',
+          clientState: getChessEngine().fen()
+        });
       }
     });
     
@@ -675,7 +819,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       }
       
       // Clean up all event listeners to prevent memory leaks
-      safeSocket.off('offer_draw');
+      safeSocket.off('draw_request');
       safeSocket.off('game_started');
       safeSocket.off('move_made');
       safeSocket.off('checkmate');
@@ -808,7 +952,8 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
                 rating: typeof data?.whitePlayer?.rating === 'number' ? data.whitePlayer.rating : 1500,
                 capturedPieces: capturedByWhite,
                 isGuest: false,
-                photoURL: data?.whitePlayer?.photoURL || null
+                photoURL: data?.whitePlayer?.photoURL || null,
+                userId: data?.whitePlayer?.userId ?? undefined
               };
               
               const updatedBlackPlayer = {
@@ -816,7 +961,8 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
                 rating: typeof data?.blackPlayer?.rating === 'number' ? data.blackPlayer.rating : 1500,
                 capturedPieces: capturedByBlack,
                 isGuest: false,
-                photoURL: data?.blackPlayer?.photoURL || null
+                photoURL: data?.blackPlayer?.photoURL || null,
+                userId: data?.blackPlayer?.userId ?? undefined
               };
               
               // Update player states with real data
@@ -847,20 +993,22 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
               console.error('Failed to fetch player data for abort:', error);
               
               // Use fallback values if fetch fails
-              const fallbackWhitePlayer = {
+              const fallbackWhitePlayer: PlayerData = {
                 username: 'White Player',
                 rating: 1500,
                 capturedPieces: capturedByWhite,
                 isGuest: false,
-                photoURL: null
+                photoURL: null,
+                userId: undefined
               };
               
-              const fallbackBlackPlayer = {
+              const fallbackBlackPlayer: PlayerData = {
                 username: 'Black Player',
                 rating: 1500,
                 capturedPieces: capturedByBlack,
                 isGuest: false,
-                photoURL: null
+                photoURL: null,
+                userId: undefined
               };
               
               // Update player states with fallback data
@@ -1220,7 +1368,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     // Threefold repetition handling is now integrated into the main game_end handler above
 
     return () => {
-      safeSocket.off('offer_draw');
+      safeSocket.off('draw_request');
       safeSocket.off('game_started');
       safeSocket.off('move_made');
       safeSocket.off('checkmate');
@@ -1389,267 +1537,72 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     const move = moveQueue[0];
     const currentSocket = socket; // Capture current socket to avoid closure issues
     
-    // Create a function to handle a single move
-    const processMoveWithRetry = async () => {
+    // Only send the move to the server, do not apply it locally again
+    // (it's already been applied by the local move handler in ChessBoard.tsx)
+    const sendMoveToServer = () => {
       try {
-        console.log(`Processing move: ${move.from} to ${move.to} (Socket connected: ${currentSocket.connected})`);
-        const currentPlayerColor = !gameState.isWhiteTurn ? 'white' : 'black'; // Invert since move is being made
+        console.log(`[OUTGOING] Sending move to server: ${move.from} to ${move.to}${move.promotion ? ', promotion: ' + move.promotion : ''}`);
+        
+        // Use the player color stored with the move
+        const currentPlayerColor = move.player;
+        
+        if (!currentPlayerColor) {
+          console.error('[ERROR] No player color specified with move');
+          setMoveQueue(prev => prev.slice(1));
+          return;
+        }
+        
+        // Ensure we have a valid socket connection
+        if (!socket || !socket.connected) {
+          console.error('[ERROR] No socket connection available');
+              setMoveQueue(prev => prev.slice(1));
+              return;
+        }
         
         // Get the current chess engine instance
         const chess = getChessEngine();
-        
-        // Verify that the chess engine state is synchronized with the server
-        // If we have a move history, rebuild the board state first to ensure consistency
-        if (sanMoveList.length > 0) {
-          console.log(`Verifying chess engine state with ${sanMoveList.length} moves in history`);
-          // Make sure synchronization is successful
-          const syncSuccess = synchronizeBoardFromMoveHistory(sanMoveList);
-          if (!syncSuccess) {
-            console.warn('Failed to synchronize board state from move history, attempting fallback');
-            // Try to reset the chess engine to a fresh state and apply the move history
-            const tempChess = resetChessEngine();
-            let allMovesApplied = true;
-            
-            for (const historyMove of sanMoveList) {
-              try {
-                const result = tempChess.move(historyMove);
-                if (!result) {
-                  console.error(`Failed to apply move: ${historyMove} during fallback synchronization`);
-                  // Try with coordinate notation if SAN fails
-                  if (historyMove.match(/^[a-h][1-8][a-h][1-8][qrbnQRBN]?$/)) {
-                    const from = historyMove.substring(0, 2);
-                    const to = historyMove.substring(2, 4);
-                    const promotion = historyMove.length > 4 ? historyMove.substring(4, 5).toLowerCase() : undefined;
-                    
-                    const altResult = tempChess.move({
-                      from,
-                      to,
-                      promotion
-                    });
-                    
-                    if (!altResult) {
-                      allMovesApplied = false;
-                      break;
-                    }
-                    // If we succeeded with coordinate notation, continue to next move
-                    continue;
-                  }
-                  
-                  allMovesApplied = false;
-                  break;
-                }
-              } catch (moveError) {
-                console.error(`Error applying move: ${historyMove} during fallback synchronization`, moveError);
-                allMovesApplied = false;
-                break;
-              }
-            }
-            
-            if (!allMovesApplied) {
-              console.error('Critical error: Failed to rebuild board state, move may be invalid');
-              // Request a board sync from the server
-              if (currentSocket && gameRoomId) {
-                console.log('Requesting emergency board sync from server');
-                currentSocket.emit('request_board_sync', {
-                  gameId: gameRoomId,
-                  reason: 'critical_state_error',
-                  clientState: chess.fen()
-                });
-              }
-              // Remove this move from the queue and return
-              setMoveQueue(prev => prev.slice(1));
-              return;
-            }
-          }
-        }
-        
-        // Get the current FEN position before making the move
         const currentFen = chess.fen();
         
-        // Apply the move to get the SAN notation and resulting state
-        try {
-          // Make a copy of the current position to avoid modifying the actual game state
-          const tempChess = new Chess();
-          
-          // Load the current FEN into the temporary chess instance
-          try {
-            tempChess.load(currentFen);
-          } catch (fenError) {
-            console.error('Error loading current FEN into temporary chess instance:', fenError);
-            // Try using move history instead
-            if (sanMoveList.length > 0) {
-              resetChessEngine(); // Start fresh
-              for (const historyMove of sanMoveList) {
-                try {
-                  tempChess.move(historyMove);
-                } catch (historyError) {
-                  console.error(`Error applying history move: ${historyMove}`, historyError);
-                  // Try with coordinate notation
-                  if (historyMove.match(/^[a-h][1-8][a-h][1-8][qrbnQRBN]?$/)) {
-                    const from = historyMove.substring(0, 2);
-                    const to = historyMove.substring(2, 4);
-                    const promotion = historyMove.length > 4 ? historyMove.substring(4, 5).toLowerCase() : undefined;
-                    
-                    tempChess.move({
-                      from,
-                      to,
-                      promotion
-                    });
-                  }
-                }
-              }
-            } else {
-              throw new Error('Failed to initialize temp chess engine');
-            }
-          }
-          
-          // Apply the move to the temporary chess instance with verbose output for detailed debugging
-          const moveOptions = {
-            from: move.from,
-            to: move.to,
-            promotion: move.promotion
-          };
-          
-          console.log('Attempting move with options:', moveOptions);
-          console.log('Current position before move:', tempChess.fen());
-          
-          // Get all legal moves from current position
-          const legalMoves = tempChess.moves({ verbose: true });
-          console.log('Legal moves available:', legalMoves.length);
-          
-          // Check if the move is legal by directly validating with chess.js
-          const isLegalMove = legalMoves.some((m: { from: string; to: string; promotion?: string }) => 
-            m.from === move.from && 
-            m.to === move.to && 
-            (!move.promotion || m.promotion === move.promotion)
-          );
-          
-          if (!isLegalMove) {
-            console.error(`Move validation failed: ${move.from} to ${move.to} is not a legal move`);
-            console.log('Legal moves:', legalMoves.map((m: any) => `${m.from}-${m.to}${m.promotion ? `-${m.promotion}` : ''}`));
-            
-            // Log the current turn and board state for debugging
-            console.log(`Current turn: ${tempChess.turn() === 'w' ? 'white' : 'black'}`);
-            console.log(`Game state white turn: ${gameState.isWhiteTurn ? 'white' : 'black'}`);
-            
-            // Check if we're trying to move the wrong color piece
-            const pieceAtSource = tempChess.get(move.from as any);
-            if (pieceAtSource) {
-              console.log(`Piece at ${move.from}: ${pieceAtSource.color === 'w' ? 'white' : 'black'} ${pieceAtSource.type}`);
-              console.log(`Current player: ${currentPlayerColor}`);
-              
-              // Check if the piece color matches the current player's turn
-              const pieceColorStr = pieceAtSource.color === 'w' ? 'white' : 'black';
-              if (pieceColorStr !== currentPlayerColor) {
-                console.error(`Trying to move ${pieceColorStr} piece on ${currentPlayerColor}'s turn!`);
-                // This indicates a turn synchronization issue
-              }
-            } else {
-              console.error(`No piece at position ${move.from}`);
-            }
-            
-            // Remove this move from the queue and return
-            setMoveQueue(prev => prev.slice(1));
-            return;
-          }
-          
-          // Apply the move now that we've verified it's legal
-          const moveResult = tempChess.move(moveOptions);
-          
-          if (!moveResult) {
-            console.error(`Invalid move: ${move.from} to ${move.to} despite passing legal move check`);
-            // Remove this move from the queue and continue
-            setMoveQueue(prev => prev.slice(1));
-            return;
-          }
-          
-          // Get the SAN notation of the move
-          const sanMove = moveResult.san;
-          
-          // Get the resulting FEN and move history after the move
-          const resultingFen = tempChess.fen();
-          const moveHistory = tempChess.history();
-          
-          // Log move details for debugging
-          console.log('Move details:', {
-            san: sanMove,
-            beforeMove: currentFen,
-            afterMove: resultingFen,
-            fenParts: resultingFen.split(' '),
-            halfMoveClock: resultingFen.split(' ')[4],
-            fullMoveNumber: resultingFen.split(' ')[5],
-            moveHistory
-          });
-          
-          // Emit the move_made event with SAN notation as the primary identifier
-          currentSocket.emit('move_made', {
+        // Get the current move history
+        const history = chess.history({ verbose: true });
+        const lastMoveVerbose = history.length > 0 ? history[history.length - 1] : null;
+        
+        // Check if this is a pawn promotion move
+        if (move.promotion) {
+          console.log(`[PROMOTION] Sending promotion move with piece: ${move.promotion}`);
+        }
+        
+        // Create a unique move ID for tracking
+        const moveId = `${move.from}-${move.to}-${Date.now()}`;
+        
+        // Emit the move to the server
+        socket.emit('move_made', {
             gameId: gameRoomId,
-            san: sanMove, // Primary identifier - Standard Algebraic Notation
-            from: move.from, // Include from/to for backward compatibility
-            to: move.to,
-            player: currentPlayerColor,
-            promotion: move.promotion,
-            currentFen: currentFen, // FEN before the move (for validation)
-            resultingFen: resultingFen, // FEN after the move (for validation)
-            moveHistory: moveHistory // Include move history for verification
-          });
-          
-          console.log(`Move emitted successfully to server: ${sanMove} (${move.from}-${move.to})`);
-        } catch (moveError) {
-          console.error(`Error processing move: ${moveError instanceof Error ? moveError.message : 'Unknown error'}`);
-          
-          // Since we had an error but still want to try sending the move, use a more robust approach
-          // Attempt to directly validate the move with the current chess instance
-          try {
-            const legalMoves = chess.moves({ verbose: true });
-            const isLegalMove = legalMoves.some((m: { from: string; to: string; promotion?: string }) => 
-              m.from === move.from && 
-              m.to === move.to && 
-              (!move.promotion || m.promotion === move.promotion)
-            );
-            
-            if (isLegalMove) {
-              console.log('Move appears legal despite processing error, sending basic move data');
-              // Fall back to sending just the from/to coordinates
-              currentSocket.emit('move_made', {
-                gameId: gameRoomId,
+          moveId,
                 from: move.from,
                 to: move.to,
                 player: currentPlayerColor,
+          notation: move.notation || undefined,
                 promotion: move.promotion,
-                currentFen: currentFen // Include current FEN for validation
-              });
-              
-              console.log(`Fallback move emitted to server: ${move.from}-${move.to}`);
-            } else {
-              console.error('Move is not legal according to current board state, aborting');
-              // Request a board sync since our state might be corrupt
-              if (currentSocket && gameRoomId) {
-                currentSocket.emit('request_board_sync', {
-                  gameId: gameRoomId,
-                  reason: 'move_validation_failed',
-                  clientState: chess.fen()
-                });
-              }
-            }
-          } catch (validationError) {
-            console.error('Critical error validating move:', validationError);
-          }
-        }
+          isCapture: move.isCapture || lastMoveVerbose?.captured !== undefined,
+          fen: currentFen,
+          san: lastMoveVerbose?.san || undefined,
+          timestamp: Date.now()
+        });
         
-        // Remove this move from the queue
+        // Remove the move from the queue
         setMoveQueue(prev => prev.slice(1));
       } catch (error) {
-        console.error('Error processing move:', error);
-        
-        // If there's an error, try again after a short delay
-        setTimeout(processMoveWithRetry, 500);
+        console.error('[ERROR] Failed to send move to server:', error);
+        // Remove the move from the queue even if it failed
+        setMoveQueue(prev => prev.slice(1));
       }
     };
-    
-    // Execute immediately
-    processMoveWithRetry();
-  }, [socket, moveQueue, gameRoomId, gameState.isWhiteTurn, sanMoveList, synchronizeBoardFromMoveHistory]);
+
+    // Send the move to the server
+    sendMoveToServer();
+    // Don't remove the move from the queue immediately - wait for server confirmation
+  }, [socket, moveQueue, gameRoomId, sanMoveList]);
   
   // Add a function to synchronize the board from FEN or move history
   const synchronizeBoardFromFen = useCallback((fen: string, moveHistory?: string[]) => {
@@ -1822,159 +1775,104 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         return;
       }
       
-      console.log(`Received board_updated event for game ${data.gameId} with ${data.moveHistory.length} moves`);
+      console.log(`Received board_updated event for game ${data.gameId} with ${data.moveHistory.length} moves, whiteTurn=${data.whiteTurn}`);
       
-      // Log the last move if available
-      if (data.lastMove) {
-        console.log(`Last move: ${data.lastMove}, isCapture: ${data.isCapture}, isCheck: ${data.isCheck}`);
-      }
+      try {
+        // Always update the chess engine state with the server's FEN if provided
+        if (data.fen) {
+          setChessPosition(data.fen, gameRoomId);
+        }
       
-      // Compare current move history with received move history
-      const moveHistoryChanged = JSON.stringify(sanMoveList) !== JSON.stringify(data.moveHistory);
-      if (!moveHistoryChanged && sanMoveList.length > 0) {
-        console.log('Move history unchanged, skipping full board synchronization');
-        
-        // Still update turn information if provided
+        // CRITICAL: Always update the active player first if whiteTurn is provided
+        // This ensures clocks and turn indicators stay in sync, regardless of other updates
         if (data.whiteTurn !== undefined) {
-          setActivePlayer(data.whiteTurn ? 'white' : 'black');
-          
-          // Also update game state
-          setGameState(prev => ({
-            ...prev,
-            isWhiteTurn: data.whiteTurn === true, // Ensure boolean type
+          const newActivePlayer = data.whiteTurn ? 'white' : 'black';
+          if (activePlayer !== newActivePlayer) {
+            console.log(`[TURN] Updating active player from ${activePlayer} to ${newActivePlayer} (whiteTurn=${data.whiteTurn})`);
+            setActivePlayer(newActivePlayer);
+            
+            // Also update the game state to reflect the current turn
+            setGameState(prevState => ({
+              ...prevState,
+              isWhiteTurn: data.whiteTurn,
             hasWhiteMoved: data.moveHistory.length > 0
           }));
+          } else {
+            console.log(`[TURN] Active player already set to ${activePlayer}, no update needed`);
+          }
+        } else {
+          console.warn('[TURN] No whiteTurn value provided in board_updated event');
         }
         
+        // Check if the move history has actually changed
+        const moveHistoryChanged = JSON.stringify(data.moveHistory) !== JSON.stringify(sanMoveList);
+        
+        if (!moveHistoryChanged) {
+          console.log('Move history unchanged, skipping further update');
         return;
       }
       
       // Synchronize the board using move history as the primary source of truth
       const syncResult = synchronizeBoardFromMoveHistory(data.moveHistory);
-      
       if (syncResult) {
-        console.log(`Successfully synchronized board from move history`);
-        
-        // If FEN is provided, validate it against our local state
-        if (data.fen) {
-          const chess = getChessEngine();
-          const localFen = chess.fen();
+          // Update the board state from the new position
+          const newBoardState = getCurrentBoardState();
           
-          // Compare only the position part (first 4 parts) of the FEN
-          const serverFenParts = data.fen.split(' ');
-          const localFenParts = localFen.split(' ');
+          // Check if the board state has actually changed
+          const boardStateChanged = JSON.stringify(newBoardState) !== JSON.stringify(boardState);
           
-          const serverPosition = serverFenParts.slice(0, 4).join(' ');
-          const localPosition = localFenParts.slice(0, 4).join(' ');
+          if (!boardStateChanged && data.moveHistory.length === sanMoveList.length) {
+            console.log('Board state unchanged, skipping update');
+            return;
+          }
           
-          if (serverPosition !== localPosition) {
-            console.warn(`FEN position mismatch after synchronization. Server: ${serverPosition}, Local: ${localPosition}`);
-            console.warn('Attempting to resynchronize with server FEN');
-            
-            // Try to force the FEN position directly
-            const fenSyncSuccess = setChessPosition(data.fen, gameRoomId);
-            if (fenSyncSuccess) {
-              console.log('Successfully forced FEN synchronization');
-              
-              // Update the SAN move list to match server
+          // Update move history
               setSanMoveList(data.moveHistory);
-              
-              // Notify parent about SAN move list changes if callback exists
-              if (onSanMoveListChange) {
-                onSanMoveListChange(data.moveHistory);
-              }
-            } else {
-              console.error('Failed to force FEN synchronization');
-              
-              // Request a full board sync as a last resort
-              if (socket && gameRoomId) {
-                console.log('Requesting emergency board sync after FEN synchronization failure');
-                socket.emit('request_board_sync', {
-                  gameId: gameRoomId,
-                  reason: 'fen_sync_failed',
-                  clientState: localFen
-                });
-              }
-            }
-          } else {
-            console.log(`FEN position matches after synchronization`);
-            
-            // Check move counts
-            const serverHalfMove = parseInt(serverFenParts[4]);
-            const serverFullMove = parseInt(serverFenParts[5]);
-            const localHalfMove = parseInt(localFenParts[4]);
-            const localFullMove = parseInt(localFenParts[5]);
-            
-            if (serverHalfMove !== localHalfMove || serverFullMove !== localFullMove) {
-              console.warn(`Move count mismatch. Server: ${serverHalfMove}/${serverFullMove}, Local: ${localHalfMove}/${localFullMove}`);
-              // This is not critical but we should log it
+          if (onSanMoveListChange) onSanMoveListChange(data.moveHistory);
+          
+          // Batch state updates to prevent excessive renders
+          const updates: any = {
+            boardState: newBoardState
+          };
+          
+          // Update last move if provided
+          if (data.lastMove) {
+            const matches = data.lastMove.match(/[a-h][1-8]/g) || [];
+            if (matches.length >= 2) {
+              const from = matches[0];
+              const to = matches[1];
+              updates.lastMove = { from, to };
             }
           }
-        }
-        
-        // Update active player based on whiteTurn if provided
-        if (data.whiteTurn !== undefined) {
-          setActivePlayer(data.whiteTurn ? 'white' : 'black');
           
-          // Also update game state
-          setGameState(prev => ({
-            ...prev,
-            isWhiteTurn: data.whiteTurn === true, // Ensure boolean type
-            hasWhiteMoved: data.moveHistory.length > 0
-          }));
+          // Apply all updates in a single batch to prevent cascading updates
+          setBoardState(newBoardState);
+          if (updates.lastMove) setLastMove(updates.lastMove);
           
-          // Update game state tracker for continuous clock synchronization
-          gameStateTracker.isWhiteTurn = data.whiteTurn;
-          gameStateTracker.activePlayer = data.whiteTurn ? 'white' : 'black';
-          gameStateTracker.lastUpdateTime = Date.now();
-        }
+          console.log('Successfully processed board update');
       } else {
-        console.error(`Failed to synchronize board from move history, falling back to FEN if available`);
-        
-        // Fall back to FEN synchronization if move history synchronization failed
+          // If move history sync fails, fallback to FEN
         if (data.fen) {
-          const fenSyncSuccess = synchronizeBoardFromFen(data.fen, data.moveHistory);
-          
-          if (!fenSyncSuccess && socket && gameRoomId) {
-            console.error('Critical: Both move history and FEN synchronization failed');
-            
-            // As a last resort, request a clean board sync from the server
+            synchronizeBoardFromFen(data.fen, data.moveHistory);
+            if (socket && gameRoomId) {
             socket.emit('request_board_sync', {
               gameId: gameRoomId,
               reason: 'critical_sync_failure',
               clientState: getChessEngine().fen()
             });
           }
-        } else {
-          console.error('Critical: No FEN available for fallback synchronization');
-          
-          // Request a clean board sync from the server
+          }
+        }
+      } catch (error) {
+        console.error('Error processing board update:', error);
+        // Request a full board sync if we fail to process the update
           if (socket && gameRoomId) {
             socket.emit('request_board_sync', {
               gameId: gameRoomId,
-              reason: 'no_fallback_available',
+            reason: 'board_update_processing_failed',
               clientState: getChessEngine().fen()
             });
           }
-        }
-      }
-      
-      // Check for game end conditions in the data
-      if (data.isGameOver) {
-        console.log(`Game over detected in board_updated event. Reason: ${data.gameOverReason || 'unknown'}`);
-        
-        setGameState(prev => ({
-          ...prev,
-          isGameOver: true,
-          gameOverReason: data.gameOverReason || prev.gameOverReason
-        }));
-        
-        // Stop the clocks
-        setActivePlayer(null);
-        
-        // Update game state tracker
-        gameStateTracker.activePlayer = null;
-        gameStateTracker.isWhiteTurn = false;
       }
     };
     
@@ -1993,28 +1891,62 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     }) => {
       if (data.gameId !== gameRoomId) return;
       
-      console.log(`Received board_sync event for game ${data.gameId} with FEN: ${data.fen}`);
+      console.log(`Received board_sync event for game ${data.gameId} with FEN: ${data.fen}, whiteTurn=${data.whiteTurn}`);
       
-      // If move history is available, use it as the primary source of truth
+      try {
+        // CRITICAL: Always update the active player first if whiteTurn is provided
+        // This ensures clocks and turn indicators stay in sync, regardless of other updates
+        if (data.whiteTurn !== undefined) {
+          const newActivePlayer = data.whiteTurn ? 'white' : 'black';
+          if (activePlayer !== newActivePlayer) {
+            console.log(`[TURN] Updating active player from ${activePlayer} to ${newActivePlayer} (whiteTurn=${data.whiteTurn})`);
+            setActivePlayer(newActivePlayer);
+            
+            // Also update the game state to reflect the current turn
+            setGameState(prevState => ({
+              ...prevState,
+              isWhiteTurn: data.whiteTurn,
+              hasWhiteMoved: data.moveHistory !== undefined && data.moveHistory.length > 0
+            }));
+          } else {
+            console.log(`[TURN] Active player already set to ${activePlayer}, no update needed`);
+          }
+        } else {
+          console.warn('[TURN] No whiteTurn value provided in board_sync event');
+        }
+      
+        // Always set the FEN position first
+        setChessPosition(data.fen, gameRoomId);
+        
+        // If move history is available, use it to update the move list
       if (data.moveHistory && data.moveHistory.length > 0) {
         console.log(`Using move history from board_sync event (${data.moveHistory.length} moves)`);
-        synchronizeBoardFromMoveHistory(data.moveHistory);
-      } else {
-        // Fall back to FEN synchronization
-        console.log(`No move history in board_sync event, falling back to FEN`);
-        synchronizeBoardFromFen(data.fen);
-      }
-      
-      // Update active player based on whiteTurn if provided
-      if (data.whiteTurn !== undefined) {
-        setActivePlayer(data.whiteTurn ? 'white' : 'black');
+          
+          // Check if the move history has actually changed
+          const moveHistoryChanged = JSON.stringify(data.moveHistory) !== JSON.stringify(sanMoveList);
+          
+          if (moveHistoryChanged) {
+            setSanMoveList(data.moveHistory);
+            if (onSanMoveListChange) onSanMoveListChange(data.moveHistory);
+          }
+        }
         
-        // Also update game state
-        setGameState(prev => ({
-          ...prev,
-          isWhiteTurn: data.whiteTurn === true, // Ensure boolean type
-          hasWhiteMoved: data.moveHistory !== undefined && data.moveHistory.length > 0
-        }));
+        // Update the board state from the new position
+        const newBoardState = getCurrentBoardState();
+        
+        // Check if the board state has actually changed to prevent unnecessary updates
+        const boardStateChanged = JSON.stringify(newBoardState) !== JSON.stringify(boardState);
+        
+        if (!boardStateChanged) {
+          console.log('Board state unchanged, skipping update');
+          return;
+        }
+        
+        // Apply board state update
+        setBoardState(newBoardState);
+        console.log('Successfully processed board sync');
+      } catch (error) {
+        console.error('Failed to synchronize board state:', error);
       }
     };
     
@@ -2023,6 +1955,18 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     // Handle game_end event from server
     const handleGameEnd = (data: any) => {
       console.log('Received game_end event:', data);
+      console.log('Player color:', playerColor);
+      
+      // Additional logging for timeout events
+      if (data.reason === 'timeout') {
+        console.log('[TIMEOUT] Received game_end with timeout reason', {
+          winnerColor: data.winnerColor,
+          loserColor: data.loserColor,
+          playerColor,
+          shouldWin: (playerColor === 'white' && data.winnerColor === 'white') || 
+                     (playerColor === 'black' && data.winnerColor === 'black')
+        });
+      }
       
       // Check if this update is for our current game
       if (data.gameId !== gameRoomId) {
@@ -2048,14 +1992,119 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       
       // Determine the result from the player's perspective
       let playerResult: GameResultType = 'draw';
-      if (data.result === 'draw' || data.reason === 'threefold_repetition') {
+      
+      // Debug log all data fields to help diagnose the issue
+      console.log('Game end data fields:', {
+        reason: data.reason,
+        winner: data.winner,
+        resigner: data.resigner,
+        timedOut: data.timedOut,
+        playerColor,
+        whitePlayer: whitePlayer.username,
+        blackPlayer: blackPlayer.username
+      });
+      
+      // Handle specific game end reasons
+      if (data.reason === 'checkmate') {
+        // For checkmate, determine the winner based on the data from the server
+        // If data.winner is not specified, infer it from the last move
+        let winner = data.winner;
+        
+        // If winner is not explicitly provided, determine it based on who made the last move
+        if (!winner && data.lastMoveBy) {
+          // The player who made the last move is the winner in checkmate
+          winner = data.lastMoveBy;
+          console.log(`Winner not explicitly provided, inferring from lastMoveBy: ${winner}`);
+        }
+        
+        // If we still don't have a winner, try to determine from the game state
+        if (!winner) {
+          // In checkmate, the player whose turn it is has lost (they're in checkmate)
+          const isWhiteTurn = data.whiteTurn !== undefined ? data.whiteTurn : (moveHistory?.moves?.length % 2 === 0);
+          winner = isWhiteTurn ? 'black' : 'white';
+          console.log(`Winner still not determined, inferring from turn: ${winner} (whiteTurn: ${isWhiteTurn})`);
+        }
+        
+        const isPlayerWinner = 
+          (playerColor === 'white' && winner === 'white') ||
+          (playerColor === 'black' && winner === 'black');
+        playerResult = isPlayerWinner ? 'win' : 'loss';
+        console.log(`Checkmate detected. Player is ${playerColor}, winner is ${winner}, playerResult: ${playerResult}`);
+      }
+      else if (data.reason === 'resignation') {
+        // For resignation, the winner is the opposite of the resigner
+        const isPlayerResigned = 
+          (playerColor === 'white' && data.resigner === 'white') ||
+          (playerColor === 'black' && data.resigner === 'black');
+        playerResult = isPlayerResigned ? 'loss' : 'win';
+        console.log(`Resignation detected. Player is ${playerColor}, resigner is ${data.resigner}, playerResult: ${playerResult}`);
+      }
+      else if (data.reason === 'timeout') {
+        // For timeout events, we've already shown the appropriate screen in handleTimeOut
+        // We'll just use this event to update rating changes if available
+        console.log(`Received game_end with timeout reason - using for rating updates only`);
+        console.log(`Game end data:`, data);
+        
+        try {
+          // Get the stored timeout player from localStorage
+          const timedOutPlayer = localStorage.getItem(`timeout_player_${gameRoomId}`);
+          console.log(`Retrieved timedOutPlayer from localStorage: ${timedOutPlayer}`);
+          
+          // Skip showing another result screen since we already showed it in handleTimeOut
+          console.log(`Skipping result screen for timeout since it was already shown`);
+          
+          // Just update the rating changes if they're available
+          if (data.whitePlayer?.ratingChange !== undefined && data.blackPlayer?.ratingChange !== undefined) {
+            console.log(`Updating rating changes: white=${data.whitePlayer.ratingChange}, black=${data.blackPlayer.ratingChange}`);
+            
+            // Get the current result data
+            const currentResultData = { ...gameResultData };
+            
+            // Update rating changes
+            currentResultData.playerRatingChange = playerColor === 'white' ? 
+              data.whitePlayer.ratingChange : data.blackPlayer.ratingChange;
+            currentResultData.opponentRatingChange = playerColor === 'white' ? 
+              data.blackPlayer.ratingChange : data.whitePlayer.ratingChange;
+            
+            // Update the result data
+            setGameResultData(currentResultData);
+            
+            console.log(`Updated result data with rating changes:`, currentResultData);
+          }
+          
+          // Return early to skip showing another result screen
+          return;
+        } catch (error) {
+          console.error('Error handling timeout game_end event:', error);
+          
+          // Fallback to the old method if there's an error
+          const isPlayerTimedOut = 
+            (playerColor === 'white' && (data.timedOut === 'white' || data.loserColor === 'white')) ||
+            (playerColor === 'black' && (data.timedOut === 'black' || data.loserColor === 'black'));
+          
+          playerResult = isPlayerTimedOut ? 'loss' : 'win';
+          
+          // Only show the result screen if it's not already showing
+          if (showResultScreen) {
+            console.log(`Result screen already showing, skipping`);
+            return;
+          }
+          
+          console.log(`Fallback timeout handling. Player is ${playerColor}, isTimedOut: ${isPlayerTimedOut}, playerResult: ${playerResult}`);
+        }
+      }
+      else if (['draw_agreement', 'stalemate', 'insufficient_material', 'threefold_repetition', 'fifty_move_rule'].includes(data.reason)) {
+        // These are all draw conditions
         playerResult = 'draw';
-      } else if (data.winner) {
-        // If there's a winner, determine if it's the player
+        console.log(`Draw condition detected: ${data.reason}`);
+      }
+      else if (data.winner) {
+        // Generic winner determination for other cases
         const isPlayerWinner = 
           (playerColor === 'white' && data.winner === 'white') ||
           (playerColor === 'black' && data.winner === 'black');
         playerResult = isPlayerWinner ? 'win' : 'loss';
+        console.log(`Generic winner determination. Player is ${playerColor}, winner is ${data.winner}, playerResult: ${playerResult}`);
       }
       
       // Set the game result for display
@@ -2073,6 +2122,16 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         opponentRatingChange: data.whitePlayer?.ratingChange !== undefined ? 
           (playerColor === 'white' ? data.blackPlayer.ratingChange : data.whitePlayer.ratingChange) : 0
       };
+      
+      console.log('Final result data:', resultData);
+      
+      // Save the game result to localStorage for the result page to use
+      try {
+        localStorage.setItem(`gameResult_${gameRoomId}`, JSON.stringify(resultData));
+        console.log('Saved game result to localStorage:', resultData);
+      } catch (error) {
+        console.error('Failed to save game result to localStorage:', error);
+      }
       
       // Create game result data for the window event
       const gameEndedEvent = new CustomEvent('game_ended', {
@@ -2126,99 +2185,36 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     
     setMoveHistory(history);
     
-    if (history && history.moves && history.moves.length > 0) {
-      // 🔄 FIX: When updating the move list for display, we need to:
-      // 1. Use ALL moves in the history, not just up to currentMoveIndex
-      // 2. Ensure we're sending the correct SAN notations to the MoveTracker
-
-      // Extract notations from ALL moves in history
-      // This ensures the move tracker always shows the complete game history
-      const allSanMoves = history.moves.map(move => move.notation);
-      
-      // Get the current index from history for debugging
-      const currentIndex = history.currentMoveIndex;
-      
-      // Log the state for debugging
-      console.log('📊 Move Tracker Update Debug:', {
-        totalMovesInHistory: history.moves.length,
-        currentMoveIndex: currentIndex,
-        movesBeingSentToTracker: allSanMoves.length
-      });
-      
-      // Update the sanMoveList state with ALL moves
-      setSanMoveList(prevSanMoveList => {
-        if (JSON.stringify(prevSanMoveList) !== JSON.stringify(allSanMoves)) {
-          return allSanMoves;
-        }
-        return prevSanMoveList;
-      });
-    } else {
-      setSanMoveList(prevSanMoveList => {
-        if (prevSanMoveList.length > 0) {
-          return [];
-        }
-        return prevSanMoveList;
-      });
-    }
-
-    // Update captured pieces based on the current move
-    if (history.moves.length > 0 && history.currentMoveIndex >= 0) {
-      const currentMove = history.moves[history.currentMoveIndex];
-      if (currentMove.boardState && currentMove.boardState.capturedPieces) {
-        setWhiteCapturedPieces(currentMove.boardState.capturedPieces.white);
-        setBlackCapturedPieces(currentMove.boardState.capturedPieces.black);
-      }
-    } else if (history.currentMoveIndex === -1) {
-      // At initial position, reset captured pieces
-      setWhiteCapturedPieces([]);
-      setBlackCapturedPieces([]);
-    }
+    // Debug the move tracker update
+    console.log(`📊 Move Tracker Update Debug: {totalMovesInHistory: ${history.moves.length}, currentMoveIndex: ${history.currentMoveIndex}, movesBeingSentToTracker: ${history.moves.length}}`);
     
-    // Check game status after every move
-    const status = getGameStatus();
-    
-    // Handle threefold repetition
-    if (status.isThreefoldRepetition) {
-      console.log('Threefold repetition detected - game is a draw');
-      
-      // Ensure player data is ready before creating game result data
-      ensurePlayerDataReady();
-      
-      // Create game result data for threefold repetition
-      const resultData = {
-        result: 'draw' as GameResultType,
-        reason: 'threefold_repetition' as GameEndReason,
-        playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
-        opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-        playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-        opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
-        playerPhotoURL: playerColor === 'white' ? whitePlayer.photoURL : blackPlayer.photoURL,
-        opponentPhotoURL: playerColor === 'white' ? blackPlayer.photoURL : whitePlayer.photoURL,
-        playerRatingChange: 0, // Draw means no rating change
-        opponentRatingChange: 0  // Draw means no rating change
+    // Check for threefold repetition after move history updates
+    try {
+      const chess = getChessEngine();
+      const status = {
+        fen: chess.fen(),
+        isCheck: chess.isCheck(),
+        isCheckmate: chess.isCheckmate(),
+        isDraw: chess.isDraw(),
+        isThreefoldRepetition: isThreefoldRepetition()
       };
       
-      // Log the created result data
-      console.log('Created game result data (threefold repetition):', resultData);
+      // Update current position FEN for debugging
+      console.log(`Current position FEN: ${status.fen}`);
       
-      // Set the game result data and show result screen
-      setGameResultData(resultData);
-      setShowResultScreen(true);
+      // If threefold repetition is detected, handle it
+    if (status.isThreefoldRepetition) {
+        console.log('Threefold repetition detected in handleMoveHistoryChange');
       
       // Update game state
       setGameState(prev => ({
         ...prev,
         isGameOver: true,
-        isWhiteTurn: status.turn === 'white'
+          gameOverReason: 'threefold_repetition'
       }));
       
-      // Stop both clocks
+        // Stop the clocks
       setActivePlayer(null);
-      
-      // Play draw sound - only if sound is enabled
-      if (soundEnabled) {
-        playSound('GAME_END', true);
-      }
       
       // Notify the server about the threefold repetition
       if (socket) {
@@ -2252,214 +2248,6 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       }
       
       return;
-    }
-    
-    // Handle checkmate immediately
-    if (status.isCheckmate) {
-      // Ensure player data is ready before creating game result data
-      ensurePlayerDataReady();
-      
-      // Determine the winner based on whose turn it is
-      // In chess, the player who can't move is in checkmate, so the other player wins
-      const isCurrentPlayerWinner = (status.turn === 'white' && playerColor === 'black') || 
-                                  (status.turn === 'black' && playerColor === 'white');
-      
-      // Log player data before creating result data for checkmate
-      console.log('Player data for game result (checkmate):', {
-        playerColor,
-        whitePlayer,
-        blackPlayer,
-        isCurrentPlayerWinner
-      });
-
-      // Create game result data for checkmate
-      const resultData = {
-        result: isCurrentPlayerWinner ? 'win' : 'loss' as 'win' | 'loss',
-        reason: 'checkmate' as GameEndReason,
-        playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
-        opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-        playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-        opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
-        playerPhotoURL: playerColor === 'white' ? whitePlayer.photoURL : blackPlayer.photoURL,
-        opponentPhotoURL: playerColor === 'white' ? blackPlayer.photoURL : whitePlayer.photoURL,
-        playerRatingChange: isCurrentPlayerWinner ? 10 : -10,
-        opponentRatingChange: isCurrentPlayerWinner ? -10 : 10
-      };
-      
-      // Log the created result data
-      console.log('Created game result data (checkmate):', resultData);
-      
-      // Set the game result data and show result screen
-      setGameResultData(resultData);
-      setShowResultScreen(true);
-      
-      // Update game state
-      setGameState(prev => ({
-        ...prev,
-        isGameOver: true,
-        isWhiteTurn: status.turn === 'white'
-      }));
-      
-      // Stop both clocks
-      setActivePlayer(null);
-      
-      // Play checkmate sound - only if sound is enabled
-      if (soundEnabledRef.current) {
-        playSound('CHECKMATE', true);
-      }
-      
-      return;
-    }
-    
-    // Update game state based on chess.js status
-    setGameState(prev => ({ 
-      ...prev,
-      isWhiteTurn: status.turn === 'white',
-      hasWhiteMoved: true,
-      isGameOver: status.isGameOver,
-    }));
-    
-    // If the game is over due to checkmate, stalemate, etc., show the result screen
-    if (status.isGameOver) {
-      // Ensure player data is ready before creating game result data
-      ensurePlayerDataReady();
-      
-      // Determine the result
-      let result: GameResultType = 'draw';
-      let reason: GameEndReason = 'stalemate';
-      
-      if (status.isCheckmate) {
-        // If it's checkmate, the current player (whose turn it is) lost
-        result = status.turn === playerColor ? 'loss' : 'win';
-        reason = 'checkmate';
-      } else if (status.isDraw) {
-        result = 'draw';
-        reason = 'stalemate';
-      }
-      
-      // Get player and opponent based on color
-      const player = playerColor === 'white' ? whitePlayer : blackPlayer;
-      const opponent = playerColor === 'white' ? blackPlayer : whitePlayer;
-
-      // Ensure we have valid player data, or use fallback values
-      const playerName = player?.username || (playerColor === 'white' ? 'White Player' : 'Black Player');
-      const opponentName = opponent?.username || (playerColor === 'white' ? 'Black Player' : 'White Player');
-      const playerRating = typeof player?.rating === 'number' ? player.rating : 1500;
-      const opponentRating = typeof opponent?.rating === 'number' ? opponent.rating : 1500;
-
-      // Log player data before creating result data
-      console.log('Player data for game result (stalemate/draw):', {
-        playerColor,
-        player,
-        opponent,
-        whitePlayer,
-        blackPlayer
-      });
-
-      // Create result data with safe values
-      const resultData = {
-        result,
-        reason,
-        playerName,
-        opponentName,
-        playerRating,
-        opponentRating,
-        playerPhotoURL: player?.photoURL || null,
-        opponentPhotoURL: opponent?.photoURL || null,
-        playerRatingChange: result === 'win' ? 10 : (result === 'loss' ? -10 : 0),
-        opponentRatingChange: result === 'win' ? -10 : (result === 'loss' ? 10 : 0)
-      };
-      
-      // Log the created result data
-      console.log('Created game result data (stalemate/draw):', resultData);
-      
-      console.log('Game result data created:', resultData);
-      
-      // Set result data and show the screen
-      setGameResultData(resultData);
-      setShowResultScreen(true);
-    }
-    
-    // Update active player for clocks
-    if (status.isGameOver) {
-      setActivePlayer(null); // Stop both clocks
-    } else {
-      setActivePlayer(status.turn === 'white' ? 'white' : 'black'); // Set the active player based on whose turn it is
-      
-      // Check for threefold repetition after the move with enhanced validation
-      try {
-        // First ensure the chess engine is in a valid state
-        const chess = getChessEngine();
-        const currentFen = chess.fen();
-        
-        // Log the current position for debugging
-        console.log(`Current position FEN: ${currentFen}`);
-        console.log(`Move history length: ${chess.history().length}`);
-        
-        // Only check for threefold repetition if we have enough moves
-        // Threefold repetition requires at least 8 moves (4 by each player)
-        if (chess.history().length >= 8) {
-          // Use the chess.js isThreefoldRepetition method to check
-          const isThreefoldRep = isThreefoldRepetition();
-          
-          console.log(`Threefold repetition check result: ${isThreefoldRep}`);
-          
-          if (isThreefoldRep && !gameState.isGameOver && socket) {
-            console.log('THREEFOLD REPETITION DETECTED! Emitting game_end event to server...');
-            
-            // Emit game_end event to the server with threefold_repetition reason
-            // This follows the same pattern as other game-ending scenarios
-            socket.emit('game_end', {
-              gameId: gameRoomId,
-              reason: 'threefold_repetition',
-              fen: currentFen,
-              moveHistory: chess.history() // Include move history for verification
-            });
-            
-            // Update game state to mark game as over
-            setGameState(prev => ({
-              ...prev,
-              isGameOver: true,
-              gameOverReason: 'threefold_repetition'
-            }));
-            
-            // Stop the clocks
-            setActivePlayer(null);
-            
-            // Play game end sound
-            playSound('GAME_END', soundEnabled);
-            
-            console.log('Waiting for server to process threefold repetition and emit game_end event...');
-            
-            // Request a board sync to ensure all clients have the correct state
-            socket.emit('request_board_sync', {
-              gameId: gameRoomId,
-              reason: 'threefold_repetition_detected',
-              clientState: currentFen
-            });
-            
-            // Store a temporary game result in localStorage to ensure we can show the result screen
-            // even if there's a delay in receiving the server's game_end event
-            try {
-              const tempResultData = {
-                result: 'draw' as GameResultType,
-                reason: 'threefold_repetition' as GameEndReason,
-                playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
-                opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-                playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-                opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
-                playerPhotoURL: playerColor === 'white' ? whitePlayer.photoURL : blackPlayer.photoURL,
-                opponentPhotoURL: playerColor === 'white' ? blackPlayer.photoURL : whitePlayer.photoURL,
-                playerRatingChange: 0, // Will be updated when server responds
-                opponentRatingChange: 0 // Will be updated when server responds
-              };
-              
-              localStorage.setItem(`gameResult_${gameRoomId}`, JSON.stringify(tempResultData));
-              console.log('Temporary game result data saved to localStorage for threefold repetition');
-            } catch (storageError) {
-              console.error('Failed to save temporary game result data to localStorage:', storageError);
-            }
-          }
         }
       } catch (error) {
         console.error(`Error checking for threefold repetition: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -2472,24 +2260,11 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
             reason: 'threefold_repetition_check_error',
             clientState: getChessEngine().fen()
           });
-        }
       }
     }
     
-    // If a move is made, add it to the move queue
-    // This is critical for synchronizing moves between clients
-    if (history.moves.length > 0 && history.currentMoveIndex === history.moves.length - 1) {
-      const lastMove = history.moves[history.currentMoveIndex];
-      
-      // Add to move queue instead of directly emitting
-      // This ensures moves are processed even if sound settings change
-      console.log(`Adding move to queue: ${lastMove.from}-${lastMove.to}`);
-      setMoveQueue(prev => [...prev, {
-        from: lastMove.from,
-        to: lastMove.to,
-        promotion: lastMove.promotion
-      }]);
-    }
+    // IMPORTANT: Don't add moves to the queue here - they're already being sent by ChessBoard.tsx
+    // The move queue should only contain moves initiated by the local player
   }, [soundEnabled, playerColor, whitePlayer.username, whitePlayer.rating, blackPlayer.username, blackPlayer.rating]);
   
   // Handle back button click
@@ -2530,64 +2305,103 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     console.log('Using gameId:', gameRoomId);
   }, [playerColor, gameState.timeControl, gameTimeInSeconds, gameRoomId]);
   
-  // Mock handler for time out events
+  // Handler for time out events
   const handleTimeOut = (player: 'white' | 'black') => {
     console.log(`${player} player ran out of time`);
     
-    // Emit timeout event to the server
-    if (socket) {
-      socket.emit('timeout_occurred', {
-        gameId: gameRoomId,
-        playerColor: player
-      });
-      console.log(`Emitted timeout_occurred event for ${player} in game ${gameRoomId}`);
-    }
+    // Immediately stop both clocks
+    setActivePlayer(null);
     
-    // Use setState callback to avoid referencing current state directly
-    setActivePlayer(() => null); // Stop both clocks
-    
-    // Update game state
+    // Update game state to mark it as over
     setGameState(prev => ({
       ...prev,
       isGameOver: true,
     }));
-    
-    // Create game result data for timeout
-    const timeoutResultData = {
-      result: player === playerColor ? 'loss' : 'win' as GameResultType,
-      reason: 'timeout' as GameEndReason,
-      playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
-      opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-      playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-      opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
-      playerRatingChange: player === playerColor ? -10 : 10,
-      opponentRatingChange: player === playerColor ? 10 : -10
-    };
-    
-    // Set result data and show result screen
-    setGameResultData(timeoutResultData);
-    setShowResultScreen(true);
     
     // Play time out sound
     if (soundEnabledRef.current) {
       playSound('GAME_END', true);
     }
     
-    // Set game result data based on the player who timed out
-    const resultType = playerColor === player ? 'loss' : 'win';
-    setGameResultData({
-      result: resultType as GameResultType,
-      reason: 'timeout' as GameEndReason,
-      playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
-      opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-      playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-      opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
-      playerRatingChange: resultType === 'win' ? 10 : -10,
-      opponentRatingChange: resultType === 'win' ? -10 : 10
-    });
-    
-    // Show result screen
-    setShowResultScreen(true);
+    // Emit timeout event to the server using the correct event name 'report_timeout'
+    if (socket) {
+      // Convert 'white'/'black' to 'w'/'b' for the backend
+      const color = player === 'white' ? 'w' : 'b';
+      
+      // Store which player timed out in localStorage
+      try {
+        localStorage.setItem(`timeout_player_${gameRoomId}`, player);
+        console.log(`Stored timeout player ${player} in localStorage for game ${gameRoomId}`);
+      } catch (error) {
+        console.error('Failed to store timeout player in localStorage:', error);
+      }
+      
+      console.log(`Emitting report_timeout event for ${player} (${color}) in game ${gameRoomId}`);
+      
+      // CRITICAL FIX: We need to determine if this client is reporting their own timeout or the opponent's
+      const isReportingOwnTimeout = playerColor === player;
+      console.log(`isReportingOwnTimeout: ${isReportingOwnTimeout}, playerColor: ${playerColor}, timedOutPlayer: ${player}`);
+      
+      // If this is the player who timed out, show loss screen
+      if (isReportingOwnTimeout) {
+        console.log(`This player (${playerColor}) timed out - showing loss screen`);
+        
+        // Create game result data for timeout - this player lost
+        const timeoutResultData = {
+          result: 'loss' as GameResultType,
+          reason: 'timeout' as GameEndReason,
+          playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
+          opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
+          playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
+          opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
+          playerRatingChange: -10, // Loss for timing out
+          opponentRatingChange: 10  // Win for opponent
+        };
+        
+        // Set result data and show result screen
+        setGameResultData(timeoutResultData);
+        setShowResultScreen(true);
+        
+        // Emit the timeout event to the server with a flag indicating this player timed out
+        socket.emit('report_timeout', {
+          gameId: gameRoomId,
+          color: color,
+          reporterIsTimedOutPlayer: true
+        });
+        
+        console.log(`Emitted report_timeout event with reporterIsTimedOutPlayer=true`);
+      } else {
+        // This client is reporting the opponent's timeout
+        console.log(`Opponent (${player}) timed out - showing win screen`);
+        
+        // Create game result data for timeout - this player won
+        const timeoutResultData = {
+          result: 'win' as GameResultType,
+          reason: 'timeout' as GameEndReason,
+          playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
+          opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
+          playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
+          opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
+          playerRatingChange: 10, // Win because opponent timed out
+          opponentRatingChange: -10  // Loss for opponent
+        };
+        
+        // Set result data and show result screen
+        setGameResultData(timeoutResultData);
+        setShowResultScreen(true);
+        
+        // Emit the timeout event to the server with a flag indicating this player is reporting the opponent's timeout
+        socket.emit('report_timeout', {
+          gameId: gameRoomId,
+          color: color,
+          reporterIsTimedOutPlayer: false
+        });
+        
+        console.log(`Emitted report_timeout event with reporterIsTimedOutPlayer=false`);
+      }
+    } else {
+      console.error('Socket not available, cannot report timeout to server');
+    }
   };
 
   // Handle draw offer responses
@@ -2595,57 +2409,63 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   const handleAcceptDraw = useCallback(() => {
     if (!socket) return;
     
-    socket.emit('accept_draw', { gameId: gameRoomId });
-    setDrawOfferReceived(false);
+    console.log('Accepting draw offer and notifying server');
     
     // Play button click sound using ref
     playSound('BUTTON_CLICK', soundEnabledRef.current, 1.0, 'Accept');
     
+    // Clear any draw offer timeout
     if (drawOfferTimeout) {
       clearTimeout(drawOfferTimeout);
       setDrawOfferTimeout(null);
     }
     
-    // Update game state
-    setGameState(prev => ({
-      ...prev,
-      isGameOver: true,
-    }));
+    // Clear the draw offer UI
+    setDrawOfferReceived(false);
     
-    // Create game result data for draw
-    const drawResultData = {
-      result: 'draw' as GameResultType,
-      reason: 'agreement' as GameEndReason,
-      playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
-      opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-      playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-      opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
-      playerRatingChange: 0,
-      opponentRatingChange: 0
-    };
-    
-    // Set result data and show result screen
-    setGameResultData(drawResultData);
-    setShowResultScreen(true);
-    
-    // Stop the clocks
+    // Stop the clocks immediately
     setActivePlayer(null);
+    
+    // Notify the server about the draw acceptance
+    // The server will broadcast a game_end event to both players
+    // which will trigger the result screen for both players consistently
+    socket.emit('draw_response', { 
+      gameId: gameRoomId,
+      accepted: true 
+    });
+    
+    console.log('Sent draw_response with accepted=true to server');
+    console.log('Waiting for server to broadcast game_end event');
+    
+    // We don't set game over state or show result screen here
+    // Instead, we wait for the server's game_end event which will be handled by handleGameEnd
   }, [socket, gameRoomId, drawOfferTimeout, playSound]); // Remove soundEnabled dependency
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleDeclineDraw = useCallback(() => {
     if (!socket) return;
     
-    socket.emit('decline_draw', { gameId: gameRoomId });
+    console.log('Declining draw offer');
+    
+    // Clear the draw offer UI
     setDrawOfferReceived(false);
     
     // Play button click sound using ref
     playSound('BUTTON_CLICK', soundEnabledRef.current, 1.0, 'Decline');
     
+    // Clear any timeout
     if (drawOfferTimeout) {
       clearTimeout(drawOfferTimeout);
       setDrawOfferTimeout(null);
     }
+    
+    // Send decline response to server
+    socket.emit('draw_response', { 
+      gameId: gameRoomId,
+      accepted: false 
+    });
+    
+    console.log('Sent draw_response with accepted=false to server');
   }, [socket, gameRoomId, drawOfferTimeout, playSound]); // Remove soundEnabled dependency
 
   // Handle resignation from the current player
@@ -2700,8 +2520,12 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   const handleOfferDraw = useCallback(() => {
     if (!socket) return;
     
-    socket.emit('offer_draw', { gameId: gameRoomId });
-  }, [socket, gameRoomId]);
+    console.log('Offering draw to opponent');
+    socket.emit('draw_request', { gameId: gameRoomId });
+    
+    // Play button click sound
+    playSound('BUTTON_CLICK', soundEnabledRef.current, 1.0, 'Draw Offer');
+  }, [socket, gameRoomId, playSound]);
 
   // Handle aborting the game
   const handleAbortGame = () => {
@@ -2792,7 +2616,8 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         ...prev,
         username: prev.username === 'Loading...' ? 'White Player' : prev.username,
         rating: prev.rating || 1500,
-        photoURL: prev.photoURL !== undefined ? prev.photoURL : null
+        photoURL: prev.photoURL !== undefined ? prev.photoURL : null,
+        userId: prev.userId !== undefined ? prev.userId : undefined
       }));
       
       // Update black player with fallback values
@@ -2800,7 +2625,8 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         ...prev,
         username: prev.username === 'Loading...' ? 'Black Player' : prev.username,
         rating: prev.rating || 1500,
-        photoURL: prev.photoURL !== undefined ? prev.photoURL : null
+        photoURL: prev.photoURL !== undefined ? prev.photoURL : null,
+        userId: prev.userId !== undefined ? prev.userId : undefined
       }));
     }
   };
@@ -3055,24 +2881,266 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     };
   }, [socket, gameRoomId, playSound]); // Properly reference only stable dependencies
 
+  const handleBetResult = (data: BetResult) => {
+    console.log('[ChessBoardWrapper] handleBetResult called with:', data);
+    saveBetResult(data.gameId, data);
+    console.log('[ChessBoardWrapper] saveBetResult called for gameId:', data.gameId);
+  };
+
+  const { currentBetResult } = useBet();
+  const { user } = useAuth();
+
+  useEffect(() => {
+    console.log('[ChessBoardWrapper] currentBetResult changed:', currentBetResult);
+  }, [currentBetResult]);
+
+  // Determine if this is a bet game and if the user is the winner
+  const isBetGame = !!(currentBetResult && currentBetResult.gameId === gameRoomId);
+  const isBetResultForThisGame = currentBetResult && currentBetResult.gameId === gameRoomId;
+  // Use isWinner directly from backend payload
+  const isBetWinner = isBetGame ? currentBetResult.isWinner : false;
+  // Use opponentName and betType directly from backend payload
+  const betOpponentName = isBetGame ? currentBetResult.opponentName : undefined;
+  const betType = isBetGame ? currentBetResult.betType : undefined;
+
+  // Debug logs
+  useEffect(() => {
+    console.log('[ChessBoardWrapper] currentBetResult:', currentBetResult);
+    console.log('[ChessBoardWrapper] isBetGame:', isBetGame, 'isBetResultForThisGame:', isBetResultForThisGame);
+  }, [currentBetResult, isBetGame, isBetResultForThisGame]);
+
+  // If the game is a bet game and the result is not yet available, show a loading spinner
+  const shouldShowBetResultLoading =
+    showResultScreen &&
+    isBetGame &&
+    !isBetResultForThisGame;
+
+  if (showResultScreen && gameResultData && (!isBetGame || isBetResultForThisGame)) {
+    console.log('[ChessBoardWrapper] Rendering result modal for bet game. isBetGame:', isBetGame, 'isBetResultForThisGame:', isBetResultForThisGame, 'currentBetResult:', currentBetResult);
+  }
+
+  // --- BET RESULT SCREEN IMPROVEMENT START ---
+  // Local state to track when game is over and when bet result is ready
+  const [isGameActuallyOver, setIsGameActuallyOver] = useState(false);
+  const [localBetResultForThisGame, setLocalBetResultForThisGame] = useState<BetResult | null>(null);
+  const [finalGameResultData, setFinalGameResultData] = useState<any>(null);
+  const [betResultReady, setBetResultReady] = useState(false);
+  const [displayableResultData, setDisplayableResultData] = useState<any>(null);
+
+  // Track when the game is actually over (from game_ended event)
+  useEffect(() => {
+    const handleGameEnded = (event: CustomEvent) => {
+      ensurePlayerDataReady();
+      const { reason, result, winnerSocketId, loserSocketId, source, winnerColor, loserColor } = event.detail;
+      console.log('[BET DEBUG] game_ended event received:', { reason, result, winnerSocketId, loserSocketId, source, mySocketId: socket?.id, winnerColor, loserColor });
+      setIsGameActuallyOver(true);
+      // Build standard game result data (for fallback)
+      let finalResult: GameResultType;
+      if (winnerColor && loserColor && playerColor) {
+        if (playerColor === winnerColor) {
+          finalResult = 'win';
+        } else if (playerColor === loserColor) {
+          finalResult = 'loss';
+        } else {
+          finalResult = 'draw';
+        }
+      } else if (result === 'win' || result === 'loss' || result === 'draw') {
+        finalResult = result as GameResultType;
+      } else if (socket && (winnerSocketId || loserSocketId)) {
+        if (winnerSocketId && socket.id === winnerSocketId) {
+          finalResult = 'win';
+        } else if (loserSocketId && socket.id === loserSocketId) {
+          finalResult = 'loss';
+        } else if (reason === 'resignation') {
+          finalResult = 'loss';
+        } else {
+          finalResult = 'draw';
+        }
+      } else {
+        if (reason === 'resignation') {
+          finalResult = 'loss';
+        } else {
+          finalResult = 'draw';
+        }
+      }
+      const resultData = {
+        result: finalResult,
+        reason: reason as GameEndReason,
+        playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
+        opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
+        playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
+        opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
+        playerPhotoURL: playerColor === 'white' ? whitePlayer.photoURL : blackPlayer.photoURL,
+        opponentPhotoURL: playerColor === 'white' ? blackPlayer.photoURL : whitePlayer.photoURL,
+        playerRatingChange: finalResult === 'win' ? 10 : (finalResult === 'loss' ? -10 : 0),
+        opponentRatingChange: finalResult === 'win' ? -10 : (finalResult === 'loss' ? 10 : 0)
+      };
+      setFinalGameResultData(resultData);
+      // Don't show result screen here, wait for merged logic
+    };
+    window.addEventListener('game_ended', handleGameEnded as EventListener);
+    return () => window.removeEventListener('game_ended', handleGameEnded as EventListener);
+  }, [socket, playerColor, whitePlayer, blackPlayer]);
+
+  // Track when bet result is available for this game
+  useEffect(() => {
+    if (currentBetResult && currentBetResult.gameId === gameRoomId) {
+      setLocalBetResultForThisGame(currentBetResult);
+      setBetResultReady(true);
+      console.log('[BET DEBUG] Bet result received for this game:', currentBetResult);
+    }
+  }, [currentBetResult, gameRoomId]);
+
+  // Main effect to control when to show the result screen (robust against race conditions)
+  useEffect(() => {
+    // Log all relevant state for debugging
+    console.log('[BET DEBUG] useEffect triggered:', {
+      isGameActuallyOver,
+      betResultReady,
+      localBetResultForThisGame,
+      currentBetResult,
+      finalGameResultData,
+      gameRoomId,
+      isBetGame
+    });
+
+    if (!isGameActuallyOver) {
+      setDisplayableResultData(null);
+      return;
+    }
+
+    // If this is a bet game (detected by localBetResultForThisGame for this game)
+    const isThisBetGame = !!(localBetResultForThisGame && localBetResultForThisGame.gameId === gameRoomId);
+
+    if (isThisBetGame) {
+      if (betResultReady && localBetResultForThisGame && localBetResultForThisGame.gameId === gameRoomId) {
+        // Merge bet result and standard game result
+        const isWinnerOfBet = localBetResultForThisGame.isWinner;
+        const betType = localBetResultForThisGame.betType;
+        const betOpponentName = localBetResultForThisGame.opponentName;
+        const opponentIdForBetContext = isWinnerOfBet ? localBetResultForThisGame.loserId : localBetResultForThisGame.winnerId;
+
+        const betGameResultData = {
+          ...(finalGameResultData || {}),
+          result: isWinnerOfBet ? 'win' : 'loss',
+          isBetGame: true,
+          isBetWinner: isWinnerOfBet,
+          betType,
+          betOpponentName,
+          opponentIdForBetContext,
+          playerName: finalGameResultData?.playerName,
+          opponentName: finalGameResultData?.opponentName,
+          playerRating: Number.isFinite(finalGameResultData?.playerRating) ? finalGameResultData.playerRating : 1500,
+          opponentRating: Number.isFinite(finalGameResultData?.opponentRating) ? finalGameResultData.opponentRating : 1500,
+        };
+        setDisplayableResultData(betGameResultData);
+        console.log('[BET DEBUG] Showing BET result screen:', betGameResultData);
+      } else {
+        // Bet result not ready, show spinner
+        setDisplayableResultData(null);
+        console.log('[BET DEBUG] Waiting for bet result...');
+      }
+    } else {
+      // Not a bet game, show standard result
+      if (finalGameResultData) {
+        setDisplayableResultData({
+          ...finalGameResultData,
+          isBetGame: false,
+          playerRating: Number.isFinite(finalGameResultData?.playerRating) ? finalGameResultData.playerRating : 1500,
+          opponentRating: Number.isFinite(finalGameResultData?.opponentRating) ? finalGameResultData.opponentRating : 1500,
+        });
+        console.log('[BET DEBUG] Showing STANDARD result screen:', finalGameResultData);
+      } else {
+        setDisplayableResultData(null);
+      }
+    }
+  }, [
+    isGameActuallyOver,
+    betResultReady,
+    localBetResultForThisGame,
+    finalGameResultData,
+    gameRoomId,
+    isBetGame
+  ]);
+
+  // Always clear previous chess state and initialize engine when a new game starts
+  useEffect(() => {
+    if (!gameRoomId) return;
+    clearChessState();
+    const chess = getChessEngine(gameRoomId);
+    console.log('Initialized chess engine for new game:', gameRoomId, 'FEN:', chess.fen());
+    setBoardState(getCurrentBoardState());
+    setSanMoveList(chess.history());
+  }, [gameRoomId]);
+
+  // Listen for add_move_to_queue events from the useChessMultiplayer hook
+  useEffect(() => {
+    // Define the handler for the add_move_to_queue event
+    const handleAddMoveToQueue = (event: CustomEvent) => {
+      const moveData = event.detail;
+      console.log('[EVENT] Received add_move_to_queue event:', moveData);
+      
+      // Validate that the move has all required fields
+      if (!moveData.from || !moveData.to || !moveData.player) {
+        console.error('[ERROR] Invalid move data received:', moveData);
+        return;
+      }
+      
+      // Add the move to the moveQueue
+      setMoveQueue(prev => [...prev, {
+        from: moveData.from,
+        to: moveData.to,
+        promotion: moveData.promotion,
+        player: moveData.player,
+        notation: moveData.notation,
+        isCapture: moveData.isCapture
+      }]);
+    };
+    
+    // Add the event listener
+    window.addEventListener('add_move_to_queue', handleAddMoveToQueue as EventListener);
+    
+    // Clean up when component unmounts
+    return () => {
+      window.removeEventListener('add_move_to_queue', handleAddMoveToQueue as EventListener);
+    };
+  }, []);
+
   return (
     <div className="flex flex-col w-full h-full rounded-t-xl rounded-b-none sm:rounded-t-xl sm:rounded-b-none overflow-hidden flex-shrink-0 pb-[62px]" style={{ backgroundColor: '#4A7C59' }}>
+      {/* Bet Result Loading Spinner */}
+      {isGameActuallyOver && isBetGame && !(localBetResultForThisGame && localBetResultForThisGame.gameId === gameRoomId) && (
+        <div className="flex flex-col items-center justify-center py-8">
+          <div className="w-8 h-8 border-4 border-[#4A7C59] border-t-transparent rounded-full animate-spin mb-2"></div>
+          <p className="text-[#F9F3DD] text-sm">Waiting for bet result...</p>
+        </div>
+      )}
       {/* Game Result Screen */}
-      {showResultScreen && gameResultData && (
-        <GameResultScreen
-          result={gameResultData.result}
-          reason={gameResultData.reason}
-          gameId={gameRoomId}
-          playerName={gameResultData.playerName}
-          opponentName={gameResultData.opponentName}
-          playerRating={gameResultData.playerRating}
-          opponentRating={gameResultData.opponentRating}
-          playerRatingChange={gameResultData.playerRatingChange}
-          opponentRatingChange={gameResultData.opponentRatingChange}
-          playerPhotoURL={gameResultData.playerPhotoURL}
-          opponentPhotoURL={gameResultData.opponentPhotoURL}
-          onClose={handleCloseResultScreen}
-        />
+      {displayableResultData && (
+        (() => {
+          console.log('[BET DEBUG] Rendering GameResultScreen with props:', displayableResultData);
+          return (
+            <GameResultScreen
+              result={displayableResultData.result}
+              reason={displayableResultData.reason}
+              gameId={gameRoomId}
+              playerName={displayableResultData.playerName}
+              opponentName={displayableResultData.opponentName}
+              playerRating={displayableResultData.playerRating}
+              opponentRating={displayableResultData.opponentRating}
+              playerRatingChange={displayableResultData.playerRatingChange}
+              opponentRatingChange={displayableResultData.opponentRatingChange}
+              playerPhotoURL={displayableResultData.playerPhotoURL}
+              opponentPhotoURL={displayableResultData.opponentPhotoURL}
+              onClose={handleCloseResultScreen}
+              isBetGame={displayableResultData.isBetGame}
+              isBetWinner={displayableResultData.isBetWinner}
+              betOpponentName={displayableResultData.betOpponentName}
+              betType={displayableResultData.betType}
+              opponentIdForBetContext={displayableResultData.opponentIdForBetContext}
+            />
+          );
+        })()
       )}
       
       {/* Draw Offer Notification */}
@@ -3102,11 +3170,12 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
             {/* Top player timer (White) */}
             <div>
               <GameClock 
-                timeInSeconds={gameTimeInSeconds}
+                timeInSeconds={whiteTimeRemaining}
                 isActive={activePlayer === 'white'}
                 isDarkTheme={false}
                 onTimeOut={() => handleTimeOut('white')}
                 playLowTimeSound={() => playSound('TIME_LOW', soundEnabled)}
+                onTimeUpdate={handleWhiteTimeUpdate}
               />
         </div>
       </div>
@@ -3134,11 +3203,12 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
             {/* Bottom player timer (Black) */}
             <div>
               <GameClock 
-                timeInSeconds={gameTimeInSeconds}
+                timeInSeconds={blackTimeRemaining}
                 isActive={activePlayer === 'black'}
                 isDarkTheme={true}
                 onTimeOut={() => handleTimeOut('black')}
                 playLowTimeSound={() => playSound('TIME_LOW', soundEnabledRef.current)}
+                onTimeUpdate={handleBlackTimeUpdate}
               />
             </div>
           </div>
@@ -3160,11 +3230,12 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
             {/* Top player timer (Black) */}
             <div>
               <GameClock 
-                timeInSeconds={gameTimeInSeconds}
+                timeInSeconds={blackTimeRemaining}
                 isActive={activePlayer === 'black'}
                 isDarkTheme={false}
                 onTimeOut={() => handleTimeOut('black')}
                 playLowTimeSound={() => playSound('TIME_LOW', soundEnabledRef.current)}
+                onTimeUpdate={handleBlackTimeUpdate}
               />
             </div>
           </div>
@@ -3192,11 +3263,12 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         {/* Bottom player timer (White) */}
             <div>
           <GameClock 
-                timeInSeconds={gameTimeInSeconds}
+                timeInSeconds={whiteTimeRemaining}
             isActive={activePlayer === 'white'}
             isDarkTheme={true}
                 onTimeOut={() => handleTimeOut('white')}
                 playLowTimeSound={() => playSound('TIME_LOW', soundEnabledRef.current)}
+                onTimeUpdate={handleWhiteTimeUpdate}
           />
         </div>
       </div>
@@ -3219,6 +3291,9 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
           length: moveHistory.moves.length,
           currentMoveIndex: moveHistory.currentMoveIndex
         } : undefined}
+        whitePlayer={whitePlayer}
+        blackPlayer={blackPlayer}
+        playerColor={playerColor}
       />
       
       {/* Disconnection Notification */}

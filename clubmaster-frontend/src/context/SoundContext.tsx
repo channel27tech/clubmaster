@@ -65,7 +65,6 @@ export const SoundProvider: React.FC<SoundProviderProps> = ({ children, userId }
           setSoundEnabled(settings.soundEnabled);
         }
       } catch (err) {
-        console.error('Error initializing sound settings:', err);
         // Use current state (from localStorage) as fallback
         // No need to set error state as we already have a working local setting
       } finally {
@@ -80,9 +79,6 @@ export const SoundProvider: React.FC<SoundProviderProps> = ({ children, userId }
   // Toggle sound function without any direct WebSocket operations
   const toggleSound = useCallback(async (enabled: boolean) => {
     if (!userId) return;
-    
-    // Log the operation for debugging
-    console.log(`Sound toggle requested: ${enabled ? 'enabled' : 'disabled'}`);
     
     // Update local state immediately without waiting
     setSoundEnabled(enabled);
@@ -106,9 +102,7 @@ export const SoundProvider: React.FC<SoundProviderProps> = ({ children, userId }
           await updateSoundSettings(userId, enabled);
           
           isUpdating = false;
-          console.log(`Sound settings updated on server: ${enabled ? 'enabled' : 'disabled'}`);
         } catch (err) {
-          console.error('Background sound settings update failed:', err);
           // Don't update any state here - keep the error isolated
         }
       }, 0);

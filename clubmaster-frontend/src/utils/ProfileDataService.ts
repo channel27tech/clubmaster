@@ -105,8 +105,6 @@ export class ProfileDataService {
    */
   async fetchUserProfile(userId: string): Promise<UserProfile | null> {
     try {
-      console.log(`Fetching profile data for Firebase UID: ${userId}`);
-      
       // Use browser-side API route when running in browser
       if (typeof window !== 'undefined') {
         try {
@@ -132,10 +130,8 @@ export class ProfileDataService {
           }
           
           const data = await response.json() as UserProfile;
-          console.log('Profile data fetched successfully:', data);
           return data;
         } catch (error) {
-          console.error('Error fetching from frontend API route:', error);
           // Fall back to direct backend call
         }
       }
@@ -144,7 +140,6 @@ export class ProfileDataService {
       const response = await fetch(`${this.baseUrl}/profile/${userId}`);
       
       if (response.status === 404) {
-        console.warn(`User not found for Firebase UID: ${userId}`);
         // Return default values when user not found
         return {
           id: userId,
@@ -163,10 +158,8 @@ export class ProfileDataService {
       }
       
       const data = await response.json() as UserProfile;
-      console.log('Profile data fetched successfully:', data);
       return data;
     } catch (error) {
-      console.error('Error fetching user profile:', error);
       // Return default values on error
       return {
         id: userId,
@@ -188,11 +181,9 @@ export class ProfileDataService {
    */
   async fetchGameHistory(userId: string): Promise<GameHistoryEntry[]> {
     try {
-      console.log(`Fetching game history for Firebase UID: ${userId}`);
       const response = await fetch(`${this.baseUrl}/profile/${userId}/games`);
       
       if (response.status === 404) {
-        console.warn(`User not found for Firebase UID: ${userId}, returning empty game history`);
         return [];
       }
       
@@ -201,10 +192,8 @@ export class ProfileDataService {
       }
       
       const data = await response.json() as GameHistoryEntry[];
-      console.log('Game history fetched successfully:', data);
       return data;
     } catch (error) {
-      console.error('Error fetching game history:', error);
       return []; // Return empty array on error
     }
   }
@@ -303,8 +292,6 @@ export class ProfileDataService {
       // Display text without time control category prefix
       const displayText = `vs ${game.opponentName} (${game.opponentRating}) | ${resultIcon}${resultText}`;
       
-      console.log(`Game ${game.id} - Time Control Icon: ${timeControlIcon}, Display Text: ${displayText}`);
-      
       return {
         id: game.id,
         date: gameDate,
@@ -340,13 +327,10 @@ export class ProfileDataService {
    */
   async fetchOtherUserProfile(userId: string): Promise<UserProfile | null> {
     try {
-      console.log(`Fetching other user profile data for ID: ${userId}`);
-      
       // Direct backend call for other users' profiles
       const response = await fetch(`${this.baseUrl}/profile/${userId}`);
       
       if (response.status === 404) {
-        console.warn(`User not found for ID: ${userId}`);
         // Return default values when user not found
         return {
           id: userId,
@@ -365,10 +349,8 @@ export class ProfileDataService {
       }
       
       const data = await response.json() as UserProfile;
-      console.log('Other user profile data fetched successfully:', data);
       return data;
     } catch (error) {
-      console.error('Error fetching other user profile:', error);
       // Return default values on error
       return {
         id: userId,

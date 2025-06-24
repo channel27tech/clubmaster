@@ -3,6 +3,7 @@ import { NotificationsService } from './notifications.service';
 import { CreateNotificationDto } from './dto/create-notification.dto';
 import { NotificationQueryDto } from './dto/notification-query.dto';
 import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
+// import { FirebaseAuthGuard } from '../firebase/firebase-auth.guard';
 import { Notification } from './entities/notification.entity';
 import { UsersService } from '../users/users.service';
 
@@ -39,7 +40,7 @@ export class NotificationsController {
   async getUnreadCount(
     @Request() req,
   ): Promise<{ count: number }> {
-    const userId = req.user.id;
+    const userId = req.user.uid;
     return this.notificationsService.getUnreadCount(userId);
   }
 
@@ -52,7 +53,7 @@ export class NotificationsController {
     @Param('id') id: string,
     @Request() req,
   ): Promise<Notification> {
-    const userId = req.user.id;
+    const userId = req.user.uid;
     
     // Get the notification first to verify ownership
     const notification = await this.notificationsService.findOne(id);
@@ -76,7 +77,7 @@ export class NotificationsController {
   async markAllAsRead(
     @Request() req,
   ): Promise<{ affected: number }> {
-    const userId = req.user.id;
+    const userId = req.user.uid;
     return this.notificationsService.markAllAsRead(userId);
   }
 
@@ -90,7 +91,7 @@ export class NotificationsController {
     @Param('id') id: string,
     @Request() req,
   ): Promise<void> {
-    const userId = req.user.id;
+    const userId = req.user.uid;
     
     // Get the notification first to verify ownership
     const notification = await this.notificationsService.findOne(id);

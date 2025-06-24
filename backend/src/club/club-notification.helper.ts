@@ -43,15 +43,17 @@ export class ClubNotificationHelper {
     clubName: string,
     memberAvatar: string,
   ): Promise<void> {
+    const message = `${memberUsername} has left your club ${clubName}.`;
     const promises = adminUserIds.map((adminId) =>
       this.notificationsService.sendNotification(
         adminId,
         NotificationType.CLUB_MEMBER_LEFT,
         {
+          message,
           senderUserId: memberUserId,
           clubId,
           clubName,
-          memberName: memberUsername,
+          memberUsername,
           memberAvatar,
         },
       ),
@@ -87,36 +89,43 @@ export class ClubNotificationHelper {
   async sendSuperAdminTransferNotification(
     recipientUserId: string,
     senderUserId: string,
-    clubName: string
+    clubName: string,
+    clubLogo: string,
   ): Promise<void> {
-    const message = `You are the new club member of this ${clubName}`;
+    const message = `You are the new super admin of the club ${clubName}`;
+    const payload = { senderUserId, clubName, message, clubLogo };
+    console.log('[ClubNotificationHelper] Payload to be sent:', payload);
+
     await this.notificationsService.sendNotification(
       recipientUserId,
       NotificationType.SUPER_ADMIN_TRANSFER,
-      { senderUserId, clubName, message }
+      payload,
     );
   }
 
   /**
-   * Notify a user when they are removed from a club by the super admin
+   * Notify a member when they have been removed from a club
    */
   async sendMemberRemovedNotification(
-    removedUserId: string,
+    recipientUserId: string,
     clubId: string,
     clubName: string,
+    removedByUserId: string,
     removedByName: string,
-    clubLogo: string
+    clubLogo: string,
   ): Promise<void> {
+    const message = `You have been removed from the club ${clubName} by ${removedByName}.`;
     await this.notificationsService.sendNotification(
-      removedUserId,
+      recipientUserId,
       NotificationType.CLUB_MEMBER_REMOVED,
       {
+        message,
         clubId,
         clubName,
+        removedByUserId,
         removedByName,
         clubLogo,
-        message: `You have been removed from the club ${clubName} by ${removedByName}.`
-      }
+      },
     );
   }
 } 

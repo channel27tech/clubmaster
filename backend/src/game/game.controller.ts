@@ -17,14 +17,14 @@ export class GameController {
   @UseGuards(FirebaseAuthGuard)
   async getGamePlayers(@Param('id') id: string) {
     this.logger.log(`Received request for game players with ID: ${id}`);
-    
-    // Pass the full original ID to the repository service
-    // The repository service will handle the extraction and lookup logic
-    const game = await this.gameRepositoryService.findOne(id);
+   
+    // Use the customId-aware lookup
+    const game = await this.gameRepositoryService.findOneByCustomId(id);
     if (!game) {
       this.logger.error(`Game with ID ${id} not found`);
       throw new NotFoundException(`Game with ID ${id} not found`);
     }
+    this.logger.log(`[GameController] Found game for customId ${id}: ${game.id}`);
     
     this.logger.debug(`Found game with ID: ${game.id}, white player ID: ${game.whitePlayerId}, black player ID: ${game.blackPlayerId}`);
 
@@ -52,16 +52,26 @@ export class GameController {
     const whiteRating = game.whitePlayerRating || whitePlayer.rating || 1500;
     const blackRating = game.blackPlayerRating || blackPlayer.rating || 1500;
 
+    // Create effective photo URLs that prioritize custom photos over Firebase photos
+    const whitePlayerPhotoURL = whitePlayer.custom_photo_base64 || whitePlayer.photoURL;
+    const blackPlayerPhotoURL = blackPlayer.custom_photo_base64 || blackPlayer.photoURL;
+    
+    // Prioritize custom usernames over displayName
+    const whitePlayerUsername = whitePlayer.username || whitePlayer.displayName;
+    const blackPlayerUsername = blackPlayer.username || blackPlayer.displayName;
+
     const response = {
       whitePlayer: { 
-        username: whitePlayer.displayName, 
+        username: whitePlayerUsername, 
         rating: whiteRating,
-        photoURL: whitePlayer.photoURL || null 
+        photoURL: whitePlayerPhotoURL,
+        userId: whitePlayer.id
       },
       blackPlayer: { 
-        username: blackPlayer.displayName, 
+        username: blackPlayerUsername, 
         rating: blackRating,
-        photoURL: blackPlayer.photoURL || null 
+        photoURL: blackPlayerPhotoURL,
+        userId: blackPlayer.id
       }
     };
 

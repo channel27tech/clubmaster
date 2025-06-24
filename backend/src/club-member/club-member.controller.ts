@@ -72,10 +72,10 @@ export class ClubMemberController {
     @Param('clubId') clubId: string,
     @Request() req
   ) {
-    const user = await this.userRepository.findOne({ where: { firebaseUid: req.user.uid } });
-    if (!user) throw new UnauthorizedException('User not found');
-    
-    await this.clubMemberService.leaveClub(user.id, clubId);
+    if (!req.user || !req.user.uid) {
+      throw new UnauthorizedException('User not found');
+    }
+    await this.clubMemberService.leaveClub(req.user.uid, clubId);
     return { success: true };
   }
 
@@ -90,9 +90,12 @@ export class ClubMemberController {
     const club = await this.clubRepository.findOne({ where: { id: parseInt(clubId, 10) } });
     if (!club) throw new NotFoundException('Club not found');
     const requester = await this.userRepository.findOne({ where: { firebaseUid: req.user.uid } });
-    if (!requester || club.superAdminId !== requester.id) throw new ForbiddenException('Only super admin can remove members');
+
+    if (!requester) {
+      throw new ForbiddenException('You are not authorized to perform this action');
+    }
     // Remove the member
-    await this.clubMemberService.removeMember(userId, clubId);
+    await this.clubMemberService.removeMember(req.user.uid, userId, clubId);
     return { success: true };
   }
 

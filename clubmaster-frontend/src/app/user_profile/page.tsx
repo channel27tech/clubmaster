@@ -131,6 +131,10 @@ export default function UserProfile() {
       if (profileData) {
         // Store the complete profile data
         setUserProfileData(profileData);
+        // Store backend user ID for bet result detection
+        if (typeof window !== 'undefined' && profileData.id) {
+          localStorage.setItem('backendUserId', profileData.id);
+        }
         console.log('Full profile data received:', {
           effective_photo_url: profileData.effective_photo_url,
           photoURL: profileData.photoURL,

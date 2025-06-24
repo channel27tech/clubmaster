@@ -130,7 +130,7 @@ const PlayPage: React.FC = () => {
 
       {/* Main content */}
       {!isMatchmaking && (
-        <div className="w-full max-w-[400px] bg-[#363B3B] min-h-screen sm:min-h-0 sm:h-auto sm:rounded-[16px] overflow-hidden shadow-lg">
+        <div className="w-full max-w-[400px] bg-[#363B3B] min-h-screen sm:min-h-0 sm:h-auto sm:rounded-[16px] overflow-hidden shadow-lg flex flex-col">
           {/* Header with back button and title */}
           <div className="w-full h-[60px] bg-[#363B3B] flex items-center px-[21px]">
             <Link href="/" className="flex items-center justify-center w-[28px] h-[28px] text-[#FAF3DD]">
@@ -138,8 +138,7 @@ const PlayPage: React.FC = () => {
             </Link>
             <h1 className="text-[22px] font-semibold mx-auto text-[#FAF3DD] font-poppins tracking-[0.25%]">Match Setup</h1>
           </div>
-          
-          <div className="flex flex-col flex-1 px-[21px] pt-[21px] pb-[21px]">
+          <div className="flex-1 flex flex-col px-[21px] pt-[21px] pb-[120px]"> {/* Add extra bottom padding for fixed buttons */}
             {/* Game mode selection and time buttons in a grid layout */}
             <div className="grid grid-cols-3 gap-x-[16px] mb-[21px]">
               {/* Column 1: Bullet */}
@@ -232,23 +231,22 @@ const PlayPage: React.FC = () => {
                 </div>
               </div>
             </div>
-            
-            {/* Action buttons - 16px gap between buttons */}
-            <div className="mt-auto flex flex-col gap-[16px]">
+          </div>
+          {/* Fixed action buttons at the bottom */}
+          <div className="fixed left-1/2 bottom-[21px] w-full max-w-[400px] -translate-x-1/2 px-[21px] z-50">
+            <div className="flex flex-col gap-[16px]">
               <button
                 onClick={handleStartMatchmaking}
                 className="h-[57px] bg-[#4A7C59] hover:bg-[#3d6549] rounded-[10px] font-semibold transition-colors w-full border-2 border-[#E9CB6B] text-[#FAF3DD] text-[18px] font-poppins"
               >
                 Play Random
               </button>
-              
               <button
                 onClick={() => console.log('Create link')}
                 className="h-[57px] bg-[#4C5454] hover:bg-[#3d4343] rounded-[10px] font-semibold transition-colors w-full text-[#FAF3DD] text-[18px] font-poppins"
               >
                 Create Link
               </button>
-              
               <button
                 onClick={() => router.push('/bet/match_setup_screen')}
                 className="h-[57px] bg-[#4C5454] hover:bg-[#3d4343] rounded-[10px] font-semibold transition-colors w-full text-[#FAF3DD] text-[18px] font-poppins"

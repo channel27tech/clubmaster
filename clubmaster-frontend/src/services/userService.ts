@@ -90,16 +90,11 @@ export const fetchUsers = async (currentUser: User | null): Promise<AppUser[]> =
       
       return filteredUsers;
     } catch (apiError) {
-      console.error('API Error:', apiError);
-      console.warn('Falling back to mock user data');
-      
       // Return filtered mock data if the API call fails
       // Note: Mock data filtering should still exclude current/guest users
       return filterMockUsers(currentUser);
     }
   } catch (error) {
-    console.error('Error in fetchUsers:', error);
-    
     // If user is not authenticated, return an empty array
     return [];
   }

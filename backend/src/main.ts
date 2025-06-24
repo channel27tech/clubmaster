@@ -14,6 +14,7 @@ import { IoAdapter } from '@nestjs/platform-socket.io';
 import { json, urlencoded } from 'express';
 import { join } from 'path';
 import { NestExpressApplication } from '@nestjs/platform-express';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
  
 // If your application needs crypto functionality, create a utility instead
 // Example: create a cryptoUtils file or use the crypto module directly where needed
@@ -70,12 +71,44 @@ async function bootstrap() {
   app.useStaticAssets(join(__dirname, '..', 'public', 'uploads'), {
     prefix: '/uploads/',
   });
+
+  // Setup Swagger documentation
+  const config = new DocumentBuilder()
+    .setTitle('Clubmaster API')
+    .setDescription('The Clubmaster API documentation')
+    .setVersion('1.0')
+    .addBearerAuth(
+      {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+        name: 'Authorization',
+        description: 'Enter your Firebase JWT token',
+        in: 'header',
+      },
+      'firebase-jwt', // This is the security scheme name used in @ApiBearerAuth() decorator
+    )
+    .addTag('auth', 'Authentication endpoints')
+    .addTag('friends', 'Friend management endpoints')
+    .addTag('notifications', 'Notification management endpoints')
+    .addTag('profile', 'User profile endpoints')
+    .addTag('game', 'Game management endpoints')
+    .addTag('club', 'Club management endpoints')
+    .build();
+  
+  const document = SwaggerModule.createDocument(app, config);
+  SwaggerModule.setup('api', app, document, {
+    swaggerOptions: {
+      persistAuthorization: true,
+    },
+  });
  
   // Try ports in sequence until one works
   const tryPort = async (port: number): Promise<number> => {
     try {
       await app.listen(port);
       logger.log(`Application is running on: http://localhost:${port}`);
+      logger.log(`API Documentation available at: http://localhost:${port}/api`);
       logger.log(`WebSocket endpoint available at: ws://localhost:${port}/chess`);
       return port;
     } catch (error) {

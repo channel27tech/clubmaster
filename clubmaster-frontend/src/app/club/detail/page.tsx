@@ -486,18 +486,17 @@ export default function ClubDetailPage() {
 
       {/* Join Button fixed at the bottom */}
       {showJoinButton && (
-        <div className="fixed bottom-14 left-1/2 -translate-x-1/2 w-full max-w-[400px] z-10 px-4">
-          <button 
-            onClick={handleJoin} 
-            className="w-full py-3 rounded-lg bg-[#4A7C59] text-[#FAF3DD] font-medium border border-[#E9CB6B]"
-            disabled={loading}
-          >
-            {loading ? 'Joining...' : 'Join'}
-          </button>
-          {apiError && <div className="text-red-400 text-center mt-2">{apiError}</div>}
-        </div>
-      )}
-
+  <div className="fixed bottom-18 left-1/2 -translate-x-1/2 w-full max-w-[400px] z-10 px-4">
+    {apiError && <div className="text-red-400 text-center mb-2">{apiError}</div>}
+    <button 
+      onClick={handleJoin} 
+      className="w-full py-3 rounded-lg bg-[#4A7C59] text-[#FAF3DD] font-medium border border-[#E9CB6B]"
+      disabled={loading}
+    >
+      {loading ? 'Joining...' : 'Join'}
+    </button>
+  </div>
+)}
       {/* Bottom Navigation */}
       <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[400px] z-10">
         <BottomNavigation />

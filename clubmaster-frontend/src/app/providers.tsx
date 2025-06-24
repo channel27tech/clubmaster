@@ -9,6 +9,8 @@ import { BetProvider } from '../context/BetContext';
 import { ActivityProvider } from '../context/ActivityContext';
 import RouteGuard from '../components/RouteGuard';
 import GlobalNotifications from './components/GlobalNotifications';
+import { Toaster } from 'react-hot-toast';
+import AuthTokenManager from '../components/AuthTokenManager';
 
 interface ProvidersProps {
   children: React.ReactNode;
@@ -79,6 +81,7 @@ export const Providers: React.FC<ProvidersProps> = ({ children }) => {
   
   return (
     <AuthProvider>
+      <AuthTokenManager />
       <RouteGuard>
         <SocketProvider>
           <NotificationsProvider>
@@ -87,6 +90,25 @@ export const Providers: React.FC<ProvidersProps> = ({ children }) => {
                 <BetProvider>
                   {children}
                   <GlobalNotifications />
+                  <Toaster 
+                    position="top-center"
+                    toastOptions={{
+                      style: {
+                        background: '#4A7C59',
+                        color: '#FAF3DD',
+                      },
+                      success: {
+                        duration: 3000,
+                      },
+                      error: {
+                        duration: 5000,
+                        style: {
+                          background: '#B92D22',
+                          color: '#FAF3DD',
+                        },
+                      },
+                    }}
+                  />
                 </BetProvider>
               </SoundProvider>
             </ActivityProvider>

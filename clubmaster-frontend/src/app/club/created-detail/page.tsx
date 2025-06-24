@@ -18,6 +18,7 @@ interface ClubData {
   points: number;
   credits: number;
   superAdminId: number;
+  rank: number;
 }
 
 interface ClubMember {
@@ -483,7 +484,7 @@ export default function ClubCreatedDetailPage() {
             <div className="mt-2 space-y-0.5">
               <div className="flex items-center">
                 <span className="text-[#E9CB6B] mr-1 text-sm">🥇</span>
-                <span className="text-[#D9D9D9] text-xs">New Club</span>
+                <span className="text-[#D9D9D9] text-xs">#{club.rank}</span>
               </div>
               <div className="flex items-center">
                 <span className="text-[#E9CB6B] mr-1 text-sm">👉</span>

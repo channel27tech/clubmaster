@@ -78,22 +78,19 @@ export class NotificationsService {
     type: NotificationType, 
     payload: Record<string, any>,
   ): Promise<Notification> {
-    // Extract senderUserId from payload if available
-    const { senderUserId, ...restPayload } = payload;
-    
-    // Create the notification DTO
+    console.log('[NotificationsService] Received payload in sendNotification:', payload);
+    const dataPayload = { ...payload };
+    const senderUserId = dataPayload.senderUserId;
+    delete dataPayload.senderUserId;
+
     const createNotificationDto: CreateNotificationDto = {
       recipientUserId: userId,
       type,
-      data: restPayload,
+      data: dataPayload,
+      senderUserId,
     };
 
-    // Add senderUserId if available
-    if (senderUserId) {
-      createNotificationDto.senderUserId = senderUserId;
-    }
-
-    // Use the existing createNotification method which now includes the emit functionality
+    console.log('[NotificationsService] DTO passed to createNotification:', createNotificationDto);
     return this.createNotification(createNotificationDto);
   }
 
@@ -110,6 +107,22 @@ export class NotificationsService {
     }
 
     notification.status = NotificationStatus.READ;
+    return this.notificationsRepository.save(notification);
+  }
+
+  /**
+   * Mark a notification as processed (after an action has been taken)
+   * @param id - Notification ID
+   * @returns The updated notification
+   */
+  async markAsProcessed(id: string): Promise<Notification> {
+    const notification = await this.notificationsRepository.findOne({ where: { id } });
+    
+    if (!notification) {
+      throw new NotFoundException(`Notification with ID ${id} not found`);
+    }
+
+    notification.status = NotificationStatus.PROCESSED;
     return this.notificationsRepository.save(notification);
   }
 

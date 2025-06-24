@@ -206,95 +206,56 @@ export class ClubMemberService {
     }
   }
   
-  // Remove member from club
-  async removeMember(userId: string, clubId: string): Promise<void> {
-    try {
-      // Convert clubId to number
-      const clubIdNum = parseInt(clubId, 10);
-      if (isNaN(clubIdNum)) {
-        throw new BadRequestException('Invalid club ID');
-      }
+  // Remove member from club - This is for an admin kicking a member
+  async removeMember(removerFirebaseUid: string, targetUserId: string, clubId: string): Promise<void> {
+    const clubIdNum = parseInt(clubId, 10);
+    if (isNaN(clubIdNum)) throw new BadRequestException('Invalid club ID');
 
-      // Check if the club exists
-      const club = await this.clubRepository.findOne({ where: { id: clubIdNum } });
-      if (!club) {
-        throw new NotFoundException(`Club with ID ${clubId} not found`);
-      }
-      
-      // Check if member is in club
-      const membership = await this.clubMemberRepository.findOne({
-        where: { userId, clubId: clubIdNum },
-      });
-      
-      if (!membership) {
-        throw new NotFoundException('User is not a member of this club');
-      }
-      
-      // Send notification to all club admins and super admin before removing
-      let isSuperAdminRemoval = false;
-      try {
-        // Get admin and super admin userIds
-        const admins = await this.clubMemberRepository.find({
-          where: [
-            { clubId: clubIdNum, role: 'admin' },
-            { clubId: clubIdNum, role: 'super_admin' }
-          ],
-        });
-        const adminIds = admins.map(admin => admin.userId);
-        // Check if the removal is performed by the super admin
-        if (club.superAdminId && adminIds.includes(club.superAdminId)) {
-          isSuperAdminRemoval = true;
-        }
-        if (adminIds.length > 0 && !isSuperAdminRemoval) {
-          // Fetch the username and avatar of the leaving member
-          const memberUser = await this.userRepository.findOne({ where: { id: userId } });
-          const memberName = memberUser?.displayName || 'Member';
-          const memberAvatar = memberUser?.photoURL || '/images/avatars/default.jpg';
-          await this.clubNotificationHelper.sendMemberLeftNotification(
-            adminIds,
-            userId,
-            memberName,
-            clubId,
-            club.name,
-            memberAvatar
-          );
-        }
-      } catch (error) {
-        this.logger.error(`Failed to send club member left notifications: ${error.message}`);
-        // Non-blocking - continue even if notifications fail
-      }
-      
-      // Remove membership
-      await this.clubMemberRepository.remove(membership);
+    const club = await this.clubRepository.findOne({ where: { id: clubIdNum } });
+    if (!club) throw new NotFoundException(`Club with ID ${clubId} not found`);
 
-      // Send notification to the removed member if removed by super admin
-      try {
-        const removedUser = await this.userRepository.findOne({ where: { id: userId } });
-        const superAdminUser = await this.userRepository.findOne({ where: { id: club.superAdminId } });
-        if (isSuperAdminRemoval) {
-          const baseUrl = process.env.BASE_URL || 'http://localhost:3001';
-          let clubLogoUrl = '';
-          if (club.logo) {
-            clubLogoUrl = club.logo.startsWith('http') ? club.logo : `${baseUrl}${club.logo}`;
-          }
-          await this.clubNotificationHelper.sendMemberRemovedNotification(
-            userId,
-            clubId,
-            club.name,
-            superAdminUser?.displayName || 'Super Admin',
-            clubLogoUrl
-          );
-        }
-      } catch (error) {
-        this.logger.error(`Failed to send member removed notification: ${error.message}`);
-        // Non-blocking - continue even if notifications fail
-      }
-    } catch (error) {
-      this.logger.error(`Error removing member from club: ${error.message}`);
-      throw error;
+    const removerUser = await this.userRepository.findOne({ where: { firebaseUid: removerFirebaseUid } });
+    if (!removerUser) throw new NotFoundException('Remover user not found');
+
+    const removerMembership = await this.clubMemberRepository.findOne({
+      where: { userId: removerUser.id, clubId: clubIdNum },
+    });
+    if (!removerMembership || !['admin', 'super_admin'].includes(removerMembership.role)) {
+      throw new ForbiddenException('You do not have permission to remove members from this club.');
     }
+
+    const targetMembership = await this.clubMemberRepository.findOne({
+      where: { userId: targetUserId, clubId: clubIdNum },
+    });
+    if (!targetMembership) throw new NotFoundException('Target user is not a member of this club.');
+
+    if (targetMembership.role === 'super_admin') {
+      throw new ForbiddenException('Cannot remove the super admin.');
+    }
+    
+    if (targetMembership.role === 'admin' && removerMembership.role !== 'super_admin') {
+        throw new ForbiddenException('Admins can only be removed by a super admin.');
+    }
+
+    // Send notification to the removed member
+    try {
+        const baseUrl = process.env.BASE_URL || 'http://localhost:3001';
+        const logoUrl = club.logo && !club.logo.startsWith('http') ? `${baseUrl}${club.logo}` : club.logo;
+        await this.clubNotificationHelper.sendMemberRemovedNotification(
+            targetUserId,
+            clubId,
+            club.name,
+            removerUser.id,
+            removerUser.displayName || 'an admin',
+            logoUrl
+        );
+    } catch (error) {
+      this.logger.error(`Failed to send member removed notification: ${error.message}`);
+    }
+
+    await this.clubMemberRepository.remove(targetMembership);
   }
-  
+
   // Update member role
   async updateMemberRole(adminUserId: string, targetUserId: string, clubId: string, newRole: string): Promise<ClubMember> {
     try {
@@ -355,7 +316,10 @@ export class ClubMemberService {
     if (isNaN(clubIdNum)) {
       throw new BadRequestException('Invalid club ID');
     }
-    const club = await this.clubRepository.findOne({ where: { id: clubIdNum } });
+    const club = await this.clubRepository.findOne({ 
+      where: { id: clubIdNum },
+      select: ['id', 'name', 'logo'],
+    });
     if (!club) {
       throw new NotFoundException(`Club with ID ${clubId} not found`);
     }
@@ -381,10 +345,15 @@ export class ClubMemberService {
 
     // Send notification to the new super admin
     try {
+      const baseUrl = process.env.BASE_URL || 'http://localhost:3001';
+      const logoUrl = club.logo && !club.logo.startsWith('http') ? `${baseUrl}${club.logo}` : club.logo;
+      this.logger.debug(`[ClubMemberService] Club logo URL for notification: ${logoUrl}`);
+
       await this.clubNotificationHelper.sendSuperAdminTransferNotification(
         newAdminId,
         currentAdminId,
-        club.name
+        club.name,
+        logoUrl,
       );
     } catch (error) {
       this.logger.error(`Failed to send super admin transfer notification: ${error.message}`);
@@ -393,29 +362,54 @@ export class ClubMemberService {
   }
 
   async removeMemberFromClub(clubId: string, userId: string): Promise<void> {
-    // For now, just call removeMember which already handles notifications and removal
-    await this.removeMember(userId, clubId);
+    // This method seems to be called without a remover context, so it's ambiguous.
+    // For now, it's safer to assume this is a "leave" action until its usage is clarified.
+    await this.leaveClub(userId, clubId);
   }
 
-  async leaveClub(userId: string, clubId: string): Promise<void> {
-    const club = await this.clubRepository.findOne({ where: { id: parseInt(clubId, 10) } });
-    if (!club) {
-      throw new NotFoundException('Club not found');
-    }
-    // Check if user is super admin
+  async leaveClub(userFirebaseUid: string, clubId: string): Promise<void> {
+    const clubIdNum = parseInt(clubId, 10);
+    if (isNaN(clubIdNum)) throw new BadRequestException('Invalid club ID');
+
+    const club = await this.clubRepository.findOne({ where: { id: clubIdNum } });
+    if (!club) throw new NotFoundException('Club not found');
+    
+    const user = await this.userRepository.findOne({ where: { firebaseUid: userFirebaseUid } });
+    if (!user) throw new NotFoundException('User not found');
+
     const member = await this.clubMemberRepository.findOne({
-      where: { userId, clubId: parseInt(clubId, 10) }
+      where: { userId: user.id, clubId: clubIdNum }
     });
-    if (!member) {
-      throw new NotFoundException('Member not found');
-    }
-    // Prevent super admin from leaving without transfer
+    if (!member) throw new NotFoundException('You are not a member of this club');
+    
     if (member.role === 'super_admin') {
       throw new ForbiddenException(
         'As a super admin, you must transfer your role to another member before leaving the club'
       );
     }
+
+    // Notify admins that a member has left
+    try {
+        const admins = await this.clubMemberRepository.find({
+            where: { clubId: clubIdNum, role: 'super_admin' },
+        });
+        const adminIds = admins.map(admin => admin.userId);
+
+        if (adminIds.length > 0) {
+            await this.clubNotificationHelper.sendMemberLeftNotification(
+                adminIds,
+                user.id,
+                user.displayName || 'A member',
+                clubId,
+                club.name,
+                user.photoURL || '/images/avatars/default.jpg',
+            );
+        }
+    } catch (error) {
+        this.logger.error(`Failed to send member left notification: ${error.message}`);
+    }
+
     // Remove the member
-    await this.removeMember(userId, clubId);
+    await this.clubMemberRepository.remove(member);
   }
 } 

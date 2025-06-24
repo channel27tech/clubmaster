@@ -1,9 +1,11 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useBet } from '@/context/BetContext';
 import BetChallengeNotification from './BetChallengeNotification';
 import { BetType } from '@/types/bet';
+import { MatchmakingManagerHandle } from './MatchmakingManager';
+import { useToast } from '@/hooks/useToast';
 
 /**
  * GlobalNotifications component that renders app-wide notifications
@@ -16,6 +18,8 @@ const GlobalNotifications: React.FC = () => {
     acceptBetChallenge, 
     rejectBetChallenge 
   } = useBet();
+  const matchmakingRef = useRef<MatchmakingManagerHandle>(null);
+  const toast = useToast();
 
   // Handler for the info button click - now handled within BetChallengeNotification
   const handleShowNotificationInfo = () => {
@@ -23,6 +27,22 @@ const GlobalNotifications: React.FC = () => {
     // The actual popup is handled within the BetChallengeNotification component
     console.log('[GlobalNotifications] Info button clicked for bet type:', 
       currentBetChallenge?.betType);
+  };
+
+  // Handle bet challenge acceptance with matchmaking integration
+  const handleAcceptBetChallenge = () => {
+    if (!currentBetChallenge) {
+      console.error('[GlobalNotifications] No current bet challenge to accept');
+      return;
+    }
+    
+    console.log('[GlobalNotifications] Accepting bet challenge:', currentBetChallenge.id);
+    
+    // Accept the bet challenge through the bet service
+    acceptBetChallenge(currentBetChallenge.id);
+    
+    // Matchmaking will be initiated by the server when both players have accepted
+    // The bet_game_ready event will be handled by the BetContext
   };
 
   // Add debug logging when the notification should be shown
@@ -39,7 +59,7 @@ const GlobalNotifications: React.FC = () => {
       {isShowingBetNotification && currentBetChallenge && (
         <BetChallengeNotification
           isOpen={isShowingBetNotification}
-          onAccept={() => acceptBetChallenge(currentBetChallenge.id)}
+          onAccept={handleAcceptBetChallenge}
           onReject={() => rejectBetChallenge(currentBetChallenge.id)}
           onShowInfo={handleShowNotificationInfo}
           challengerName={currentBetChallenge.challengerName || currentBetChallenge.senderUsername || "Unknown Player"}
