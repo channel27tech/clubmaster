@@ -2,8 +2,8 @@ import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards, Re
 import { NotificationsService } from './notifications.service';
 import { CreateNotificationDto } from './dto/create-notification.dto';
 import { NotificationQueryDto } from './dto/notification-query.dto';
-import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
-// import { FirebaseAuthGuard } from '../firebase/firebase-auth.guard';
+// import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
+import { FirebaseAuthGuard } from '../firebase/firebase-auth.guard';
 import { Notification } from './entities/notification.entity';
 import { UsersService } from '../users/users.service';
 

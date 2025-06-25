@@ -84,12 +84,15 @@ export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ child
         }
         
         // Create socket connection
-        notificationsSocket = io(API_URL, {
+        notificationsSocket = io(`${API_URL}/notifications`, {
           path: '/socket.io', // Using default Socket.IO path
           reconnection: true,
           reconnectionAttempts: 5,
           reconnectionDelay: 1000,
           transports: ['websocket'],
+          query: {
+            userId: user.uid // Add the userId as a query parameter
+          },
           auth: {
             token // Send token in the initial connection
           }
@@ -113,15 +116,15 @@ export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ child
         });
 
         // Listen for new notifications
-        notificationsSocket.on('notification', (notification: any) => {
+        notificationsSocket.on('new_notification', (notification: any) => {
           console.log('Received new notification:', notification);
           // Transform the notification to match our interface
           const newNotification: Notification = {
             id: notification.id,
             type: notification.type,
-            message: notification.data?.message || '',
+            message: notification.message || notification.data?.message || '',
             data: notification.data || {},
-            timestamp: new Date(notification.createdAt || Date.now()),
+            timestamp: new Date(notification.timestamp || Date.now()),
             senderUserId: notification.senderUserId,
             read: false
           };
