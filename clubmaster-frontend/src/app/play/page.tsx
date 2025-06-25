@@ -8,6 +8,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import Head from "next/head";
+import { useAuth } from '../../context/AuthContext';
 
 // Define the window interface to properly type the window extensions
 interface ExtendedWindow extends Window {
@@ -35,6 +36,7 @@ const PlayPage: React.FC = () => {
   const [playAs, setPlayAs] = useState<string>('white');
   const [isMatchmaking, setIsMatchmaking] = useState<boolean>(false);
   const router = useRouter();
+  const { isGuest } = useAuth();
   
   // Function to get time value based on game mode
   const getTimeFromGameMode = (mode: string): number => {
@@ -133,9 +135,19 @@ const PlayPage: React.FC = () => {
         <div className="w-full max-w-[400px] bg-[#363B3B] min-h-screen sm:min-h-0 sm:h-auto sm:rounded-[16px] overflow-hidden shadow-lg flex flex-col">
           {/* Header with back button and title */}
           <div className="w-full h-[60px] bg-[#363B3B] flex items-center px-[21px]">
-            <Link href="/" className="flex items-center justify-center w-[28px] h-[28px] text-[#FAF3DD]">
+            <button
+              type="button"
+              className="flex items-center justify-center w-[28px] h-[28px] text-[#FAF3DD]"
+              onClick={() => {
+                if (isGuest) {
+                  router.push('/login');
+                } else {
+                  router.push('/');
+                }
+              }}
+            >
               <FaArrowLeft />
-            </Link>
+            </button>
             <h1 className="text-[22px] font-semibold mx-auto text-[#FAF3DD] font-poppins tracking-[0.25%]">Match Setup</h1>
           </div>
           <div className="flex-1 flex flex-col px-[21px] pt-[21px] pb-[120px]"> {/* Add extra bottom padding for fixed buttons */}
@@ -247,12 +259,15 @@ const PlayPage: React.FC = () => {
               >
                 Create Link
               </button>
-              <button
-                onClick={() => router.push('/bet/match_setup_screen')}
-                className="h-[57px] bg-[#4C5454] hover:bg-[#3d4343] rounded-[10px] font-semibold transition-colors w-full text-[#FAF3DD] text-[18px] font-poppins"
-              >
-                Create Bet Challenge
-              </button>
+              {/* Only show Create Bet Challenge if not guest */}
+              {!isGuest && (
+                <button
+                  onClick={() => router.push('/bet/match_setup_screen')}
+                  className="h-[57px] bg-[#4C5454] hover:bg-[#3d4343] rounded-[10px] font-semibold transition-colors w-full text-[#FAF3DD] text-[18px] font-poppins"
+                >
+                  Create Bet Challenge
+                </button>
+              )}
             </div>
           </div>
         </div>

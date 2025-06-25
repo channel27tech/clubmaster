@@ -17,7 +17,7 @@ import {
   BetStatus,
   BetType,
 } from './bet.model';
-import { SocketAuthGuard } from '../auth/socket-auth.guard';
+import { SocketAuthGuard } from '../firebase/socket-auth.guard';
 import { MatchmakingService } from '../game/matchmaking.service';
 import { UsersService } from '../users/users.service';
 import { Logger } from '@nestjs/common';

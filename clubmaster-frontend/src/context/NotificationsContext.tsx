@@ -43,7 +43,6 @@ export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ child
 
   // Create and connect to the socket
   useEffect(() => {
-    // Check if user is authenticated and has<<<<<<< HEAD
     // Check if user is authenticated and has an ID property
     if (!user || !user.uid) {
       return;
@@ -53,8 +52,13 @@ export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ child
 
     const connectSocket = async () => {
       try {
-        // Get Firebase token
-        const token = await user.getIdToken();
+        // Get token: use guest token for anonymous users
+        let token: string;
+        if (user.isAnonymous) {
+          token = `guest_${user.uid}`;
+        } else {
+          token = await user.getIdToken();
+        }
         
         // Create socket connection
         notificationsSocket = io('http://localhost:3001', {
@@ -72,7 +76,7 @@ export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ child
         notificationsSocket.on('connect', () => {
           console.log('Connected to notifications socket');
           
-          // Authenticate with the socket server using Firebase token
+          // Authenticate with the socket server using token
           notificationsSocket?.emit('authenticate', { token });
           console.log('Notifications socket connection established:', notificationsSocket);
         });
@@ -125,7 +129,12 @@ export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ child
     const reconnectInterval = setInterval(async () => {
       if (socket && user) {
         try {
-          const token = await user.getIdToken(true); // Force refresh token
+          let token: string;
+          if (user.isAnonymous) {
+            token = `guest_${user.uid}`;
+          } else {
+            token = await user.getIdToken(true); // Force refresh token
+          }
           socket.emit('authenticate', { token });
         } catch (error) {
           console.error('Failed to refresh authentication token:', error);

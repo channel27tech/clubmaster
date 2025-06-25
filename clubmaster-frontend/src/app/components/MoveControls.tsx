@@ -70,7 +70,7 @@ const MoveControls: React.FC<MoveControlsProps> = ({
   moveHistory,
   whitePlayer,
   blackPlayer,
-  playerColor
+  playerColor,
 }) => {
   // Socket context for game actions
   const { socket } = useSocket();
@@ -407,9 +407,10 @@ const MoveControls: React.FC<MoveControlsProps> = ({
         <button 
           className={`flex flex-col items-center ${!canGoBack ? 'opacity-50' : ''}`}
           onClick={() => {
-            onBack();
-            // Play button click sound only for back button
-            soundEnabled && playSound('BUTTON_CLICK', soundEnabled, 1.0, 'Back');
+            // First play the sound
+            if (soundEnabled) playSound('BUTTON_CLICK', soundEnabled, 1.0, 'Back');
+            // Then trigger the navigation with a slight delay
+            requestAnimationFrame(() => onBack());
           }}
           disabled={!canGoBack}
         >
@@ -423,9 +424,10 @@ const MoveControls: React.FC<MoveControlsProps> = ({
         <button 
           className={`flex flex-col items-center ${!canGoForward ? 'opacity-50' : ''}`}
           onClick={() => {
-            onForward();
-            // Play button click sound only for forward button
-            soundEnabled && playSound('BUTTON_CLICK', soundEnabled, 1.0, 'Forward');
+            // First play the sound
+            if (soundEnabled) playSound('BUTTON_CLICK', soundEnabled, 1.0, 'Forward');
+            // Then trigger the navigation with a slight delay
+            requestAnimationFrame(() => onForward());
           }}
           disabled={!canGoForward}
         >

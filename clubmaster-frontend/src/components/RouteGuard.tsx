@@ -20,6 +20,8 @@ const publicPaths = [
 // Paths that guest users can access (in addition to public paths)
 const guestAllowedPaths = [
   '/play',
+  '/play/game', // Allow access to game pages
+  '/matchmaking', // Allow access to matchmaking
   // Add any other paths that guest users should be able to access
 ];
 
@@ -42,6 +44,12 @@ export default function RouteGuard({ children }: RouteGuardProps) {
       pathname 
     });
     
+    // Always allow access to /login and its subpages
+    if (pathname && pathname.startsWith('/login')) {
+      setAuthorized(true);
+      setCheckingAuth(false);
+      return;
+    }
     // Authentication check function
     const authCheck = () => {
       // Check if we're on a public path (anyone can access)

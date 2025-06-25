@@ -17,7 +17,7 @@ export class GameController {
   @UseGuards(FirebaseAuthGuard)
   async getGamePlayers(@Param('id') id: string) {
     this.logger.log(`Received request for game players with ID: ${id}`);
-   
+    
     // Use the customId-aware lookup
     const game = await this.gameRepositoryService.findOneByCustomId(id);
     if (!game) {

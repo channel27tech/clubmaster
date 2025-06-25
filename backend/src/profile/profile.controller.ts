@@ -1,34 +1,8 @@
-import { Controller, Get, Post, Body, Param, Logger, NotFoundException, HttpException, HttpStatus, ConflictException, BadRequestException, UseGuards, Headers, Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Logger, NotFoundException, HttpException, HttpStatus, ConflictException, BadRequestException, UseGuards, Headers } from '@nestjs/common';
 import { Response } from 'express';
 import { ProfileDataService, UpdateProfileDto } from './profile-data.service';
 import * as admin from 'firebase-admin';
-
-// Firebase Auth Guard
-@Injectable()
-class FirebaseAuthGuard implements CanActivate {
-  private readonly logger = new Logger(FirebaseAuthGuard.name);
-
-  async canActivate(context: ExecutionContext): Promise<boolean> {
-    const request = context.switchToHttp().getRequest();
-    const authorization = request.headers.authorization;
-
-    if (!authorization || !authorization.startsWith('Bearer ')) {
-      this.logger.warn('Missing or invalid authorization header');
-      return false;
-    }
-
-    const idToken = authorization.split('Bearer ')[1];
-    try {
-      const decodedToken = await admin.auth().verifyIdToken(idToken);
-      request.user = decodedToken;
-      this.logger.log(`Successfully verified Firebase token for UID: ${decodedToken.uid}`);
-      return true;
-    } catch (error) {
-      this.logger.error(`Invalid Firebase token: ${error.message}`);
-      return false;
-    }
-  }
-}
+import { FirebaseAuthGuard } from '../firebase/firebase-auth.guard';
 
 @Controller('profile')
 export class ProfileController {

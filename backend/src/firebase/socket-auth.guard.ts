@@ -18,7 +18,7 @@ export class SocketAuthGuard implements CanActivate {
 
       // Check if the socket has already been authenticated via the 'authenticate' event
       if (client.data?.isAuthenticated) {
-        this.logger.log(`✅ Socket ${client.id} already authenticated.`);
+        this.logger.log(`Γ£à Socket ${client.id} already authenticated.`);
         return true; // Socket is authenticated, allow access
       }
 
@@ -31,13 +31,13 @@ export class SocketAuthGuard implements CanActivate {
         return false; // Block access to protected events, socket needs to authenticate
       }
 
-      this.logger.log(`🔑 Socket ${client.id}: Attempting to verify Firebase token from handshake...`);
+      this.logger.log(`≡ƒöæ Socket ${client.id}: Attempting to verify Firebase token from handshake...`);
 
       // Verify the token using Firebase Admin SDK (if found in handshake)
       const decodedToken = await admin.auth().verifyIdToken(token);
       
       // Log successful verification
-      this.logger.log(`✅ Socket ${client.id}: Handshake token verified for user ID: ${decodedToken.uid.substring(0, 6)}...`);
+      this.logger.log(`Γ£à Socket ${client.id}: Handshake token verified for user ID: ${decodedToken.uid.substring(0, 6)}...`);
       
       // Mark socket as authenticated and attach user data
       client.data = {
@@ -55,7 +55,7 @@ export class SocketAuthGuard implements CanActivate {
 
     } catch (error) {
       // Log specific error but don't throw here, let it be handled by event handler or lack of auth flag
-      this.logger.error(`❌ Socket ${context.switchToWs().getClient().id}: Handshake authentication failed: ${error.message}`);
+      this.logger.error(`Γ¥î Socket ${context.switchToWs().getClient().id}: Handshake authentication failed: ${error.message}`);
       // Return false to block access to protected events
       return false;
     }

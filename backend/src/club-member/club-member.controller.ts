@@ -1,7 +1,7 @@
 import { Controller, Post, Body, Req, UsePipes, ValidationPipe, Get, Query, UseGuards, UnauthorizedException } from '@nestjs/common';
 import { ClubMemberService } from './club-member.service';
 import { JoinClubDto } from './dto/join-club.dto';
-import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
+import { FirebaseAuthGuard } from '../firebase/firebase-auth.guard';
 
 // Extend the Express Request interface to include our firebaseUser property
 interface FirebaseRequest extends Request {
