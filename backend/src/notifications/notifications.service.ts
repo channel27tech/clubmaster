@@ -23,6 +23,24 @@ export class NotificationsService {
    * @returns The created notification
    */
   async createNotification(createNotificationDto: CreateNotificationDto): Promise<Notification> {
+    // Duplicate prevention for CLUB_MEMBER_LEFT
+    if (createNotificationDto.type === NotificationType.CLUB_MEMBER_LEFT) {
+      const existing = await this.notificationsRepository.findOne({
+        where: {
+          recipientUserId: createNotificationDto.recipientUserId,
+          type: createNotificationDto.type,
+          status: NotificationStatus.UNREAD,
+          // Check for same clubId and memberName in data
+          data: {
+            clubId: createNotificationDto.data?.clubId,
+            memberName: createNotificationDto.data?.memberName,
+          },
+        },
+      });
+      if (existing) {
+        return existing;
+      }
+    }
     const notification = this.notificationsRepository.create({
       recipientUserId: createNotificationDto.recipientUserId,
       senderUserId: createNotificationDto.senderUserId || null,
@@ -60,22 +78,19 @@ export class NotificationsService {
     type: NotificationType, 
     payload: Record<string, any>,
   ): Promise<Notification> {
-    // Extract senderUserId from payload if available
-    const { senderUserId, ...restPayload } = payload;
-    
-    // Create the notification DTO
+    console.log('[NotificationsService] Received payload in sendNotification:', payload);
+    const dataPayload = { ...payload };
+    const senderUserId = dataPayload.senderUserId;
+    delete dataPayload.senderUserId;
+
     const createNotificationDto: CreateNotificationDto = {
       recipientUserId: userId,
       type,
-      data: restPayload,
+      data: dataPayload,
+      senderUserId,
     };
 
-    // Add senderUserId if available
-    if (senderUserId) {
-      createNotificationDto.senderUserId = senderUserId;
-    }
-
-    // Use the existing createNotification method which now includes the emit functionality
+    console.log('[NotificationsService] DTO passed to createNotification:', createNotificationDto);
     return this.createNotification(createNotificationDto);
   }
 

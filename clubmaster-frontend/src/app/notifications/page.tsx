@@ -11,7 +11,7 @@ import { useAuth } from '../../context/AuthContext';
 // Notification data types based on the NotificationsContext
 interface NotificationData {
   id: string;
-  type: 'GAME_INVITE' | 'FRIEND_REQUEST' | 'CLUB_MEMBER_JOINED' | 'CLUB_ROLE_UPDATE' | 'TOURNAMENT_ALERT' | 'TOURNAMENT_REMINDER';
+  type: 'GAME_INVITE' | 'FRIEND_REQUEST' | 'CLUB_MEMBER_JOINED' | 'CLUB_ROLE_UPDATE' | 'TOURNAMENT_ALERT' | 'TOURNAMENT_REMINDER' | 'CLUB_MEMBER_LEFT' | 'CLUB_MEMBER_REMOVED' | 'SUPER_ADMIN_TRANSFER_REQUEST' | 'SUPER_ADMIN_TRANSFER';
   title: string;
   message: string;
   avatarUrl: string;
@@ -56,27 +56,35 @@ export default function NotificationPage() {
       }
       
       try {
-        // Fetch from API - only get UNREAD notifications by default
-        const result = await notificationService.fetchNotifications(50, 0, 'UNREAD');
+        // Fetch ALL notifications regardless of status
+        const result = await notificationService.fetchNotifications(50, 0, 'ALL');
         
         console.log('Received notifications from API:', result.notifications);
+        console.log('Total notifications count:', result.total);
         
-        // Map API data to the format we need
-        const mappedNotifications = result.notifications.map(n => {
+        if (result.notifications.length === 0) {
+          console.log('No notifications returned from the API');
+          setNotifications([]);
+          setIsLoading(false);
+          return;
+        }
+        
+          // Map API data to the format we need
+          const mappedNotifications = result.notifications.map(n => {
           console.log(`Processing notification ${n.id} of type ${n.type}:`, n);
           console.log(`Complete raw notification data:`, JSON.stringify(n));
           console.log(`Notification data keys:`, Object.keys(n.data || {}));
           
-          // Determine actions based on notification type
-          let actions: ('accept' | 'reject' | 'view')[] = ['view'];
-          
-          if (n.type === 'GAME_INVITE' || n.type === 'FRIEND_REQUEST') {
-            actions = ['accept', 'reject'];
-          } else if (n.type === 'TOURNAMENT_ALERT' && n.data.requiresAction) {
-            actions = ['accept', 'reject'];
-          }
-          
-          // Get avatar URL based on the notification type
+            // Determine actions based on notification type
+            let actions: ('accept' | 'reject' | 'view')[] = ['view'];
+            
+            if (n.type === 'GAME_INVITE' || n.type === 'FRIEND_REQUEST') {
+              actions = ['accept', 'reject'];
+            } else if (n.type === 'TOURNAMENT_ALERT' && n.data.requiresAction) {
+              actions = ['accept', 'reject'];
+            }
+            
+            // Get avatar URL based on the notification type
           let avatarUrl = '/white-profile.png';
           let title = '';
           let message = '';
@@ -98,7 +106,7 @@ export default function NotificationPage() {
             // Find the first field that has a value
             let foundUsername = false;
             for (const field of usernamePriorityFields) {
-              if (n.data[field]) {
+              if (n.data && n.data[field]) {
                 title = n.data[field];
                 console.log(`Using ${field} field for username: ${title}`);
                 foundUsername = true;
@@ -110,7 +118,7 @@ export default function NotificationPage() {
             if (!foundUsername) {
               title = 'Someone';
               console.log(`No username fields found, using default: ${title}`);
-              console.log('Available fields:', Object.keys(n.data));
+              console.log('Available fields:', Object.keys(n.data || {}));
             }
             
             // For avatar, use the following priority order:
@@ -125,7 +133,7 @@ export default function NotificationPage() {
             // Find the first field that has a value
             let foundAvatar = false;
             for (const field of avatarPriorityFields) {
-              if (n.data[field]) {
+              if (n.data && n.data[field]) {
                 avatarUrl = n.data[field];
                 console.log(`Using ${field} field for avatar: ${avatarUrl.substring(0, 30)}...`);
                 foundAvatar = true;
@@ -137,7 +145,7 @@ export default function NotificationPage() {
             if (!foundAvatar) {
               avatarUrl = '/white-profile.png';
               console.log(`No avatar fields found, using default avatar`);
-              console.log('Available fields:', Object.keys(n.data));
+              console.log('Available fields:', Object.keys(n.data || {}));
             }
             
             message = 'sent you a friend request';
@@ -158,7 +166,7 @@ export default function NotificationPage() {
             // Find the first field that has a value
             let foundUsername = false;
             for (const field of usernamePriorityFields) {
-              if (n.data[field]) {
+              if (n.data && n.data[field]) {
                 title = n.data[field];
                 console.log(`Using ${field} field for username: ${title}`);
                 foundUsername = true;
@@ -170,7 +178,7 @@ export default function NotificationPage() {
             if (!foundUsername) {
               title = 'Someone';
               console.log(`No username fields found, using default: ${title}`);
-              console.log('Available fields:', Object.keys(n.data));
+              console.log('Available fields:', Object.keys(n.data || {}));
             }
             
             // For avatar, use the following priority order:
@@ -185,7 +193,7 @@ export default function NotificationPage() {
             // Find the first field that has a value
             let foundAvatar = false;
             for (const field of avatarPriorityFields) {
-              if (n.data[field]) {
+              if (n.data && n.data[field]) {
                 avatarUrl = n.data[field];
                 console.log(`Using ${field} field for avatar: ${avatarUrl.substring(0, 30)}...`);
                 foundAvatar = true;
@@ -197,40 +205,76 @@ export default function NotificationPage() {
             if (!foundAvatar) {
               avatarUrl = '/white-profile.png';
               console.log(`No avatar fields found, using default avatar`);
-              console.log('Available fields:', Object.keys(n.data));
+              console.log('Available fields:', Object.keys(n.data || {}));
             }
             
             message = 'invited you to play a game';
-          } else if (n.type.includes('CLUB')) {
-            avatarUrl = n.data.clubLogo || '/images/club-logos/clubmaster-gold.svg';
-            title = n.data.title || n.data.clubName || 'Club Notification';
-            message = n.message || n.data.message || '';
-          } else if (n.type.includes('TOURNAMENT')) {
-            avatarUrl = n.data.tournamentLogo || '/images/club-logos/kings-gambit.svg';
-            title = n.data.title || n.data.tournamentName || 'Tournament Notification';
-            message = n.message || n.data.message || '';
+          } else if (n.type && (n.type.includes('CLUB') || n.type.includes('ADMIN'))) {
+            console.log('Club notification data:', n.data);
+            
+            // Handle club-related notifications
+            if (n.data) {
+              avatarUrl = n.data.clubLogo || '/images/club-logos/clubmaster-gold.svg';
+              title = n.data.title || n.data.clubName || 'Club Notification';
+              message = n.message || (n.data && n.data.message) || '';
+              
+              // Special handling for club member notifications
+              if (n.type === 'CLUB_MEMBER_REMOVED') {
+                avatarUrl = n.data.clubLogo || '/images/avatars/default.jpg';
+                title = n.data.clubName || 'Club';
+                if (n.data.removedByName) {
+                  message = `You have been removed from the club ${n.data.clubName} by ${n.data.removedByName}.`;
+                } else {
+                  message = n.data.message || `You have been removed from the club ${n.data.clubName}.`;
+                }
+                console.log('Processed CLUB_MEMBER_REMOVED notification:', { title, message });
+              } else if (n.type === 'CLUB_MEMBER_LEFT') {
+                title = n.data.memberUsername || 'A member';
+                message = n.data.message || `${title} has left your club ${n.data.clubName}.`;
+                avatarUrl = n.data.memberAvatar || '/images/avatars/default.jpg';
+                console.log('Processed CLUB_MEMBER_LEFT notification:', { title, message });
+              } else if (n.type === 'CLUB_MEMBER_JOINED') {
+                avatarUrl = n.data.memberAvatar || '/images/avatars/default.jpg';
+                title = n.data.memberUsername || n.data.memberName || 'New member';
+                message = `${title} has joined the club ${n.data.clubName}.`;
+                console.log('Processed CLUB_MEMBER_JOINED notification:', { title, message });
+              } else if (n.type === 'SUPER_ADMIN_TRANSFER') {
+                title = n.data.clubName || 'Club'; // Use clubName for the title
+                message = n.data.message || `You are the new super admin of the club ${title}`;
+                avatarUrl = n.data.clubLogo || '/images/club-logos/clubmaster-gold.svg'; // Use clubLogo for the avatar
+                console.log('Processed SUPER_ADMIN_TRANSFER notification:', { title, message });
+              }
+            } else {
+              console.warn(`Club notification ${n.id} has no data object`);
+              title = 'Club Notification';
+              message = n.message || 'You have a new club notification';
+            }
+          } else if (n.type && n.type.includes('TOURNAMENT')) {
+            avatarUrl = (n.data && n.data.tournamentLogo) || '/images/club-logos/kings-gambit.svg';
+            title = (n.data && (n.data.title || n.data.tournamentName)) || 'Tournament Notification';
+            message = n.message || (n.data && n.data.message) || '';
           } else {
             // Default for other notification types
-            title = n.data.title || n.type;
-            message = n.message || n.data.message || '';
+            title = (n.data && n.data.title) || n.type || 'Notification';
+            message = n.message || (n.data && n.data.message) || '';
           }
           
           const mappedNotification = {
-            id: n.id,
-            type: n.type as any,
+              id: n.id,
+              type: n.type as any,
             title: title,
             message: message,
-            avatarUrl,
-            timestamp: n.timestamp,
-            actions,
-            read: n.read
-          };
+              avatarUrl,
+            timestamp: n.timestamp || new Date(),
+              actions,
+            read: n.read || false
+            };
           
           console.log('Mapped notification:', mappedNotification);
           return mappedNotification;
-        });
-        
-        setNotifications(mappedNotifications);
+          });
+          
+          setNotifications(mappedNotifications);
       } catch (error: any) {
         console.error("Error fetching notifications:", error);
         
@@ -243,10 +287,9 @@ export default function NotificationPage() {
           setError("Unable to load notifications. Please try again later.");
         }
       } finally {
-        setIsLoading(false);
+      setIsLoading(false);
       }
     };
-
     fetchNotificationsData();
   }, [user]);
 
@@ -270,7 +313,7 @@ export default function NotificationPage() {
       );
       
       // Handle navigation based on notification type
-      if (notification.type === 'CLUB_ROLE_UPDATE' || notification.type === 'CLUB_MEMBER_JOINED') {
+      if (notification.type === 'CLUB_ROLE_UPDATE' || notification.type === 'CLUB_MEMBER_JOINED' || notification.type === 'SUPER_ADMIN_TRANSFER') {
         router.push('/club/detail');
       } else if (notification.type.includes('TOURNAMENT')) {
         router.push('/tournament');
@@ -556,7 +599,7 @@ export default function NotificationPage() {
               {notification.actions.includes('reject') && (
                 <button 
                   onClick={() => handleAction(notification.id, 'reject')}
-                  className="bg-[#979797] text-[#FAF3DD] text-sm font-medium px-4 py-2 rounded-md hover:bg-[#878787] transition-colors"
+                  className="bg-[#E57373] text-[#FAF3DD] text-sm font-medium px-4 py-2 rounded-md hover:bg-[#D32F2F] transition-colors"
                 >
                   Reject
                 </button>

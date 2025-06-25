@@ -41,20 +41,23 @@ export class ClubNotificationHelper {
     memberUsername: string,
     clubId: string,
     clubName: string,
+    memberAvatar: string,
   ): Promise<void> {
+    const message = `${memberUsername} has left your club ${clubName}.`;
     const promises = adminUserIds.map((adminId) =>
       this.notificationsService.sendNotification(
         adminId,
         NotificationType.CLUB_MEMBER_LEFT,
         {
+          message,
           senderUserId: memberUserId,
           clubId,
           clubName,
           memberUsername,
+          memberAvatar,
         },
       ),
     );
-
     await Promise.all(promises);
   }
 
@@ -81,21 +84,47 @@ export class ClubNotificationHelper {
   }
 
   /**
-   * Notify a user when they are made super admin of a club
+   * Send a notification for super admin transfer events (request/accept/decline)
    */
   async sendSuperAdminTransferNotification(
-    userId: string,
-    previousAdminId: string,
+    recipientUserId: string,
+    senderUserId: string,
+    clubName: string,
+    clubLogo: string,
+  ): Promise<void> {
+    const message = `You are the new super admin of the club ${clubName}`;
+    const payload = { senderUserId, clubName, message, clubLogo };
+    console.log('[ClubNotificationHelper] Payload to be sent:', payload);
+
+    await this.notificationsService.sendNotification(
+      recipientUserId,
+      NotificationType.SUPER_ADMIN_TRANSFER,
+      payload,
+    );
+  }
+
+  /**
+   * Notify a member when they have been removed from a club
+   */
+  async sendMemberRemovedNotification(
+    recipientUserId: string,
     clubId: string,
     clubName: string,
+    removedByUserId: string,
+    removedByName: string,
+    clubLogo: string,
   ): Promise<void> {
+    const message = `You have been removed from the club ${clubName} by ${removedByName}.`;
     await this.notificationsService.sendNotification(
-      userId,
-      NotificationType.SUPER_ADMIN_TRANSFER,
+      recipientUserId,
+      NotificationType.CLUB_MEMBER_REMOVED,
       {
-        senderUserId: previousAdminId,
+        message,
         clubId,
         clubName,
+        removedByUserId,
+        removedByName,
+        clubLogo,
       },
     );
   }
