@@ -379,7 +379,7 @@ export class MatchmakingService {
         userId: whitePlayer.userId,
         rating: whitePlayer.rating,
         username: whitePlayer.username || `Player-${whitePlayerSocketId.substring(0, 5)}`,
-        isGuest: whitePlayer.isGuest || true,
+        isGuest: whitePlayer.isGuest !== false,
         connected: true,
         gamesPlayed: whitePlayer.gamesPlayed || 0,
       };
@@ -389,7 +389,7 @@ export class MatchmakingService {
         userId: blackPlayer.userId,
         rating: blackPlayer.rating,
         username: blackPlayer.username || `Player-${blackPlayerSocketId.substring(0, 5)}`,
-        isGuest: blackPlayer.isGuest || true,
+        isGuest: blackPlayer.isGuest !== false,
         connected: true,
         gamesPlayed: blackPlayer.gamesPlayed || 0,
       };

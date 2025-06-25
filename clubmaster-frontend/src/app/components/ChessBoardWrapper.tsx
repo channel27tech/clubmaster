@@ -6,20 +6,20 @@ import PlayerInfo from './PlayerInfo';
 import MoveControls from './MoveControls';
 import GameClock from './GameClock';
 import GameResultScreen from './GameResultScreen';
-import { MoveHistoryState } from '../utils/moveHistory';
-import { getChessEngine, makeMove, resetChessEngine, setChessPosition, getGameStatus, getCurrentBoardState, isThreefoldRepetition, getFen, clearChessState } from '../utils/chessEngine';
-import { useSound } from '../../context/SoundContext';
-import { useSocket } from '../../context/SocketContext';
-import { playSound, preloadSoundEffects } from '../utils/soundEffects';
-import { CapturedPiece, GameResultType, GameEndReason, GameResult, PlayerData } from '../utils/types';
+import WaitingScreen from './WaitingScreen';
 import DisconnectionNotification from './DisconnectionNotification';
-import { fetchGamePlayers } from '../api/gameApi';
-import { Chess } from 'chess.js';
-import { onBetResult, offBetResult } from '@/services/betService';
-import { saveBetResult } from '@/services/betResultService';
-import { useBet } from '../../context/BetContext';
+import { MoveHistoryState, BoardState } from '../utils/moveHistory';
+import { getChessEngine, makeMove, resetChessEngine, setChessPosition, getGameStatus, getCurrentBoardState, isThreefoldRepetition, getFen, clearChessState } from '../utils/chessEngine';
+import { useSocket } from '../../context/SocketContext';
+import { useSound } from '../../context/SoundContext';
 import { useAuth } from '../../context/AuthContext';
-import { BetResult } from '@/types/bet';
+import { useBet } from '../../context/BetContext';
+import { BetResult } from '../../types/bet';
+import { playSound, preloadSoundEffects } from '../utils/soundEffects';
+import { fetchGamePlayers } from '../api/gameApi';
+import { CapturedPiece, GameResultType, GameEndReason, GameResult, PlayerData } from '../utils/types';
+import { saveBetResult } from '@/services/betResultService';
+import useChessHistory from '../hooks/useChessHistory';
 
 // Use dynamic import in a client component
 const ChessBoard = dynamic(() => import('./ChessBoard'), {
@@ -76,6 +76,33 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [gameRoomId, setGameRoomId] = useState<string>(gameId);
   
+  // Helper function to create GameResult objects with proper typing
+  const createGameResult = (
+    result: GameResultType,
+    reason: GameEndReason,
+    playerName: string,
+    opponentName: string,
+    playerRating: number | undefined,
+    opponentRating: number | undefined,
+    playerRatingChange: number,
+    opponentRatingChange: number,
+    playerPhotoURL?: string | null,
+    opponentPhotoURL?: string | null
+  ): GameResult => {
+    return {
+      result,
+      reason,
+      playerName,
+      opponentName,
+      playerRating: playerRating || 0, // Provide default value
+      opponentRating: opponentRating || 0, // Provide default value
+      playerRatingChange,
+      opponentRatingChange,
+      playerPhotoURL: playerPhotoURL || null,
+      opponentPhotoURL: opponentPhotoURL || null
+    };
+  };
+  
   // Router for navigation
   const router = useRouter();
   
@@ -93,7 +120,21 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     soundEnabledRef.current = soundEnabled;
   }, [soundEnabled]);
   
-  const [moveHistory, setMoveHistory] = useState<MoveHistoryState | null>(null);
+  // Use the chess history hook
+  const {
+    moveHistory,
+    boardState,
+    lastMove,
+    isViewingHistory,
+    updateMoveHistory,
+    updateBoardState,
+    setLastMove,
+    appendMove,
+    goBack,
+    goForward,
+    exitHistoryMode
+  } = useChessHistory();
+  
   const [sanMoveList, setSanMoveList] = useState<string[]>([]);
   
   // Captured pieces state
@@ -131,19 +172,6 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     // Remove noisy log
     // console.log('Black player data updated:', blackPlayer);
   }, [blackPlayer]);
-  
-  // Board state
-  const [boardState, setBoardState] = useState<BoardState>({
-    squares: Array(8).fill(null).map((_, rowIndex) => 
-      Array(8).fill(null).map((_, colIndex) => ({
-        position: `${String.fromCharCode(97 + colIndex)}${8 - rowIndex}`,
-        piece: null
-      }))
-    )
-  });
-  
-  // Last move for highlighting
-  const [lastMove, setLastMove] = useState<{ from: string, to: string } | null>(null);
   
   // Loading state for player data
   const [loadingPlayers, setLoadingPlayers] = useState<boolean>(true);
@@ -254,19 +282,19 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       console.log('Setting placeholder player data after all retries failed');
       
       setWhitePlayer({
-        username: 'White Player',
+        username: isGuest && user && user.displayName ? user.displayName : 'White Player',
         rating: 1500,
         capturedPieces: capturedByWhite,
-        isGuest: false,
+        isGuest: isGuest,
         photoURL: null,
         userId: undefined
       });
       
       setBlackPlayer({
-        username: 'Black Player',
+        username: isGuest && user && user.displayName ? user.displayName : 'Black Player',
         rating: 1500,
         capturedPieces: capturedByBlack,
-        isGuest: false,
+        isGuest: isGuest,
         photoURL: null,
         userId: undefined
       });
@@ -616,7 +644,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       
       try {
         const chess = getChessEngine();
-        
+      
         // If we have a FEN, use it for full synchronization (most reliable)
         if (fen) {
           console.log(`[SYNC] Using server-provided FEN for synchronization: ${fen}`);
@@ -630,7 +658,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         // Or try to reconstruct the move
         else {
           console.log(`[SYNC] Reconstructing move from: ${from}, to: ${to}, promotion: ${promotion || 'none'}`);
-          
+        
           // If this is a promotion move, include the promotion piece
           if (promotion) {
             chess.move({
@@ -1566,7 +1594,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         // Get the current move history
         const history = chess.history({ verbose: true });
         const lastMoveVerbose = history.length > 0 ? history[history.length - 1] : null;
-        
+          
         // Check if this is a pawn promotion move
         if (move.promotion) {
           console.log(`[PROMOTION] Sending promotion move with piece: ${move.promotion}`);
@@ -1574,7 +1602,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         
         // Create a unique move ID for tracking
         const moveId = `${move.from}-${move.to}-${Date.now()}`;
-        
+          
         // Emit the move to the server
         socket.emit('move_made', {
             gameId: gameRoomId,
@@ -1767,112 +1795,132 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       gameOverReason?: string,
       timestamp: number 
     }) => {
-      if (data.gameId !== gameRoomId) return;
-      
-      // Check if the game is already over
-      if (gameState.isGameOver) {
-        console.log('Game is already over, ignoring board_updated event');
+      // Skip updates if the game IDs don't match
+      if (data.gameId !== gameRoomId) {
+        console.log(`[handleBoardUpdated] Ignoring update for different game: ${data.gameId} vs ${gameRoomId}`);
         return;
       }
-      
-      console.log(`Received board_updated event for game ${data.gameId} with ${data.moveHistory.length} moves, whiteTurn=${data.whiteTurn}`);
-      
-      try {
-        // Always update the chess engine state with the server's FEN if provided
-        if (data.fen) {
-          setChessPosition(data.fen, gameRoomId);
-        }
-      
-        // CRITICAL: Always update the active player first if whiteTurn is provided
-        // This ensures clocks and turn indicators stay in sync, regardless of other updates
-        if (data.whiteTurn !== undefined) {
-          const newActivePlayer = data.whiteTurn ? 'white' : 'black';
-          if (activePlayer !== newActivePlayer) {
-            console.log(`[TURN] Updating active player from ${activePlayer} to ${newActivePlayer} (whiteTurn=${data.whiteTurn})`);
-            setActivePlayer(newActivePlayer);
-            
-            // Also update the game state to reflect the current turn
-            setGameState(prevState => ({
-              ...prevState,
-              isWhiteTurn: data.whiteTurn,
-            hasWhiteMoved: data.moveHistory.length > 0
-          }));
-          } else {
-            console.log(`[TURN] Active player already set to ${activePlayer}, no update needed`);
+
+      // Only update board state if not viewing history
+      if (!isViewingHistory) {
+        // Process the move history from the server
+        console.log(`[handleBoardUpdated] Processing move history update for game ${data.gameId}`);
+        
+        try {
+          // Check if the game is already over
+          if (gameState.isGameOver) {
+            console.log('Game is already over, ignoring board_updated event');
+            return;
           }
-        } else {
-          console.warn('[TURN] No whiteTurn value provided in board_updated event');
-        }
-        
-        // Check if the move history has actually changed
-        const moveHistoryChanged = JSON.stringify(data.moveHistory) !== JSON.stringify(sanMoveList);
-        
-        if (!moveHistoryChanged) {
-          console.log('Move history unchanged, skipping further update');
-        return;
-      }
-      
-      // Synchronize the board using move history as the primary source of truth
-      const syncResult = synchronizeBoardFromMoveHistory(data.moveHistory);
-      if (syncResult) {
-          // Update the board state from the new position
-          const newBoardState = getCurrentBoardState();
+
+          console.log(`Received board_updated event for game ${data.gameId} with ${data.moveHistory.length} moves, whiteTurn=${data.whiteTurn}`);
           
-          // Check if the board state has actually changed
-          const boardStateChanged = JSON.stringify(newBoardState) !== JSON.stringify(boardState);
+          // Always update the chess engine state with the server's FEN if provided
+          if (data.fen) {
+            setChessPosition(data.fen, gameRoomId);
+          }
+        
+          // CRITICAL: Always update the active player first if whiteTurn is provided
+          // This ensures clocks and turn indicators stay in sync, regardless of other updates
+          if (data.whiteTurn !== undefined) {
+            const newActivePlayer = data.whiteTurn ? 'white' : 'black';
+            if (activePlayer !== newActivePlayer) {
+              console.log(`[TURN] Updating active player from ${activePlayer} to ${newActivePlayer} (whiteTurn=${data.whiteTurn})`);
+              setActivePlayer(newActivePlayer);
+            
+              // Also update the game state to reflect the current turn
+              setGameState(prevState => ({
+                ...prevState,
+                isWhiteTurn: data.whiteTurn,
+                hasWhiteMoved: data.moveHistory.length > 0
+              }));
+            } else {
+              console.log(`[TURN] Active player already set to ${activePlayer}, no update needed`);
+            }
+          } else {
+            console.warn('[TURN] No whiteTurn value provided in board_updated event');
+          }
           
-          if (!boardStateChanged && data.moveHistory.length === sanMoveList.length) {
-            console.log('Board state unchanged, skipping update');
+          // Check if the move history has actually changed
+          const moveHistoryChanged = JSON.stringify(data.moveHistory) !== JSON.stringify(sanMoveList);
+          
+          if (!moveHistoryChanged) {
+            console.log('Move history unchanged, skipping further update');
             return;
           }
           
-          // Update move history
-              setSanMoveList(data.moveHistory);
-          if (onSanMoveListChange) onSanMoveListChange(data.moveHistory);
-          
-          // Batch state updates to prevent excessive renders
-          const updates: any = {
-            boardState: newBoardState
-          };
-          
-          // Update last move if provided
-          if (data.lastMove) {
-            const matches = data.lastMove.match(/[a-h][1-8]/g) || [];
-            if (matches.length >= 2) {
-              const from = matches[0];
-              const to = matches[1];
-              updates.lastMove = { from, to };
+                    // Synchronize the board using move history as the primary source of truth
+          const syncResult = synchronizeBoardFromMoveHistory(data.moveHistory);
+          if (syncResult) {
+            // Update the board state from the new position
+            const newBoardState = getCurrentBoardState();
+            
+            // Check if the board state has actually changed
+            const boardStateChanged = JSON.stringify(newBoardState) !== JSON.stringify(boardState);
+            
+            if (!boardStateChanged && data.moveHistory.length === sanMoveList.length) {
+              console.log('Board state unchanged, skipping update');
+              return;
+            }
+                
+            // Always update the move history
+            setSanMoveList(data.moveHistory);
+            if (onSanMoveListChange) onSanMoveListChange(data.moveHistory);
+            
+            // Prepare updates
+            const updates: any = {};
+            
+            // Update last move if provided
+            if (data.lastMove) {
+              const matches = data.lastMove.match(/[a-h][1-8]/g) || [];
+              if (matches.length >= 2) {
+                const from = matches[0];
+                const to = matches[1];
+                updates.lastMove = { from, to };
+              }
+            }
+            
+            // Check if we're in review mode (viewing a historical move)
+            const isReviewMode = moveHistory && moveHistory.currentMoveIndex !== moveHistory.moves.length - 1 && moveHistory.moves.length > 0;
+            
+            // Only update the visible board state if we're not in review mode
+            if (!isReviewMode) {
+              console.log('Not in review mode, updating visible board state');
+              updateBoardState(newBoardState);
+              if (updates.lastMove) setLastMove(updates.lastMove);
+            } else {
+              console.log('In review mode, preserving historical view (not updating visible board state)');
+              // Even in review mode, we should update the underlying move history
+              // This ensures that when the user exits review mode, they'll see the latest state
+            }
+            
+            console.log('Successfully processed board update');
+          } else {
+            // If move history sync fails, fallback to FEN
+            if (data.fen) {
+              synchronizeBoardFromFen(data.fen, data.moveHistory);
+              if (socket && gameRoomId) {
+                socket.emit('request_board_sync', {
+                  gameId: gameRoomId,
+                  reason: 'critical_sync_failure',
+                  clientState: getChessEngine().fen()
+                });
+              }
             }
           }
-          
-          // Apply all updates in a single batch to prevent cascading updates
-          setBoardState(newBoardState);
-          if (updates.lastMove) setLastMove(updates.lastMove);
-          
-          console.log('Successfully processed board update');
-      } else {
-          // If move history sync fails, fallback to FEN
-        if (data.fen) {
-            synchronizeBoardFromFen(data.fen, data.moveHistory);
-            if (socket && gameRoomId) {
-            socket.emit('request_board_sync', {
-              gameId: gameRoomId,
-              reason: 'critical_sync_failure',
-              clientState: getChessEngine().fen()
-            });
-          }
-          }
-        }
-      } catch (error) {
-        console.error('Error processing board update:', error);
-        // Request a full board sync if we fail to process the update
+        } catch (error) {
+          console.error('Error processing board update:', error);
+          // Request a full board sync if we fail to process the update
           if (socket && gameRoomId) {
             socket.emit('request_board_sync', {
               gameId: gameRoomId,
-            reason: 'board_update_processing_failed',
+              reason: 'board_update_processing_failed',
               clientState: getChessEngine().fen()
             });
           }
+        }
+      } else {
+        console.log('[handleBoardUpdated] Ignoring board update while viewing history');
       }
     };
     
@@ -1919,8 +1967,8 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         setChessPosition(data.fen, gameRoomId);
         
         // If move history is available, use it to update the move list
-      if (data.moveHistory && data.moveHistory.length > 0) {
-        console.log(`Using move history from board_sync event (${data.moveHistory.length} moves)`);
+        if (data.moveHistory && data.moveHistory.length > 0) {
+          console.log(`Using move history from board_sync event (${data.moveHistory.length} moves)`);
           
           // Check if the move history has actually changed
           const moveHistoryChanged = JSON.stringify(data.moveHistory) !== JSON.stringify(sanMoveList);
@@ -1928,6 +1976,8 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
           if (moveHistoryChanged) {
             setSanMoveList(data.moveHistory);
             if (onSanMoveListChange) onSanMoveListChange(data.moveHistory);
+            
+            // Process the move history update
           }
         }
         
@@ -1942,8 +1992,19 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
           return;
         }
         
-        // Apply board state update
-        setBoardState(newBoardState);
+        // Check if we're in review mode (viewing a historical move)
+        const isReviewMode = moveHistory && moveHistory.currentMoveIndex !== moveHistory.moves.length - 1 && moveHistory.moves.length > 0;
+        
+        // Only update the visible board state if we're not in review mode
+        if (!isReviewMode) {
+          console.log('Not in review mode, updating visible board state');
+          updateBoardState(newBoardState);
+        } else {
+          console.log('In review mode, preserving historical view (not updating visible board state)');
+          // Even in review mode, we should update the underlying move history
+          // This ensures that when the user exits review mode, they'll see the latest state
+        }
+        
         console.log('Successfully processed board sync');
       } catch (error) {
         console.error('Failed to synchronize board state:', error);
@@ -2117,11 +2178,38 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
         playerPhotoURL: playerColor === 'white' ? whitePlayer.photoURL : blackPlayer.photoURL,
         opponentPhotoURL: playerColor === 'white' ? blackPlayer.photoURL : whitePlayer.photoURL,
-        playerRatingChange: data.whitePlayer?.ratingChange !== undefined ? 
-          (playerColor === 'white' ? data.whitePlayer.ratingChange : data.blackPlayer.ratingChange) : 0,
-        opponentRatingChange: data.whitePlayer?.ratingChange !== undefined ? 
-          (playerColor === 'white' ? data.blackPlayer.ratingChange : data.whitePlayer.ratingChange) : 0
+        // Check for rating changes in multiple possible locations in the payload
+        playerRatingChange: playerColor === 'white' 
+          ? (data.whitePlayer?.ratingChange !== undefined 
+             ? data.whitePlayer.ratingChange 
+             : (data.whiteRatingChange?.ratingChange !== undefined 
+                ? data.whiteRatingChange.ratingChange 
+                : 0))
+          : (data.blackPlayer?.ratingChange !== undefined 
+             ? data.blackPlayer.ratingChange 
+             : (data.blackRatingChange?.ratingChange !== undefined 
+                ? data.blackRatingChange.ratingChange 
+                : 0)),
+        opponentRatingChange: playerColor === 'white' 
+          ? (data.blackPlayer?.ratingChange !== undefined 
+             ? data.blackPlayer.ratingChange 
+             : (data.blackRatingChange?.ratingChange !== undefined 
+                ? data.blackRatingChange.ratingChange 
+                : 0))
+          : (data.whitePlayer?.ratingChange !== undefined 
+             ? data.whitePlayer.ratingChange 
+             : (data.whiteRatingChange?.ratingChange !== undefined 
+                ? data.whiteRatingChange.ratingChange 
+                : 0))
       };
+      
+      // Log the rating changes for debugging
+      console.log('Rating changes extracted from payload:', {
+        whiteRatingChange: data.whitePlayer?.ratingChange || data.whiteRatingChange?.ratingChange,
+        blackRatingChange: data.blackPlayer?.ratingChange || data.blackRatingChange?.ratingChange,
+        playerRatingChange: resultData.playerRatingChange,
+        opponentRatingChange: resultData.opponentRatingChange
+      });
       
       console.log('Final result data:', resultData);
       
@@ -2183,119 +2271,59 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     // 2. We need to send ALL moves to the MoveTracker for display, not just the active ones
     // 3. This ensures the move tracker shows the complete history even after rewinds & new moves
     
-    setMoveHistory(history);
+    console.log(`Move history updated. Current index: ${history.currentMoveIndex}, Total moves: ${history.moves.length}`);
     
-    // Debug the move tracker update
-    console.log(`📊 Move Tracker Update Debug: {totalMovesInHistory: ${history.moves.length}, currentMoveIndex: ${history.currentMoveIndex}, movesBeingSentToTracker: ${history.moves.length}}`);
+    // Save the current move history
+    updateMoveHistory(history);
     
-    // Check for threefold repetition after move history updates
-    try {
-      const chess = getChessEngine();
-      const status = {
-        fen: chess.fen(),
-        isCheck: chess.isCheck(),
-        isCheckmate: chess.isCheckmate(),
-        isDraw: chess.isDraw(),
-        isThreefoldRepetition: isThreefoldRepetition()
-      };
+    // Determine if we're in review mode (viewing a historical move)
+    const isReviewMode = history.currentMoveIndex !== history.moves.length - 1 && history.moves.length > 0;
+    
+    // Update the board state to match the currently viewed move
+    if (history.currentMoveIndex >= 0 && history.currentMoveIndex < history.moves.length) {
+      const currentMove = history.moves[history.currentMoveIndex];
       
-      // Update current position FEN for debugging
-      console.log(`Current position FEN: ${status.fen}`);
+      // Force a re-render by creating a new object reference
+      updateBoardState({...currentMove.boardState});
+      setLastMove({ from: currentMove.from, to: currentMove.to });
       
-      // If threefold repetition is detected, handle it
-    if (status.isThreefoldRepetition) {
-        console.log('Threefold repetition detected in handleMoveHistoryChange');
+      // Store the current board state in a stable reference for comparison
+      // This helps us detect when we need to override incoming socket updates
+      stableBoardRef.current = {...currentMove.boardState};
+      console.log("Updated stable board reference with current state:", getFen());
       
-      // Update game state
-      setGameState(prev => ({
-        ...prev,
-        isGameOver: true,
-          gameOverReason: 'threefold_repetition'
-      }));
-      
-        // Stop the clocks
-      setActivePlayer(null);
-      
-      // Notify the server about the threefold repetition
-      if (socket) {
-        console.log('Emitting threefold_repetition event to server');
-        socket.emit('threefold_repetition', {
-          gameId: gameRoomId,
-          fen: status.fen
-        });
-        
-        // Also emit a game_ended event for consistency with other end conditions
-        socket.emit('game_ended', {
-          gameId: gameRoomId,
-          reason: 'threefold_repetition',
-          result: 'draw'
-        });
+      if (isReviewMode) {
+        console.log(`Showing historical move ${history.currentMoveIndex + 1}/${history.moves.length}`);
+      } else {
+        console.log(`Showing latest move ${history.currentMoveIndex + 1}/${history.moves.length}`);
       }
+    } else if (history.currentMoveIndex === -1 && history.initialBoardState) {
+      // If we're at the initial position (before any moves)
+      // Force a re-render by creating a new object reference
+      updateBoardState({...history.initialBoardState});
+      setLastMove(null);
       
-      // Dispatch a local game_ended event
-      try {
-        const gameEndedEvent = new CustomEvent('game_ended', {
-          detail: {
-            reason: 'threefold_repetition',
-            result: 'draw',
-            source: 'local_threefold_repetition',
-            timestamp: Date.now()
-          }
-        });
-        window.dispatchEvent(gameEndedEvent);
-      } catch (error) {
-        console.error('Error dispatching threefold_repetition event:', error);
-      }
+      // Store the initial board state in a stable reference
+      stableBoardRef.current = {...history.initialBoardState};
+      console.log("Updated stable board reference with initial state");
       
-      return;
-        }
-      } catch (error) {
-        console.error(`Error checking for threefold repetition: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        
-        // If there's an error, request a board sync to recover
-        if (socket && gameRoomId) {
-          console.log('Requesting board sync due to threefold repetition check error');
-          socket.emit('request_board_sync', {
-            gameId: gameRoomId,
-            reason: 'threefold_repetition_check_error',
-            clientState: getChessEngine().fen()
-          });
-      }
+      console.log("Showing initial board position");
     }
-    
-    // IMPORTANT: Don't add moves to the queue here - they're already being sent by ChessBoard.tsx
-    // The move queue should only contain moves initiated by the local player
-  }, [soundEnabled, playerColor, whitePlayer.username, whitePlayer.rating, blackPlayer.username, blackPlayer.rating]);
+  }, [getFen]);
   
   // Handle back button click
   const handleBackClick = useCallback(() => {
-    // These buttons interact with the board through its exposed methods
-    // We're simulating a click on the hidden button in ChessBoard
-    const backButton = document.querySelector('.hidden button:first-child') as HTMLButtonElement;
-    if (backButton) {
-      backButton.click();
-    }
-    
-    // Play button click sound with button label - use the ref value
-    playSound('BUTTON_CLICK', soundEnabledRef.current, 1.0, 'Back');
-  }, [playSound]); // Remove soundEnabled from deps
+    goBack();
+  }, [goBack]);
   
   // Handle forward button click
   const handleForwardClick = useCallback(() => {
-    // These buttons interact with the board through its exposed methods
-    // We're simulating a click on the hidden button in ChessBoard
-    const forwardButton = document.querySelector('.hidden button:last-child') as HTMLButtonElement;
-    if (forwardButton) {
-      forwardButton.click();
-    }
-    
-    // Play button click sound with button label - use the ref value
-    playSound('BUTTON_CLICK', soundEnabledRef.current, 1.0, 'Forward');
-  }, [playSound]); // Remove soundEnabled from deps
+    goForward();
+  }, [goForward]);
   
   // Determine if we can go back/forward in the move history
-  const canGoBack = moveHistory ? moveHistory.currentMoveIndex >= 0 : false;
-  const canGoForward = moveHistory ? moveHistory.currentMoveIndex < moveHistory.moves.length - 1 : false;
+  const canGoBack = moveHistory?.currentMoveIndex >= 0;
+  const canGoForward = moveHistory?.currentMoveIndex < (moveHistory?.moves?.length || 0) - 1;
   
   // Debug values
   useEffect(() => {
@@ -2347,21 +2375,21 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         console.log(`This player (${playerColor}) timed out - showing loss screen`);
         
         // Create game result data for timeout - this player lost
-        const timeoutResultData = {
+    const timeoutResultData = {
           result: 'loss' as GameResultType,
-          reason: 'timeout' as GameEndReason,
-          playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
-          opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-          playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-          opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
+      reason: 'timeout' as GameEndReason,
+      playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
+      opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
+      playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
+      opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
           playerRatingChange: -10, // Loss for timing out
           opponentRatingChange: 10  // Win for opponent
-        };
-        
-        // Set result data and show result screen
-        setGameResultData(timeoutResultData);
-        setShowResultScreen(true);
-        
+    };
+    
+    // Set result data and show result screen
+    setGameResultData(timeoutResultData);
+    setShowResultScreen(true);
+    
         // Emit the timeout event to the server with a flag indicating this player timed out
         socket.emit('report_timeout', {
           gameId: gameRoomId,
@@ -2377,18 +2405,18 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         // Create game result data for timeout - this player won
         const timeoutResultData = {
           result: 'win' as GameResultType,
-          reason: 'timeout' as GameEndReason,
-          playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
-          opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-          playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-          opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
+      reason: 'timeout' as GameEndReason,
+      playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
+      opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
+      playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
+      opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
           playerRatingChange: 10, // Win because opponent timed out
           opponentRatingChange: -10  // Loss for opponent
         };
-        
+    
         // Set result data and show result screen
         setGameResultData(timeoutResultData);
-        setShowResultScreen(true);
+    setShowResultScreen(true);
         
         // Emit the timeout event to the server with a flag indicating this player is reporting the opponent's timeout
         socket.emit('report_timeout', {
@@ -2888,7 +2916,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   };
 
   const { currentBetResult } = useBet();
-  const { user } = useAuth();
+  const { user, isGuest } = useAuth();
 
   useEffect(() => {
     console.log('[ChessBoardWrapper] currentBetResult changed:', currentBetResult);
@@ -3069,7 +3097,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     clearChessState();
     const chess = getChessEngine(gameRoomId);
     console.log('Initialized chess engine for new game:', gameRoomId, 'FEN:', chess.fen());
-    setBoardState(getCurrentBoardState());
+    updateBoardState(getCurrentBoardState());
     setSanMoveList(chess.history());
   }, [gameRoomId]);
 
@@ -3106,6 +3134,12 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     };
   }, []);
 
+  // Add a direct reference to the current board state for move navigation
+  const stableBoardRef = useRef<BoardState | null>(null);
+
+  
+
+
   return (
     <div className="flex flex-col w-full h-full rounded-t-xl rounded-b-none sm:rounded-t-xl sm:rounded-b-none overflow-hidden flex-shrink-0 pb-[62px]" style={{ backgroundColor: '#4A7C59' }}>
       {/* Bet Result Loading Spinner */}
@@ -3119,13 +3153,16 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       {displayableResultData && (
         (() => {
           console.log('[BET DEBUG] Rendering GameResultScreen with props:', displayableResultData);
+          // Use guest displayName for playerName/opponentName if guest
+          const playerName = isGuest && user && user.displayName ? user.displayName : displayableResultData.playerName;
+          const opponentName = isGuest && user && user.displayName && displayableResultData.opponentName === 'Black Player' ? user.displayName : displayableResultData.opponentName;
           return (
             <GameResultScreen
               result={displayableResultData.result}
               reason={displayableResultData.reason}
               gameId={gameRoomId}
-              playerName={displayableResultData.playerName}
-              opponentName={displayableResultData.opponentName}
+              playerName={playerName}
+              opponentName={opponentName}
               playerRating={displayableResultData.playerRating}
               opponentRating={displayableResultData.opponentRating}
               playerRatingChange={displayableResultData.playerRatingChange}
@@ -3159,7 +3196,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
           <div className="flex justify-between items-center mb-4 sm:mb-2 mx-[21px]">
             <PlayerInfo 
               position="top"
-              username={whitePlayer.username}
+              username={isGuest && user && user.displayName ? user.displayName : whitePlayer.username}
               rating={whitePlayer.rating}
               clubAffiliation={whitePlayer.clubAffiliation}
               isGuest={whitePlayer.isGuest || false}
@@ -3186,13 +3223,14 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         onMoveHistoryChange={handleMoveHistoryChange}
             playerColor={playerColor}
             gameId={gameRoomId}
+            boardState={isViewingHistory ? boardState : getCurrentBoardState()}
       />
       
           {/* Player 2 Info (Bottom) - Black */}
           <div className="flex justify-between items-center mt-4 sm:mt-2 mx-[21px]">
         <PlayerInfo 
           position="bottom"
-          username={blackPlayer.username}
+          username={isGuest && user && user.displayName ? user.displayName : blackPlayer.username}
           rating={blackPlayer.rating}
           clubAffiliation={blackPlayer.clubAffiliation}
           isGuest={blackPlayer.isGuest || false}
@@ -3219,7 +3257,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
           <div className="flex justify-between items-center mb-4 sm:mb-2 mx-[21px]">
             <PlayerInfo 
               position="top"
-              username={blackPlayer.username}
+              username={isGuest && user && user.displayName ? user.displayName : blackPlayer.username}
               rating={blackPlayer.rating}
               clubAffiliation={blackPlayer.clubAffiliation}
               isGuest={blackPlayer.isGuest || false}
@@ -3246,13 +3284,14 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
             onMoveHistoryChange={handleMoveHistoryChange}
             playerColor={playerColor}
             gameId={gameRoomId}
+            boardState={isViewingHistory ? boardState : getCurrentBoardState()}
           />
           
           {/* Player 1 Info (Bottom) - White */}
           <div className="flex justify-between items-center mt-4 sm:mt-2 mx-[21px]">
             <PlayerInfo 
               position="bottom"
-              username={whitePlayer.username}
+              username={isGuest && user && user.displayName ? user.displayName : whitePlayer.username}
               rating={whitePlayer.rating}
               clubAffiliation={whitePlayer.clubAffiliation}
               isGuest={whitePlayer.isGuest || false}
@@ -3278,23 +3317,40 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       {/* Debug logging moved to useEffect */}
       
       {/* Move Controls */}
-      <MoveControls
-        onBack={handleBackClick}
-        onForward={handleForwardClick}
-        canGoBack={canGoBack}
-        canGoForward={canGoForward}
-        gameId={gameRoomId}
-        gameState={gameState}
-        onResign={handleResignGame}
-        onAbortGame={handleAbortGame}
-        moveHistory={moveHistory ? {
-          length: moveHistory.moves.length,
-          currentMoveIndex: moveHistory.currentMoveIndex
-        } : undefined}
-        whitePlayer={whitePlayer}
-        blackPlayer={blackPlayer}
-        playerColor={playerColor}
-      />
+      <div className="move-controls-container relative">
+        <MoveControls
+          onBack={handleBackClick}
+          onForward={handleForwardClick}
+          canGoBack={canGoBack}
+          canGoForward={canGoForward}
+          gameId={gameRoomId}
+          gameState={gameState}
+          onResign={handleResignGame}
+          onAbortGame={handleAbortGame}
+          moveHistory={{
+            length: moveHistory?.moves?.length || 0,
+            currentMoveIndex: moveHistory?.currentMoveIndex || -1
+          }}
+          whitePlayer={whitePlayer}
+          blackPlayer={blackPlayer}
+          playerColor={playerColor}
+        />
+        
+        {/* Live button to exit history mode */}
+        {isViewingHistory && (
+          <button 
+            onClick={() => {
+              // Get current live board state from chess engine
+              const currentLiveBoardState = getCurrentBoardState();
+              exitHistoryMode(currentLiveBoardState);
+            }}
+            className="absolute right-2 top-0 bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-3 rounded text-sm"
+            aria-label="Return to live game"
+          >
+            Live
+          </button>
+        )}
+      </div>
       
       {/* Disconnection Notification */}
       {opponentDisconnected && (

@@ -15,9 +15,12 @@ api.interceptors.request.use(
     // Get the token from cookies
     const token = Cookies.get('authToken');
     
-    // If token exists, add it to the headers
-    if (token) {
+    // If token exists and is NOT a guest token, add it to the headers
+    if (token && !token.startsWith('guest_')) {
       config.headers.Authorization = `Bearer ${token}`;
+    } else {
+      // Remove Authorization header for guest tokens
+      delete config.headers.Authorization;
     }
     
     return config;
