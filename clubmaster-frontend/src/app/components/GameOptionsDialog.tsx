@@ -198,12 +198,10 @@ const GameOptionsDialog: React.FC<GameOptionsDialogProps> = ({
   if (!isOpen) return null;
 
   // Show Abort button if:
-  // 1. The game has not had any moves made (hasWhiteMoved is false)
+  // 1. The game has not had any moves made (hasWhiteMoved is strictly false)
   // 2. We have an abort handler to call (passed from MoveControls)
   // 3. The game is not over
-  // Enhanced abort button visibility - explicitly handle hasWhiteMoved being undefined
-  // If hasWhiteMoved is undefined, assume no moves have been made yet
-  const showAbortButton = !!onAbort && !gameState.isGameOver && gameState.hasWhiteMoved !== true;
+  const showAbortButton = !!onAbort && !gameState.isGameOver && gameState.hasWhiteMoved === false;
 
   // Add debug logging for the abort button visibility with simplified conditions
   useEffect(() => {

@@ -185,10 +185,26 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
           });
           setSocket(socketInstance);
            // Update connection status based on the basic socket connection
-           socketInstance.on('connect', () => setConnectionStatus('connected'));
+           socketInstance.on('connect', () => {
+             setConnectionStatus('connected');
+             // --- JOIN USER ROOM LOGIC ---
+             const backendUserId = localStorage.getItem('backendUserId');
+             if (backendUserId) {
+               socketInstance.emit('join_user_room', { userId: backendUserId });
+               console.log('[SocketContext] Joined user room:', backendUserId);
+             }
+           });
            socketInstance.on('disconnect', () => setConnectionStatus('disconnected'));
            socketInstance.on('reconnect_attempt', () => setConnectionStatus('connecting'));
-           socketInstance.on('reconnect', () => setConnectionStatus('connected'));
+           socketInstance.on('reconnect', () => {
+             setConnectionStatus('connected');
+             // --- JOIN USER ROOM LOGIC ON RECONNECT ---
+             const backendUserId = localStorage.getItem('backendUserId');
+             if (backendUserId) {
+               socketInstance.emit('join_user_room', { userId: backendUserId });
+               console.log('[SocketContext] Re-joined user room:', backendUserId);
+             }
+           });
            socketInstance.on('reconnect_failed', () => setConnectionStatus('disconnected'));
            socketInstance.on('reconnect_error', () => setConnectionStatus('disconnected'));
           return;

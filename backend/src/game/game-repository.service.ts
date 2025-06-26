@@ -313,12 +313,57 @@ export class GameRepositoryService {
   // Find a game by customId (used for client-facing gameId)
   async findOneByCustomId(customId: string): Promise<Game | null> {
     try {
-      return await this.gamesRepository.findOne({
+      this.logger.log(`[findOneByCustomId] Looking up game with customId: ${customId}`);
+      
+      // First try direct match
+      let game = await this.gamesRepository.findOne({
         where: { customId },
         relations: ['whitePlayer', 'blackPlayer'],
       });
+      
+      if (game) {
+        this.logger.log(`[findOneByCustomId] Found game with exact customId match: ${game.id}`);
+        return game;
+      }
+      
+      // If direct match failed, try by UUID (some bet games might have UUID as customId)
+      if (this.isValidUuid(customId)) {
+        this.logger.log(`[findOneByCustomId] customId is a valid UUID, trying direct ID lookup`);
+        game = await this.gamesRepository.findOne({
+          where: { id: customId },
+          relations: ['whitePlayer', 'blackPlayer'],
+        });
+        
+        if (game) {
+          this.logger.log(`[findOneByCustomId] Found game by UUID: ${game.id}`);
+          return game;
+        }
+      }
+      
+      // If UUID lookup failed, try partial match (especially for bet games)
+      this.logger.log(`[findOneByCustomId] No exact match, trying partial match with pattern: %${customId}%`);
+      
+      // Try to find any game where customId contains the given ID
+      const gamesWithPartialMatch = await this.gamesRepository.createQueryBuilder('game')
+        .where('game.customId LIKE :pattern', { pattern: `%${customId}%` })
+        .leftJoinAndSelect('game.whitePlayer', 'whitePlayer')
+        .leftJoinAndSelect('game.blackPlayer', 'blackPlayer')
+        .getMany();
+      
+      if (gamesWithPartialMatch.length > 0) {
+        if (gamesWithPartialMatch.length > 1) {
+          this.logger.warn(`[findOneByCustomId] Found ${gamesWithPartialMatch.length} games with partial match for '${customId}'. Using the first one: ${gamesWithPartialMatch[0].id}`);
+        } else {
+          this.logger.log(`[findOneByCustomId] Found game with partial customId match: ${gamesWithPartialMatch[0].id}`);
+        }
+        return gamesWithPartialMatch[0];
+      }
+      
+      // If nothing found even with partial match
+      this.logger.warn(`[findOneByCustomId] No game found with customId ${customId} (exact or partial match)`);
+      return null;
     } catch (error) {
-      this.logger.error(`Error finding game with customId ${customId}: ${error.message}`);
+      this.logger.error(`[findOneByCustomId] Error finding game with customId ${customId}: ${error.message}`);
       return null;
     }
   }

@@ -23,7 +23,9 @@ import { UsersService } from '../users/users.service';
 import { Logger } from '@nestjs/common';
 import { User } from '../users/entities/user.entity';
 import { v4 as uuidv4 } from 'uuid';
-import { GameManagerService } from '../game/game-manager.service';
+import { GameManagerService, GamePlayer } from '../game/game-manager.service';
+import { GameRepositoryService } from '../game/game-repository.service';
+import { DataSource } from 'typeorm';
 
 // This is the interface for the bet challenge options
 interface BetChallengeOptions {
@@ -49,7 +51,7 @@ interface BetChallengeOptions {
 // This is the gateway that is used to handle the bet challenges
 export class BetGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server: Server;
-  private readonly logger = new Logger(BetGateway.name);
+  private readonly logger = new Logger('BET');
   private userSocketMap: Map<string, string> = new Map(); // Maps userId to current socketId
 
   // This is the constructor for the bet gateway
@@ -58,6 +60,8 @@ export class BetGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly matchmakingService: MatchmakingService,
     private readonly usersService: UsersService,
     private readonly gameManagerService: GameManagerService,
+    private readonly gameRepositoryService: GameRepositoryService,
+    private readonly dataSource: DataSource,
   ) {}
 
   // Handle connection event for new socket clients with proper error handling
@@ -342,247 +346,101 @@ export class BetGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() payload: BetChallengeResponse,
   ) {
     try {
-      this.logger.log(`Received bet challenge response from ${client.id} for challenge ${payload.challengeId}`);
-
-      // Get user ID from authenticated socket
-      const userId = client.data?.userId;
-      if (!userId) {
-        return {
-          event: 'bet_response_error',
-          data: { success: false, message: 'User not authenticated' },
-        };
+      const responderId = client.data?.userId;
+      if (!responderId) {
+        this.logger.error(`No user ID found for socket ${client.id} when responding to challenge`);
+        client.emit('bet_challenge_response_error', { message: 'Authentication required' });
+        return;
       }
 
-      // Update response with user ID
-      const response: BetChallengeResponse = {
-        ...payload,
-        responderId: userId,
-        responderSocketId: client.id,
-      };
+      this.ensureUserInRoom(client, responderId);
 
-      // Process response
-      const challenge = this.betService.respondToBetChallenge(response, client);
+      // Get the challenge by ID
+      const challenge = await this.betService.getBetChallenge(payload.challengeId);
       if (!challenge) {
-        return {
-          event: 'bet_response_error',
-          data: { success: false, message: 'Invalid bet challenge' },
-        };
+        this.logger.error(`Challenge ${payload.challengeId} not found`);
+        client.emit('bet_challenge_response_error', { message: 'Challenge not found' });
+        return;
       }
 
-      // If challenge was accepted, start matchmaking
+      // Accept or reject the bet challenge using a transaction for atomicity
       if (payload.accepted) {
-        this.logger.log(`Starting matchmaking for bet challenge ${challenge.id}`);
-
-        // Get the challenger's CURRENT socket ID (not the one stored in the challenge)
-        const currentChallengerSocketId = this.userSocketMap.get(challenge.challengerId);
-        let challengerSocket: Socket | undefined;
-        
-        if (currentChallengerSocketId) {
-          this.logger.log(`Found current socket ${currentChallengerSocketId} for challenger ${challenge.challengerId}`);
-          
-          // Get the socket using the current ID
-          challengerSocket = this.server.sockets.sockets.get(currentChallengerSocketId);
-          
-          if (!challengerSocket) {
-            this.logger.warn(`Socket ${currentChallengerSocketId} exists in map but not in server.sockets`);
-          }
-        } else {
-          // Try to find any socket for this user as a fallback
-          this.logger.log(`No current socket mapping for challenger ${challenge.challengerId}, searching all sockets`);
-          const challengerSockets = await this.findSocketsByUserId(challenge.challengerId);
-          
-          if (challengerSockets.length > 0) {
-            challengerSocket = challengerSockets[0];
-            this.logger.log(`Found challenger socket ${challengerSocket.id} by searching all sockets`);
-            
-            // Update the map for future use
-            this.userSocketMap.set(challenge.challengerId, challengerSocket.id);
-          }
-        }
-
-        // Get player ratings
-        const challenger = await this.usersService.findOne(challenge.challengerId);
-        const responder = await this.usersService.findOne(userId);
-        const challengerRating = challenger?.rating || 1500;
-        const responderRating = responder?.rating || 1500;
-
-        // Setup game options
-        const gameOptions = {
-          gameMode: challenge.gameMode || 'Rapid',
-          timeControl: challenge.timeControl || '10+0',
-          rated: true,
-          preferredSide: challenge.preferredSide || 'white',
-        };
-
-        // Create a special bet game directly instead of using matchmaking
         try {
-          // Generate a unique game ID
-          const gameId = uuidv4();
-          
-          // Create game players
-          const whitePlayer = {
-            socketId: client.id, // Responder plays as white
-            userId: userId,
-            rating: responderRating,
-            username: responder?.displayName || 'Opponent',
-            isGuest: false,
-            connected: true,
-            gamesPlayed: responder?.gamesPlayed || 0
-          };
-          
-          const blackPlayer = {
-            socketId: challengerSocket?.id || `virtual_${challenge.challengerId}`,
-            userId: challenge.challengerId,
-            rating: challengerRating,
-            username: challenger?.displayName || 'Challenger',
-            isGuest: false,
-            connected: !!challengerSocket,
-            gamesPlayed: challenger?.gamesPlayed || 0
-          };
-          
-          // Create the game
-          const gameState = this.gameManagerService.createGame(
-            gameId,
-            whitePlayer,
-            blackPlayer,
-            gameOptions.gameMode,
-            gameOptions.timeControl,
-            true // rated
-          );
-          
-          if (!gameState) {
-            throw new Error('Failed to create game');
-          }
-          
-          // Link bet to game
-          await this.betService.linkBetToGame(challenge.id, gameId);
-          this.logger.log(`Directly created game ${gameId} for bet challenge ${challenge.id}`);
-          
-          // Notify both players about the game
-          const gameData = {
-            gameId,
-            gameMode: gameOptions.gameMode,
-            timeControl: gameOptions.timeControl,
-            rated: true,
-            created: new Date(),
-            betChallengeId: challenge.id,
-            whitePlayer: {
-              socketId: whitePlayer.socketId,
-              rating: whitePlayer.rating,
-              username: whitePlayer.username
-            },
-            blackPlayer: {
-              socketId: blackPlayer.socketId,
-              rating: blackPlayer.rating,
-              username: blackPlayer.username
-            }
-          };
-          
-          // Emit to responder (guaranteed to be connected)
-          client.emit('matchFound', {
-            ...gameData,
-            playerColor: 'white',
-            opponentColor: 'black'
+          // Use the new transaction-based method
+          const { game, dbGame } = await this.betService.acceptBetChallengeWithTransaction({
+            challenge,
+            responderId,
+            responderSocket: client,
+            usersService: this.usersService,
+            gameManagerService: this.gameManagerService,
+            gameRepositoryService: this.gameRepositoryService,
+            dataSource: this.dataSource,
           });
-          
-          // Emit to challenger if connected
-          if (challengerSocket) {
-            challengerSocket.emit('matchFound', {
-              ...gameData,
-              playerColor: 'black',
-              opponentColor: 'white'
-            });
+
+          // Join both players to the game room and emit events as before
+            const challengerSockets = await this.findSocketsByUserId(challenge.challengerId);
+          const responderSocket = client;
+            
+            if (challengerSockets.length > 0 && responderSocket) {
+            const challengerSocket = challengerSockets[0];
+            challengerSocket.join(game.id);
+            responderSocket.join(game.id);
+            this.logger.log(`Both players joined game room ${game.id}`);
+              challengerSocket.emit('enter_game_response', {
+                success: true,
+              gameId: game.id,
+              whitePlayerId: dbGame.whitePlayerId,
+              blackPlayerId: dbGame.blackPlayerId,
+                startedFromBet: true
+              });
+              responderSocket.emit('enter_game_response', {
+                success: true,
+              gameId: game.id,
+              whitePlayerId: dbGame.whitePlayerId,
+              blackPlayerId: dbGame.blackPlayerId,
+                startedFromBet: true
+              });
           }
-          
-          // Also emit to the challenger's user room as a fallback
-          this.server.to(challenge.challengerId).emit('matchFound', {
-            ...gameData,
-            playerColor: 'black',
-            opponentColor: 'white'
+
+          // Add logging before emitting bet_game_ready
+          this.logger.log('[BET] Emitting bet_game_ready to challenger:', {
+            gameId: dbGame.id,
+            betId: challenge.id,
+            betType: challenge.betType
           });
-          
-          // Special bet_game_ready event as a fallback
-          client.emit('bet_game_ready', { gameId });
-          if (challengerSocket) {
-            challengerSocket.emit('bet_game_ready', { gameId });
-          }
-          this.server.to(challenge.challengerId).emit('bet_game_ready', { gameId });
-          
-          return {
-            event: 'bet_response_success',
-            data: {
-              success: true,
-              message: 'Bet challenge accepted, game created',
+            this.server.to(challenge.challengerId).emit('bet_game_ready', { 
+            gameId: dbGame.id,
+            betId: challenge.id,
+            betType: challenge.betType
+          });
+          this.logger.log('[BET] Emitting bet_game_ready to responder:', {
+            gameId: dbGame.id,
               betId: challenge.id,
-              gameId: gameId
-            },
-          };
+              betType: challenge.betType
+            });
+            this.server.to(responderId).emit('bet_game_ready', { 
+            gameId: dbGame.id,
+              betId: challenge.id,
+              betType: challenge.betType
+            });
+          this.logger.log(`Bet game created: ${game.id} (bet: ${challenge.id}, type: ${challenge.betType})`);
         } catch (error) {
-          this.logger.error(`Error creating direct game: ${error.message}`);
-          
-          // Fallback to matchmaking
-          this.logger.log(`Falling back to matchmaking process for bet challenge ${challenge.id}`);
-          
-          // Add debug logging
-          this.logger.debug(`Adding challenger to matchmaking queue: ${challenge.challengerId} (socket: ${challengerSocket?.id || 'disconnected'}) with bet challenge ID: ${challenge.id}`);
-          this.logger.debug(`Adding responder to matchmaking queue: ${userId} (${client.id}) with bet challenge ID: ${challenge.id}`);
-
-          // Add both players to matchmaking queue with the bet challenge ID
-          // For challenger, use their user ID instead of socket if socket is not available
-          if (challengerSocket) {
-            this.matchmakingService.addPlayerToQueue(
-              challengerSocket,
-              gameOptions,
-              challengerRating,
-              challenge.challengerId,
-              challenger?.displayName || 'Challenger',
-              false, // Not a guest
-              challenge.id  // Pass the bet challenge ID
-            );
-          } else {
-            // Use a special method to add a player without a socket
-            this.matchmakingService.addPlayerToQueueWithoutSocket(
-              challenge.challengerId,
-              gameOptions,
-              challengerRating,
-              challenger?.displayName || 'Challenger',
-              challenge.id  // Pass the bet challenge ID
-            );
-          }
-
-          this.matchmakingService.addPlayerToQueue(
-            client,
-            gameOptions,
-            responderRating,
-            userId,
-            responder?.displayName || 'Opponent',
-            false, // Not a guest
-            challenge.id  // Pass the bet challenge ID
-          );
-
-          // Force immediate matchmaking check to pair these players
-          setTimeout(() => {
-            this.logger.debug('Triggering immediate matchmaking check for bet challenge');
-            this.matchmakingService.processMatchmakingForBetChallenge(challenge.id);
-          }, 500);
+          this.logger.error(`Error creating game for bet challenge ${challenge.id}: ${error.message}`, error.stack);
+          client.emit('bet_challenge_response_error', { message: 'Failed to create game' });
         }
+      } else {
+        // If rejected, update status as before
+        const response: BetChallengeResponse = {
+          challengeId: payload.challengeId,
+          responderId: responderId,
+          accepted: false,
+          responderSocketId: client.id
+        };
+        this.betService.respondToBetChallenge(response, client);
       }
-
-      // Return success
-      return {
-        event: 'bet_response_success',
-        data: {
-          success: true,
-          message: payload.accepted ? 'Bet challenge accepted, starting game' : 'Bet challenge rejected',
-          betId: challenge.id,
-        },
-      };
     } catch (error) {
-      this.logger.error(`Error responding to bet challenge: ${error instanceof Error ? error.message : String(error)}`);
-      return {
-        event: 'bet_response_error',
-        data: { success: false, message: 'Server error processing bet response' },
-      };
+      this.logger.error(`Error processing bet challenge response: ${error.message}`, error.stack);
+      client.emit('bet_challenge_response_error', { message: 'Server error processing response' });
     }
   }
 
@@ -632,6 +490,7 @@ export class BetGateway implements OnGatewayConnection, OnGatewayDisconnect {
           event: 'bet_status_error',
           data: { success: false, message: 'Bet challenge not found' },
         };
+        
       }
 
       // Check if the user is involved in this challenge
@@ -746,6 +605,25 @@ export class BetGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return BetType.RATING_STAKE;
       default:
         return BetType.PROFILE_CONTROL; // Default to profile control if unknown
+    }
+  }
+
+  /**
+   * Helper method to determine game mode from time control
+   */
+  private getGameModeFromTimeControl(timeControlStr: string): string {
+    try {
+      const minutes = parseInt(timeControlStr.split('+')[0]);
+      // Exact matches first
+      if (minutes === 3) return 'Bullet';
+      if (minutes === 5) return 'Blitz';
+      if (minutes === 10) return 'Rapid';
+      // Fallback ranges
+      if (minutes <= 3) return 'Bullet';
+      if (minutes <= 5) return 'Blitz';
+      return 'Rapid';
+    } catch (error) {
+      return 'Blitz'; // Default fallback
     }
   }
 }
