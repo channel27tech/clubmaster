@@ -332,19 +332,42 @@ export const checkBetChallengeStatus = (betId: string): Promise<{
 };
 
 /**
- * Add a listener for bet game ready event (special event for bet games)
+ * Add a listener for bet game ready event
  */
-export const onBetGameReady = (callback: (data: { gameId: string }) => void): void => {
+export const onBetGameReady = (callback: (data: { gameId: string, betType: BetType, betId: string }) => void): void => {
   const socket = socketService.getSocket();
   if (socket) {
-    socket.off('bet_game_ready'); // Remove any existing listeners
+    // Remove existing listeners to prevent duplicates
+    socket.off('bet_game_ready');
+    
+    // Add a listener for the bet_game_ready event
     socket.on('bet_game_ready', (data) => {
-      if (data && data.gameId) {
-        callback(data);
-      } else {
+      try {
+        if (!data || !data.gameId) {
+          console.error('[betService] Invalid bet_game_ready data:', data);
+          return;
+        }
+        
+        // Log the event
+        console.log('[betService] Game ready event received:', data);
+        
+        // Ensure required properties are set
+        const gameData = {
+          gameId: data.gameId,
+          betType: data.betType || BetType.RATING_STAKE, // Default to rating stake if not specified
+          betId: data.betId || localStorage.getItem('activeBetChallengeId') || 'unknown'
+        };
+        
+        // Call the callback with the game data
+        callback(gameData);
+      } catch (error) {
+        console.error('[betService] Error processing bet_game_ready event:', error);
       }
     });
+    
     console.log('[betService] Registered bet_game_ready listener');
+  } else {
+    console.warn('[betService] Socket not available for onBetGameReady');
   }
 };
 
@@ -360,5 +383,118 @@ export const offBetGameReady = (callback?: (data: any) => void): void => {
       socket.off('bet_game_ready');
     }
     console.log('[betService] Removed bet_game_ready listener');
+  }
+};
+
+/**
+ * Update a user's profile with profile control permissions
+ */
+export const updateControlledProfile = async (
+  targetUserId: string,
+  updateData: { nickname?: string; avatarType?: string }
+): Promise<any> => {
+  try {
+    const response = await fetch(`/api/bet/profile-control?targetUserId=${targetUserId}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(updateData)
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Error updating profile: ${response.statusText}`);
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Error in updateControlledProfile:', error);
+    throw error;
+  }
+};
+
+/**
+ * Check if current user has control over the target user's profile
+ */
+export const checkProfileControl = async (targetUserId: string): Promise<any> => {
+  try {
+    const response = await fetch(`/api/bet/profile-control/check?targetUserId=${targetUserId}`);
+    
+    if (!response.ok) {
+      throw new Error(`Error checking profile control: ${response.statusText}`);
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Error in checkProfileControl:', error);
+    throw error;
+  }
+};
+
+/**
+ * Check current user's profile lock status
+ */
+export const checkProfileLockStatus = async (): Promise<any> => {
+  try {
+    const response = await fetch('/api/bet/profile-lock/status');
+    
+    if (!response.ok) {
+      throw new Error(`Error checking profile lock status: ${response.statusText}`);
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Error in checkProfileLockStatus:', error);
+    throw error;
+  }
+};
+
+/**
+ * Save bet result to localStorage for persistence
+ */
+export const saveBetResult = (result: BetResult): void => {
+  try {
+    // Include timestamp for expiration checks
+    const resultWithTimestamp = {
+      ...result,
+      savedAt: new Date().toISOString()
+    };
+    
+    localStorage.setItem(`bet_result_${result.betId}`, JSON.stringify(resultWithTimestamp));
+    
+    if (result.gameId) {
+      localStorage.setItem(`bet_for_game_${result.gameId}`, result.betId);
+    }
+    
+    console.log(`[betService] Saved bet result for bet ID ${result.betId}`);
+  } catch (error) {
+    console.error('[betService] Error saving bet result:', error);
+  }
+};
+
+/**
+ * Get bet result from localStorage
+ */
+export const getBetResult = (betId: string): BetResult | null => {
+  try {
+    const resultStr = localStorage.getItem(`bet_result_${betId}`);
+    if (!resultStr) return null;
+    
+    return JSON.parse(resultStr);
+  } catch (error) {
+    console.error('[betService] Error retrieving bet result:', error);
+    return null;
+  }
+};
+
+/**
+ * Get bet ID associated with a game ID
+ */
+export const getBetIdFromGameId = (gameId: string): string | null => {
+  try {
+    return localStorage.getItem(`bet_for_game_${gameId}`);
+  } catch (error) {
+    console.error('[betService] Error retrieving bet ID from game ID:', error);
+    return null;
   }
 }; 

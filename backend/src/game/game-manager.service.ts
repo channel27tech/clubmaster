@@ -303,7 +303,10 @@ export class GameManagerService {
   makeMove(gameId: string, move: string, socketId: string): boolean {
     const game = this.activeGames.get(gameId);
     if (!game) return false;
-    
+    // BET LOG: Move received
+    if (game.gameMode && game.gameMode.toLowerCase().includes('bet')) {
+      this.logger.log(`[bet] Move received: gameId=${gameId}, move=${move}, socketId=${socketId}`);
+    }
     // Helper to get userId from socketId
     const getUserIdBySocket = (sid: string): string | undefined => {
       if (game.whitePlayer.socketId === sid) return game.whitePlayer.userId;
@@ -324,6 +327,9 @@ export class GameManagerService {
       }
     }
     if (!isValidTurn) {
+      if (game.gameMode && game.gameMode.toLowerCase().includes('bet')) {
+        this.logger.warn(`[bet] Move rejected (not player's turn): gameId=${gameId}, move=${move}, socketId=${socketId}`);
+      }
       this.logger.warn(`[makeMove] Move rejected: Not player's turn. gameId=${gameId}, expectedSocket=${game.whiteTurn ? game.whitePlayer.socketId : game.blackPlayer.socketId}, gotSocket=${socketId}, expectedUserId=${game.whiteTurn ? game.whitePlayer.userId : game.blackPlayer.userId}, gotUserId=${getUserIdBySocket(socketId)}`);
       return false;
     }
@@ -331,8 +337,15 @@ export class GameManagerService {
       // Make the move
       const result = game.chessInstance.move(move) as Move | null;
       if (!result) {
+        if (game.gameMode && game.gameMode.toLowerCase().includes('bet')) {
+          this.logger.warn(`[bet] Move rejected (invalid move): gameId=${gameId}, move=${move}, socketId=${socketId}`);
+        }
         this.logger.warn(`[makeMove] Move rejected: Invalid move string. gameId=${gameId}, move=${move}`);
         return false;
+      }
+      // BET LOG: Move accepted
+      if (game.gameMode && game.gameMode.toLowerCase().includes('bet')) {
+        this.logger.log(`[bet] Move accepted: gameId=${gameId}, move=${move}, socketId=${socketId}`);
       }
       // Update game state
       game.pgn = game.chessInstance.pgn();

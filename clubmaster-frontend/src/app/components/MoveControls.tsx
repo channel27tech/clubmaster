@@ -23,6 +23,7 @@ export const canAbortGame = (gameState: {
   
   // Check if no moves have been made yet using all available signals
   // Game can only be aborted before any moves are made
+  // Use strict equality check to ensure hasWhiteMoved is explicitly false
   const noMovesMade = gameState.hasWhiteMoved === false && !hasMovesInHistory;
   
   return noMovesMade;

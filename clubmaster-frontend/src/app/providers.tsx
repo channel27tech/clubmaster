@@ -6,6 +6,7 @@ import { SoundProvider } from '../context/SoundContext';
 import { NotificationsProvider } from '../context/NotificationsContext';
 import { AuthProvider } from '../context/AuthContext';
 import { BetProvider } from '../context/BetContext';
+import { BetGameProvider } from '../context/BetGameContext';
 import { ActivityProvider } from '../context/ActivityContext';
 import RouteGuard from '../components/RouteGuard';
 import GlobalNotifications from './components/GlobalNotifications';
@@ -88,27 +89,29 @@ export const Providers: React.FC<ProvidersProps> = ({ children }) => {
             <ActivityProvider>
               <SoundProvider userId={userId}>
                 <BetProvider>
-                  {children}
-                  <GlobalNotifications />
-                  <Toaster 
-                    position="top-center"
-                    toastOptions={{
-                      style: {
-                        background: '#4A7C59',
-                        color: '#FAF3DD',
-                      },
-                      success: {
-                        duration: 3000,
-                      },
-                      error: {
-                        duration: 5000,
+                  <BetGameProvider>
+                    {children}
+                    <GlobalNotifications />
+                    <Toaster 
+                      position="top-center"
+                      toastOptions={{
                         style: {
-                          background: '#B92D22',
+                          background: '#4A7C59',
                           color: '#FAF3DD',
                         },
-                      },
-                    }}
-                  />
+                        success: {
+                          duration: 3000,
+                        },
+                        error: {
+                          duration: 5000,
+                          style: {
+                            background: '#B92D22',
+                            color: '#FAF3DD',
+                          },
+                        },
+                      }}
+                    />
+                  </BetGameProvider>
                 </BetProvider>
               </SoundProvider>
             </ActivityProvider>

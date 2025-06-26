@@ -541,4 +541,58 @@ export class UsersService {
       throw error;
     }
   }
+
+  /**
+   * Clear the profile control status for a user
+   * @param userId The ID of the user whose profile control to clear
+   */
+  async clearProfileControl(userId: string): Promise<User> {
+    try {
+      const updateData = {
+        profileControlledBy: undefined,
+        profileControlExpiry: undefined,
+        controlledNickname: undefined,
+        controlledAvatarType: undefined
+      };
+      
+      await this.usersRepository.update(userId, updateData);
+      const updatedUser = await this.findOne(userId);
+      
+      if (!updatedUser) {
+        throw new NotFoundException(`User with ID ${userId} not found`);
+      }
+      
+      this.logger.log(`Profile control cleared for user ${userId}`);
+      return updatedUser;
+    } catch (error) {
+      this.logger.error(`Error clearing profile control: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Clear the profile lock status for a user
+   * @param userId The ID of the user whose profile lock to clear
+   */
+  async clearProfileLock(userId: string): Promise<User> {
+    try {
+      const updateData = {
+        profileLocked: false,
+        profileLockExpiry: undefined
+      };
+      
+      await this.usersRepository.update(userId, updateData);
+      const updatedUser = await this.findOne(userId);
+      
+      if (!updatedUser) {
+        throw new NotFoundException(`User with ID ${userId} not found`);
+      }
+      
+      this.logger.log(`Profile lock cleared for user ${userId}`);
+      return updatedUser;
+    } catch (error) {
+      this.logger.error(`Error clearing profile lock: ${error.message}`);
+      throw error;
+    }
+  }
 } 

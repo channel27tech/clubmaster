@@ -311,11 +311,29 @@ export default function MatchSetupScreen() {
     setBetError(null);
     setRejectionMessage(null);
     
+    // Add more debug logging
+    console.log("Send Request clicked with state:", {
+      selectedBetting,
+      isConnected,
+      opponentId,
+      opponentSocketId
+    });
+    
     // Determine bet type and parameters
     let betType: BetType;
     let stakeAmount: number | undefined;
 
-    switch (selectedBetting) {
+    // Force re-read selectedBetting from state to ensure we have the latest value
+    const currentSelectedBetting = selectedBetting;
+    console.log("Current selected betting option:", currentSelectedBetting);
+
+    if (currentSelectedBetting === null) {
+      console.error("No betting option selected");
+      setBetError("Please select a betting option");
+      return;
+    }
+
+    switch (currentSelectedBetting) {
         case 0: // Profile Control
             betType = BetType.PROFILE_CONTROL;
             break;
@@ -327,7 +345,7 @@ export default function MatchSetupScreen() {
             stakeAmount = selectedStake;
             break;
         default:
-            console.error("Invalid betting option selected");
+            console.error("Invalid betting option selected:", currentSelectedBetting);
             setBetError("Invalid betting option selected");
             return;
     }
@@ -374,7 +392,7 @@ export default function MatchSetupScreen() {
     }
   };
 
-  // Add debugging logs when component mounts
+  // Add debug logging when component mounts
   useEffect(() => {
     console.log('Match setup screen initialized with params:', {
       friend,
@@ -382,6 +400,45 @@ export default function MatchSetupScreen() {
       opponentSocketId
     });
   }, []);
+
+  // Add debug logging to track state changes
+  useEffect(() => {
+    console.log('Selected betting option changed:', selectedBetting);
+  }, [selectedBetting]);
+  
+  // Add a useEffect to ensure the bet type selection is properly initialized
+  useEffect(() => {
+    // Store the selected betting option in localStorage to persist across re-renders
+    if (selectedBetting !== null) {
+      localStorage.setItem('selectedBettingOption', selectedBetting.toString());
+    } else {
+      localStorage.removeItem('selectedBettingOption');
+    }
+  }, [selectedBetting]);
+  
+  // Initialize the selected betting option from localStorage on component mount
+  useEffect(() => {
+    const savedBettingOption = localStorage.getItem('selectedBettingOption');
+    if (savedBettingOption !== null) {
+      const option = parseInt(savedBettingOption, 10);
+      if (!isNaN(option) && option >= 0 && option <= 2) {
+        console.log('Initializing selected betting option from localStorage:', option);
+        setSelectedBetting(option);
+      }
+    }
+  }, []);
+
+  // Add a useEffect to log state changes for selectedBetting
+  useEffect(() => {
+    console.log('selectedBetting state changed:', selectedBetting);
+    
+    // Store in localStorage for persistence
+    if (selectedBetting !== null) {
+      localStorage.setItem('selectedBettingOption', selectedBetting.toString());
+    } else {
+      localStorage.removeItem('selectedBettingOption');
+    }
+  }, [selectedBetting]);
 
   return (
     <div className="min-h-screen w-full flex flex-col items-center justify-start" style={{ background: BG_COLOR }}>
@@ -719,10 +776,24 @@ export default function MatchSetupScreen() {
               {bettingOptions.map((opt, idx) => (
                 <div
                   key={opt.value}
-                  className="flex items-center rounded-xl px-3 py-3"
+                  className="flex items-center rounded-xl px-3 py-3 cursor-pointer"
                   style={{ background: CARD_COLOR }}
+                  onClick={() => {
+                    console.log('Betting option card clicked:', idx);
+                    // Use the functional form of setState to ensure we're working with the latest state
+                    setSelectedBetting(prevState => {
+                      const newState = prevState === idx ? null : idx;
+                      console.log(`Setting selectedBetting from ${prevState} to ${newState}`);
+                      return newState;
+                    });
+                  }}
                 >
-                  <span className="flex-1 text-[#FAF3DD] font-medium" style={{ fontSize: 15 }}>{opt.label}</span>
+                  <span 
+                    className="flex-1 text-[#FAF3DD] font-medium cursor-pointer" 
+                    style={{ fontSize: 15 }}
+                  >
+                    {opt.label}
+                  </span>
                   <span className="mx-2">
                     <button
                       style={{
@@ -739,7 +810,10 @@ export default function MatchSetupScreen() {
                         border: 'none',
                         cursor: 'pointer',
                       }}
-                      onClick={() => setOpenPopup(idx as 0 | 1 | 2)}
+                      onClick={(e) => {
+                        e.stopPropagation(); // Stop event propagation
+                        setOpenPopup(idx as 0 | 1 | 2);
+                      }}
                       aria-label={`Show info for ${opt.label}`}
                     >
                       ?
@@ -832,7 +906,16 @@ export default function MatchSetupScreen() {
                   ) : null}
                   <button
                     className="ml-3"
-                    onClick={() => setSelectedBetting(selectedBetting === idx ? null : idx)}
+                    onClick={(e) => {
+                      e.stopPropagation(); // Prevent event bubbling
+                      console.log('Betting checkbox clicked:', idx, 'Current state:', selectedBetting);
+                      // Use the functional form of setState to ensure we're working with the latest state
+                      setSelectedBetting(prevState => {
+                        const newState = prevState === idx ? null : idx;
+                        console.log(`Setting selectedBetting from ${prevState} to ${newState}`);
+                        return newState;
+                      });
+                    }}
                     style={{
                       width: 28,
                       height: 28,
@@ -848,9 +931,9 @@ export default function MatchSetupScreen() {
                     }}
                     aria-label={`Select ${opt.label}`}
                   >
-                    {selectedBetting === idx ? (
+                    {selectedBetting === idx && (
                       <span style={{ color: "#FAF3DD", fontSize: 16 }}>✓</span>
-                    ) : null}
+                    )}
                   </button>
                 </div>
               ))}
@@ -861,7 +944,7 @@ export default function MatchSetupScreen() {
           {/* Send Request Button: inside card for desktop, fixed for mobile */}
           <div className="send-request-btn-wrapper mb-4">
             <button
-              className="w-full py-3 font-semibold text-lg  send-request-btn"
+              className="w-full py-3 font-semibold text-lg send-request-btn"
               style={{
                 background: selectedBetting !== null && isConnected ? "#4A7C59" : BUTTON_DISABLED,
                 color: selectedBetting !== null && isConnected ? BUTTON_TEXT_ENABLED : BUTTON_TEXT_DISABLED,
@@ -873,7 +956,15 @@ export default function MatchSetupScreen() {
                 transition: "all 0.2s",
               }}
               disabled={selectedBetting === null || !isConnected}
-              onClick={handleSendRequest}
+              onClick={() => {
+                console.log('Send Request clicked with selectedBetting:', selectedBetting);
+                // Only proceed if selectedBetting is not null
+                if (selectedBetting !== null && isConnected) {
+                  handleSendRequest();
+                } else {
+                  console.log('Send Request button clicked but disabled. selectedBetting:', selectedBetting, 'isConnected:', isConnected);
+                }
+              }}
             >
               Send Request
             </button>

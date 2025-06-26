@@ -66,6 +66,9 @@ export class Game {
   @Column({ type: 'varchar', nullable: true })
   fen: string;
 
+  @Column({ type: 'varchar', nullable: true })
+  betChallengeId: string | null;
+
   @CreateDateColumn()
   createdAt: Date;
 

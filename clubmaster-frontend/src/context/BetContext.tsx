@@ -114,13 +114,35 @@ export const BetProvider: React.FC<BetProviderProps> = ({ children }) => {
     };
 
     // Add handler for bet_game_ready event
-    const handleBetGameReady = (data: { gameId: string }) => {
+    const handleBetGameReady = (data: { gameId: string; betType: BetType; betId: string }) => {
       if (data && data.gameId) {
         // Show a success toast
         toast.success('Game ready! Redirecting to the game...');
         
-        // Navigate to the game page
-        router.push(`/play/game/${data.gameId}`);
+        // Get opponent information from the bet challenge if available
+        const opponentId = currentBetChallenge?.opponentId || null;
+        
+        // Build URL with query parameters including bet context
+        const queryParams = new URLSearchParams({
+          isBetGame: 'true',
+          betType: data.betType,
+          betId: data.betId
+        });
+        
+        // Add opponent ID if available
+        if (opponentId) {
+          queryParams.append('opponentId', opponentId);
+        }
+        
+        console.log('[BetContext] Navigating to game with bet context:', {
+          gameId: data.gameId,
+          betType: data.betType,
+          betId: data.betId,
+          opponentId
+        });
+        
+        // Navigate to the game page with bet context
+        router.push(`/play/game/${data.gameId}?${queryParams.toString()}`);
       } else {
         toast.error('Could not start game: Invalid game data received');
       }
