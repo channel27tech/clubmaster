@@ -1,5 +1,5 @@
 'use client';
-import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef, forwardRef, useImperativeHandle } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import PlayerInfo from './PlayerInfo';
@@ -69,9 +69,20 @@ interface ChessBoardWrapperProps {
   timeControl?: string;
   gameId?: string;
   onSanMoveListChange?: (sanMoves: string[]) => void;
+  currentMoveIndex?: number;
+  onMoveIndexChange?: (moveIndex: number) => void;
 }
 
-export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', gameId = '', onSanMoveListChange }: ChessBoardWrapperProps) {
+// Define the ref type for exposed methods
+export interface ChessBoardWrapperRef {
+  jumpToMove: (moveIndex: number) => void;
+}
+
+const ChessBoardWrapper = forwardRef<ChessBoardWrapperRef, ChessBoardWrapperProps>(
+  function ChessBoardWrapper(
+    { playerColor, timeControl = '5+0', gameId = '', onSanMoveListChange, currentMoveIndex = -1, onMoveIndexChange },
+    ref
+  ) {
   // Get game ID from props or use derived from URL if available
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [gameRoomId, setGameRoomId] = useState<string>(gameId);
@@ -132,10 +143,49 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     appendMove,
     goBack,
     goForward,
+    jumpToMove,
     exitHistoryMode
   } = useChessHistory();
   
   const [sanMoveList, setSanMoveList] = useState<string[]>([]);
+  
+  // Add a ref to track the previous position to prevent unnecessary updates
+  const previousPositionRef = useRef<number>(-1);
+  
+  // Expose methods via ref
+  useImperativeHandle(ref, () => ({
+    jumpToMove: (moveIndex: number) => {
+      console.log(`[ChessBoardWrapper] jumpToMove called with index: ${moveIndex}`);
+      jumpToMove(moveIndex);
+    }
+  }), [jumpToMove]);
+  
+  // Respond to currentMoveIndex changes from parent
+  useEffect(() => {
+    // Only update if currentMoveIndex has actually changed
+    if (
+      currentMoveIndex !== undefined &&
+      moveHistory.currentMoveIndex !== currentMoveIndex &&
+      previousPositionRef.current !== currentMoveIndex
+    ) {
+      previousPositionRef.current = currentMoveIndex;
+      jumpToMove(currentMoveIndex);
+    }
+    // Only depend on currentMoveIndex and jumpToMove
+  }, [currentMoveIndex, jumpToMove, moveHistory.currentMoveIndex]);
+  
+  // Notify parent when move index changes internally
+  useEffect(() => {
+    if (
+      onMoveIndexChange &&
+      moveHistory.currentMoveIndex !== currentMoveIndex &&
+      previousPositionRef.current !== moveHistory.currentMoveIndex
+    ) {
+      previousPositionRef.current = moveHistory.currentMoveIndex;
+      onMoveIndexChange(moveHistory.currentMoveIndex);
+    }
+    // Only depend on moveHistory.currentMoveIndex and onMoveIndexChange
+  }, [moveHistory.currentMoveIndex, onMoveIndexChange, currentMoveIndex]);
   
   // Captured pieces state
   const [capturedByWhite, setCapturedByWhite] = useState<CapturedPiece[]>([]);
@@ -1807,117 +1857,117 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         console.log(`[handleBoardUpdated] Processing move history update for game ${data.gameId}`);
         
         try {
-          // Check if the game is already over
-          if (gameState.isGameOver) {
-            console.log('Game is already over, ignoring board_updated event');
-            return;
-          }
-
-          console.log(`Received board_updated event for game ${data.gameId} with ${data.moveHistory.length} moves, whiteTurn=${data.whiteTurn}`);
+      // Check if the game is already over
+      if (gameState.isGameOver) {
+        console.log('Game is already over, ignoring board_updated event');
+        return;
+      }
+      
+      console.log(`Received board_updated event for game ${data.gameId} with ${data.moveHistory.length} moves, whiteTurn=${data.whiteTurn}`);
+      
+        // Always update the chess engine state with the server's FEN if provided
+        if (data.fen) {
+          setChessPosition(data.fen, gameRoomId);
+        }
+      
+        // CRITICAL: Always update the active player first if whiteTurn is provided
+        // This ensures clocks and turn indicators stay in sync, regardless of other updates
+        if (data.whiteTurn !== undefined) {
+          const newActivePlayer = data.whiteTurn ? 'white' : 'black';
+          if (activePlayer !== newActivePlayer) {
+            console.log(`[TURN] Updating active player from ${activePlayer} to ${newActivePlayer} (whiteTurn=${data.whiteTurn})`);
+            setActivePlayer(newActivePlayer);
           
-          // Always update the chess engine state with the server's FEN if provided
-          if (data.fen) {
-            setChessPosition(data.fen, gameRoomId);
+            // Also update the game state to reflect the current turn
+            setGameState(prevState => ({
+              ...prevState,
+              isWhiteTurn: data.whiteTurn,
+              hasWhiteMoved: data.moveHistory.length > 0
+            }));
+          } else {
+            console.log(`[TURN] Active player already set to ${activePlayer}, no update needed`);
           }
+        } else {
+          console.warn('[TURN] No whiteTurn value provided in board_updated event');
+        }
         
-          // CRITICAL: Always update the active player first if whiteTurn is provided
-          // This ensures clocks and turn indicators stay in sync, regardless of other updates
-          if (data.whiteTurn !== undefined) {
-            const newActivePlayer = data.whiteTurn ? 'white' : 'black';
-            if (activePlayer !== newActivePlayer) {
-              console.log(`[TURN] Updating active player from ${activePlayer} to ${newActivePlayer} (whiteTurn=${data.whiteTurn})`);
-              setActivePlayer(newActivePlayer);
-            
-              // Also update the game state to reflect the current turn
-              setGameState(prevState => ({
-                ...prevState,
-                isWhiteTurn: data.whiteTurn,
-                hasWhiteMoved: data.moveHistory.length > 0
-              }));
-            } else {
-              console.log(`[TURN] Active player already set to ${activePlayer}, no update needed`);
-            }
-          } else {
-            console.warn('[TURN] No whiteTurn value provided in board_updated event');
-          }
+        // Check if the move history has actually changed
+        const moveHistoryChanged = JSON.stringify(data.moveHistory) !== JSON.stringify(sanMoveList);
+        
+        if (!moveHistoryChanged) {
+          console.log('Move history unchanged, skipping further update');
+          return;
+        }
+        
+                  // Synchronize the board using move history as the primary source of truth
+        const syncResult = synchronizeBoardFromMoveHistory(data.moveHistory);
+        if (syncResult) {
+          // Update the board state from the new position
+          const newBoardState = getCurrentBoardState();
           
-          // Check if the move history has actually changed
-          const moveHistoryChanged = JSON.stringify(data.moveHistory) !== JSON.stringify(sanMoveList);
+          // Check if the board state has actually changed
+          const boardStateChanged = JSON.stringify(newBoardState) !== JSON.stringify(boardState);
           
-          if (!moveHistoryChanged) {
-            console.log('Move history unchanged, skipping further update');
+          if (!boardStateChanged && data.moveHistory.length === sanMoveList.length) {
+            console.log('Board state unchanged, skipping update');
             return;
           }
+              
+          // Always update the move history
+          setSanMoveList(data.moveHistory);
+          if (onSanMoveListChange) onSanMoveListChange(data.moveHistory);
           
-                    // Synchronize the board using move history as the primary source of truth
-          const syncResult = synchronizeBoardFromMoveHistory(data.moveHistory);
-          if (syncResult) {
-            // Update the board state from the new position
-            const newBoardState = getCurrentBoardState();
-            
-            // Check if the board state has actually changed
-            const boardStateChanged = JSON.stringify(newBoardState) !== JSON.stringify(boardState);
-            
-            if (!boardStateChanged && data.moveHistory.length === sanMoveList.length) {
-              console.log('Board state unchanged, skipping update');
-              return;
+          // Prepare updates
+          const updates: any = {};
+          
+          // Update last move if provided
+          if (data.lastMove) {
+            const matches = data.lastMove.match(/[a-h][1-8]/g) || [];
+            if (matches.length >= 2) {
+              const from = matches[0];
+              const to = matches[1];
+              updates.lastMove = { from, to };
             }
-                
-            // Always update the move history
-            setSanMoveList(data.moveHistory);
-            if (onSanMoveListChange) onSanMoveListChange(data.moveHistory);
-            
-            // Prepare updates
-            const updates: any = {};
-            
-            // Update last move if provided
-            if (data.lastMove) {
-              const matches = data.lastMove.match(/[a-h][1-8]/g) || [];
-              if (matches.length >= 2) {
-                const from = matches[0];
-                const to = matches[1];
-                updates.lastMove = { from, to };
-              }
-            }
-            
-            // Check if we're in review mode (viewing a historical move)
-            const isReviewMode = moveHistory && moveHistory.currentMoveIndex !== moveHistory.moves.length - 1 && moveHistory.moves.length > 0;
-            
-            // Only update the visible board state if we're not in review mode
-            if (!isReviewMode) {
-              console.log('Not in review mode, updating visible board state');
+          }
+          
+          // Check if we're in review mode (viewing a historical move)
+          const isReviewMode = moveHistory && moveHistory.currentMoveIndex !== moveHistory.moves.length - 1 && moveHistory.moves.length > 0;
+          
+          // Only update the visible board state if we're not in review mode
+          if (!isReviewMode) {
+            console.log('Not in review mode, updating visible board state');
               updateBoardState(newBoardState);
-              if (updates.lastMove) setLastMove(updates.lastMove);
-            } else {
-              console.log('In review mode, preserving historical view (not updating visible board state)');
-              // Even in review mode, we should update the underlying move history
-              // This ensures that when the user exits review mode, they'll see the latest state
-            }
-            
-            console.log('Successfully processed board update');
+            if (updates.lastMove) setLastMove(updates.lastMove);
           } else {
-            // If move history sync fails, fallback to FEN
-            if (data.fen) {
-              synchronizeBoardFromFen(data.fen, data.moveHistory);
-              if (socket && gameRoomId) {
-                socket.emit('request_board_sync', {
-                  gameId: gameRoomId,
-                  reason: 'critical_sync_failure',
-                  clientState: getChessEngine().fen()
-                });
-              }
+            console.log('In review mode, preserving historical view (not updating visible board state)');
+            // Even in review mode, we should update the underlying move history
+            // This ensures that when the user exits review mode, they'll see the latest state
+          }
+          
+          console.log('Successfully processed board update');
+        } else {
+          // If move history sync fails, fallback to FEN
+          if (data.fen) {
+            synchronizeBoardFromFen(data.fen, data.moveHistory);
+            if (socket && gameRoomId) {
+              socket.emit('request_board_sync', {
+                gameId: gameRoomId,
+                reason: 'critical_sync_failure',
+                clientState: getChessEngine().fen()
+              });
             }
           }
-        } catch (error) {
-          console.error('Error processing board update:', error);
-          // Request a full board sync if we fail to process the update
-          if (socket && gameRoomId) {
-            socket.emit('request_board_sync', {
-              gameId: gameRoomId,
-              reason: 'board_update_processing_failed',
-              clientState: getChessEngine().fen()
-            });
-          }
+        }
+      } catch (error) {
+        console.error('Error processing board update:', error);
+        // Request a full board sync if we fail to process the update
+        if (socket && gameRoomId) {
+          socket.emit('request_board_sync', {
+            gameId: gameRoomId,
+            reason: 'board_update_processing_failed',
+            clientState: getChessEngine().fen()
+          });
+        }
         }
       } else {
         console.log('[handleBoardUpdated] Ignoring board update while viewing history');
@@ -3318,31 +3368,45 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       
       {/* Move Controls */}
       <div className="move-controls-container relative">
-        <MoveControls
-          onBack={handleBackClick}
-          onForward={handleForwardClick}
-          canGoBack={canGoBack}
-          canGoForward={canGoForward}
-          gameId={gameRoomId}
-          gameState={gameState}
-          onResign={handleResignGame}
-          onAbortGame={handleAbortGame}
+      <MoveControls
+        onBack={handleBackClick}
+        onForward={handleForwardClick}
+        canGoBack={canGoBack}
+        canGoForward={canGoForward}
+        gameId={gameRoomId}
+        gameState={gameState}
+        onResign={handleResignGame}
+        onAbortGame={handleAbortGame}
           moveHistory={{
             length: moveHistory?.moves?.length || 0,
             currentMoveIndex: moveHistory?.currentMoveIndex || -1
           }}
-          whitePlayer={whitePlayer}
-          blackPlayer={blackPlayer}
-          playerColor={playerColor}
-        />
+        whitePlayer={whitePlayer}
+        blackPlayer={blackPlayer}
+        playerColor={playerColor}
+      />
         
         {/* Live button to exit history mode */}
         {isViewingHistory && (
           <button 
             onClick={() => {
+              // Prevent multiple clicks
+              if ((window as any).isExitingHistoryMode) {
+                console.log("[ChessBoardWrapper] Already exiting history mode, ignoring click");
+                return;
+              }
+              
+              // Set a flag to prevent multiple clicks
+              (window as any).isExitingHistoryMode = true;
+              
               // Get current live board state from chess engine
               const currentLiveBoardState = getCurrentBoardState();
               exitHistoryMode(currentLiveBoardState);
+              
+              // Clear the flag after a short delay
+              setTimeout(() => {
+                (window as any).isExitingHistoryMode = false;
+              }, 500);
             }}
             className="absolute right-2 top-0 bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-3 rounded text-sm"
             aria-label="Return to live game"
@@ -3362,4 +3426,6 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       )}
     </div>
   );
-} 
+});
+
+export default ChessBoardWrapper; 
