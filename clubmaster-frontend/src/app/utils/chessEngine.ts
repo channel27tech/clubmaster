@@ -37,48 +37,68 @@ let chessInstance: Chess | null = null;
 // Track the current game ID
 let currentGameId: string | null = null;
 
+// Utility to validate a FEN string
+const isValidFen = (fen: string): boolean => {
+  try {
+    const testChess = new Chess(fen);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+// Clear all chess state from localStorage and memory
+export const clearChessState = (): void => {
+  chessInstance = null;
+  currentGameId = null;
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem(CHESS_STATE_KEY);
+    localStorage.removeItem(CURRENT_GAME_KEY);
+  }
+};
+
 // Initialize the chess engine with standard position or stored state
 export const getChessEngine = (gameId?: string): Chess => {
-  // If gameId is provided, check if it matches the stored game ID
   if (gameId && gameId !== currentGameId) {
-    // If game ID changed, force a reset
-    console.log('Game ID changed, resetting chess engine');
-    resetChessEngine();
+    chessInstance = new Chess();
     currentGameId = gameId;
-    // Store the new game ID
     if (typeof window !== 'undefined') {
       localStorage.setItem(CURRENT_GAME_KEY, gameId);
+      localStorage.setItem(CHESS_STATE_KEY, chessInstance.fen());
     }
+    console.log(`[chessEngine] Initialized new Chess() for gameId=${gameId}`);
+    return chessInstance;
   }
-
   if (!chessInstance) {
     try {
       const storedFen = getStoredFen();
       const storedGameId = getStoredGameId();
-      
-      // Only use stored FEN if the game IDs match or no gameId was specified
       if (storedFen && (!gameId || gameId === storedGameId)) {
-        // Validate FEN first before trying to use it
         try {
           const tempChess = new Chess();
-          // In some versions of chess.js, load() might return void instead of boolean
-          // So we need to try/catch instead of checking the return value
           tempChess.load(storedFen);
-          // If we got here without an error, the FEN is valid
-          console.log('Restoring chess engine from stored state:', storedFen);
-          chessInstance = tempChess; // Use the already loaded instance
+          chessInstance = tempChess;
+          console.log(`[chessEngine] Loaded Chess() from localStorage FEN for gameId=${gameId}`);
         } catch (error) {
-          console.error('Failed to load stored FEN, using default position');
-          chessInstance = new Chess(); // Fallback to default
+          chessInstance = new Chess();
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(CHESS_STATE_KEY, chessInstance.fen());
+          }
+          console.warn(`[chessEngine] Invalid FEN in localStorage, reset to new Chess() for gameId=${gameId}`);
         }
       } else {
-        // Use default starting position
-        console.log('No valid stored state, initializing with default position');
         chessInstance = new Chess();
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(CHESS_STATE_KEY, chessInstance.fen());
+        }
+        console.log(`[chessEngine] No valid FEN, initialized new Chess() for gameId=${gameId}`);
       }
     } catch (error) {
-      console.error('Error initializing chess engine:', error);
-      chessInstance = new Chess(); // Fallback to default
+      chessInstance = new Chess();
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(CHESS_STATE_KEY, chessInstance.fen());
+      }
+      console.error(`[chessEngine] Error initializing Chess():`, error);
     }
   }
   return chessInstance;
@@ -100,7 +120,6 @@ export const resetChessEngine = (): Chess => {
 export const setChessPosition = (fen: string, gameId?: string): boolean => {
   try {
     if (!fen || typeof fen !== 'string') {
-      console.error('Invalid FEN string provided:', fen);
       return false;
     }
     
@@ -113,7 +132,6 @@ export const setChessPosition = (fen: string, gameId?: string): boolean => {
       validationChess.load(fen);
       // If we got here without an error, the FEN is valid
     } catch (error) {
-      console.error('Invalid FEN string format:', fen);
       return false;
     }
     
@@ -130,7 +148,6 @@ export const setChessPosition = (fen: string, gameId?: string): boolean => {
     
     return true;
   } catch (error) {
-    console.error('Error setting chess position:', error);
     return false;
   }
 };
@@ -164,7 +181,6 @@ export const isLegalMove = (from: string, to: string, promotion?: PieceType): bo
     if (isPawnPromotionMove && !promotion) {
       // For checking legal moves, if no promotion is specified, default to 'queen'
       // This allows showing the move as legal in the UI, and then prompting for the promotion piece
-      console.log(`Potential pawn promotion detected: ${from} -> ${to}`);
     }
     
     // Check if move is legal
@@ -182,7 +198,6 @@ export const isLegalMove = (from: string, to: string, promotion?: PieceType): bo
     }
     return false;
   } catch (error) {
-    console.error('Error checking move legality:', error);
     return false;
   }
 };
@@ -205,7 +220,6 @@ export const makeMove = (from: string, to: string, promotion?: PieceType): boole
     
     // If this is a pawn promotion move but no promotion piece specified, we can't complete the move
     if (isPawnPromotionMove && !promotion) {
-      console.warn('Attempted to make a pawn promotion move without specifying the promotion piece');
       return false;
     }
     
@@ -220,16 +234,13 @@ export const makeMove = (from: string, to: string, promotion?: PieceType): boole
     
     // If move was successful, store the new position
     if (result) {
-      console.log(`Move made: ${result.san}`);
       // Store the new FEN state after a successful move
       storeFen(chess.fen(), currentGameId || undefined);
     } else {
-      console.error('Error making direct move:', new Error(`Invalid move: ${JSON.stringify(move)}`));
     }
     
     return result !== null;
   } catch (error) {
-    console.error('Error making move:', error);
     return false;
   }
 };
@@ -245,7 +256,6 @@ export const undoMove = (): boolean => {
     }
     return result !== null;
   } catch (error) {
-    console.error('Error undoing move:', error);
     return false;
   }
 };
@@ -324,10 +334,8 @@ export const isThreefoldRepetition = (): boolean => {
     const chess = getChessEngine();
     // The chess.js isThreefoldRepetition() returns a boolean indicating if the current position has occurred three or more times
     const result = chess.isThreefoldRepetition();
-    console.log(`Threefold repetition check result: ${result}`);
     return result === true;
   } catch (error) {
-    console.error('Error checking for threefold repetition:', error);
     return false; // Return false on error to avoid false positives
   }
 };
@@ -345,7 +353,6 @@ export const loadPgn = (pgn: string): boolean => {
     
     return true;
   } catch (error) {
-    console.error('Error loading PGN:', error);
     return false;
   }
 };
@@ -356,7 +363,6 @@ export const getPgn = (): string => {
   try {
     return chess.pgn();
   } catch (error) {
-    console.error('Error getting PGN:', error);
     return '';
   }
 };

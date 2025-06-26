@@ -7,10 +7,12 @@ import { ClubModule } from '../club/club.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { Club } from '../club/club.entity';
 import { User } from '../users/entities/user.entity';
+import { ClubInviteModule } from '../club-invite/club-invite.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([ClubMember, Club, User]),
+    ClubInviteModule,
     ClubModule,
     NotificationsModule,
   ],

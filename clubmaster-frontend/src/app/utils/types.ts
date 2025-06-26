@@ -2,6 +2,9 @@
 export type PieceType = 'pawn' | 'rook' | 'knight' | 'bishop' | 'queen' | 'king';
 export type PieceColor = 'white' | 'black';
 
+// Import BetType from the bet types file
+import { BetType } from '@/types/bet';
+
 // Captured piece interface
 export interface CapturedPiece {
   type: PieceType;
@@ -17,6 +20,8 @@ export interface PlayerData {
   clubAffiliation?: string;
   isGuest: boolean;
   capturedPieces: CapturedPiece[];
+  userId?: string; // Add userId for bet result handling
+  photoURL?: string | null; // Add photoURL for player avatars
 }
 
 // Interface for a board square
@@ -53,4 +58,11 @@ export interface GameResult {
   opponentPhotoURL?: string | null;
   playerRatingChange: number;
   opponentRatingChange: number;
+  // Bet-specific properties
+  betType?: BetType;
+  isBetGameWinner?: boolean;
+  opponentNameForBetContext?: string;
+  opponentIdForBetContext?: string;
+  opponentNameForBetMessage?: string;
+  stakeAmount?: number;
 } 

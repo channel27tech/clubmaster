@@ -5,7 +5,7 @@ import React, { useEffect, useState } from "react";
 import { useAuth } from "../../../context/AuthContext";
 import profileDataService, { FormattedGameEntry } from "../../../utils/ProfileDataService";
 import type { UserProfile } from "../../../utils/ProfileDataService";
-import { checkIfFriends, addFriend } from "../../../utils/friendUtils";
+import { checkIfFriends, addFriend, checkPendingRequest } from "../../../utils/friendUtils";
 
 // Import formatJoinDate utility, with a fallback implementation
 let formatJoinDate: (date?: Date | null) => string;
@@ -46,6 +46,7 @@ export default function PlayerProfile() {
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const [isFriend, setIsFriend] = useState(false);
+  const [isRequestPending, setIsRequestPending] = useState(false);
   const playerId = params.id as string;
 
   // Check if the current user is viewing their own profile
@@ -62,12 +63,23 @@ export default function PlayerProfile() {
     }
   }, [playerId]);
 
-  // Check if the player is already a friend
+  // Check if the player is already a friend or has a pending request
   useEffect(() => {
     const checkFriendStatus = async () => {
       if (user?.uid && playerId && user.uid !== playerId) {
-        const areFriends = await checkIfFriends(user.uid, playerId);
-        setIsFriend(areFriends);
+        try {
+          // Check if they are already friends
+          const areFriends = await checkIfFriends(user.uid, playerId);
+          setIsFriend(areFriends);
+          
+          // If not friends, check if there's a pending request
+          if (!areFriends) {
+            const isPending = await checkPendingRequest(playerId);
+            setIsRequestPending(isPending);
+          }
+        } catch (error) {
+          console.error('Error checking friend status:', error);
+        }
       }
     };
     
@@ -162,16 +174,31 @@ export default function PlayerProfile() {
     if (!user || !playerId) return;
     
     try {
+      // Log player ID for debugging
+      console.log('Attempting to add friend with ID:', playerId);
+      console.log('Player ID type:', typeof playerId);
+      console.log('Player ID length:', playerId.length);
+      console.log('Current user ID:', user.uid);
+      
+      // Ensure we're not trying to add ourselves
+      if (user.uid === playerId) {
+        console.warn('Cannot add yourself as a friend');
+        return;
+      }
+      
       // Call API to add friend
+      console.log('Calling addFriend utility...');
       const success = await addFriend(playerId);
       
       if (success) {
-        setIsFriend(true);
+        console.log('Successfully sent friend request');
+        // Only set the request as pending, not as friends yet
+        setIsRequestPending(true);
       } else {
-        console.error('Failed to add friend');
+        console.error('Failed to send friend request - returned false');
       }
     } catch (error) {
-      console.error('Error adding friend:', error);
+      console.error('Error sending friend request:', error);
     }
   };
 
@@ -258,20 +285,31 @@ export default function PlayerProfile() {
       {/* Action Buttons */}
       {!isOwnProfile && (
         <div className="w-full flex justify-center gap-4 px-4 mb-4" style={{ maxWidth: 430 }}>
-          <button 
-            onClick={handleAddFriend}
-            disabled={isFriend}
-            className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-md border-2 ${
-              isFriend ? 'border-gray-500 bg-gray-700 text-gray-400' : 'border-[#8FC0A9] bg-[#333939] text-[#FAF3DD] hover:bg-[#3A4141]'
-            } transition-colors`}
-          >
-            <Image src="/icons/user-plus.svg" alt="Add Friend" width={20} height={20} />
-            <span>{isFriend ? 'Friend Added' : 'Add Friend'}</span>
-          </button>
+          {/* Only show the Add Friend button if they are not friends and don't have a pending request */}
+          {!isFriend && (
+            <button 
+              onClick={handleAddFriend}
+              disabled={isRequestPending}
+              className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-md border-2 ${
+                isRequestPending 
+                  ? 'border-[#E9CB6B] bg-[#3A4141] text-[#E9CB6B]' 
+                  : 'border-[#8FC0A9] bg-[#333939] text-[#FAF3DD] hover:bg-[#3A4141]'
+              } transition-colors`}
+            >
+              <Image 
+                src={isRequestPending ? "/icons/user-clock.svg" : "/icons/user-plus.svg"} 
+                alt={isRequestPending ? "Pending" : "Add Friend"} 
+                width={20} 
+                height={20} 
+              />
+              <span>{isRequestPending ? 'Request Sent' : 'Add Friend'}</span>
+            </button>
+          )}
           
+          {/* Always show the Challenge button */}
           <button 
             onClick={handleChallenge}
-            className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-md border-2 border-[#8FC0A9] bg-[#333939] text-[#FAF3DD] hover:bg-[#3A4141] transition-colors"
+            className={`${isFriend ? 'flex-1' : ''} flex items-center justify-center gap-2 py-3 px-4 rounded-md border-2 border-[#8FC0A9] bg-[#333939] text-[#FAF3DD] hover:bg-[#3A4141] transition-colors`}
           >
             <Image src="/icons/chess-knight.svg" alt="Challenge" width={20} height={20} />
             <span>Challenge</span>

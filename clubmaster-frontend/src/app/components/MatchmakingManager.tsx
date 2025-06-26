@@ -1,7 +1,10 @@
+'use client';
+
 import React, { forwardRef, useImperativeHandle, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import * as socketService from '@/services/socketService';
 import { SidePreference, determinePlayerColor } from '@/utils/sideSelection';
+import { BetType } from '@/types/bet';
 
 interface MatchmakingManagerProps {
   defaultGameMode?: string;
@@ -12,7 +15,12 @@ interface MatchmakingManagerProps {
 }
 
 export interface MatchmakingManagerHandle {
-  startMatchmaking: (mode: string, time: string, playSide: string) => void;
+  startMatchmaking: (mode: string, time: string, playSide: string, betOptions?: {
+    betChallengeId?: string;
+    betType?: BetType;
+    stakeAmount?: number;
+    opponentId?: string;
+  }) => void;
 }
 
 // Define the window interface to properly type the window extensions
@@ -37,6 +45,7 @@ const MatchmakingManager = forwardRef<MatchmakingManagerHandle, MatchmakingManag
     const [gameMode, setGameMode] = useState<string>(defaultGameMode);
     const [timeControl, setTimeControl] = useState<string>(defaultTimeControl);
     const [side, setSide] = useState<string>(defaultSide);
+    const [betChallengeId, setBetChallengeId] = useState<string | undefined>(undefined);
     
     // Mock player info - in a real app this would come from auth state
     const playerInfo = {
@@ -44,82 +53,174 @@ const MatchmakingManager = forwardRef<MatchmakingManagerHandle, MatchmakingManag
       rating: 1762
     };
     
+    const listenersSetupRef = React.useRef(false);
+    
+    // Expose methods to parent component through ref
+    useImperativeHandle(ref, () => ({
+      startMatchmaking: (mode: string, time: string, playSide: string, betOptions?: {
+        betChallengeId?: string;
+        betType?: BetType;
+        stakeAmount?: number;
+        opponentId?: string;
+      }) => {
+        startMatchmaking(mode, time, playSide, betOptions);
+      }
+    }));
+    
     useEffect(() => {
-      // Setup socket listeners when component mounts
+      if (listenersSetupRef.current) return; // Prevent duplicate setup
+      listenersSetupRef.current = true;
+      console.log('[MatchmakingManager] Setting up socket listeners');
+      
       const handleMatchFound = (gameData: any) => {
-        console.log('Match found with gameData:', gameData);
+        console.log('[MatchmakingManager] Match found event received:', gameData);
+        
+        // Stop matchmaking state
         setIsMatchmaking(false);
         
-        // Use the server-assigned player color
-        if (!gameData || !gameData.playerColor) {
-          console.error('Error: No player color assignment received from server');
-          setError('Unable to start game - invalid color assignment');
+        // Validate game data
+        if (!gameData || !gameData.gameId) {
+          console.error('[MatchmakingManager] Invalid game data received:', gameData);
+          setError('Invalid game data received from server');
+          if (onError) onError('Invalid game data received from server');
           return;
         }
         
-        // Get the server-assigned color
-        const assignedColor = gameData.playerColor.toLowerCase();
-        
-        // Validate the assigned color
-        if (assignedColor !== 'white' && assignedColor !== 'black') {
-          console.error(`Invalid color received: ${assignedColor}`);
-          setError('Invalid color assignment received');
-          return;
+        // Store player color in localStorage based on assigned color
+        if (gameData.playerColor) {
+          console.log(`[MatchmakingManager] Setting player color to: ${gameData.playerColor}`);
+          localStorage.setItem('playerColor', gameData.playerColor);
         }
         
-        console.log(`Server assigned player color: ${assignedColor}`);
-        
-        // Log details about the side assignment for debugging
-        if (gameData.sideAssignment) {
-          console.log('Side assignment details:', gameData.sideAssignment);
-        }
-        
-        // Store the calculated player color in localStorage
-        localStorage.setItem('playerColor', assignedColor);
-        
-        // Store timeControl in localStorage
-        if (gameData && gameData.timeControl) {
-          localStorage.setItem('timeControl', gameData.timeControl);
-        } else {
-          // Use the current timeControl as fallback
-          localStorage.setItem('timeControl', `${timeControl}+0`);
+        // Store game details in localStorage for potential reconnection
+        try {
+          // Store timeControl in localStorage
+          if (gameData.timeControl) {
+            console.log(`[MatchmakingManager] Setting time control to: ${gameData.timeControl}`);
+            localStorage.setItem('timeControl', gameData.timeControl);
+          } else {
+            // Use the current timeControl as fallback
+            const fallbackTimeControl = `${timeControl}+0`;
+            console.log(`[MatchmakingManager] No time control received, using fallback: ${fallbackTimeControl}`);
+            localStorage.setItem('timeControl', fallbackTimeControl);
+          }
+          
+          // Store gameId in localStorage
+          localStorage.setItem('currentGameId', gameData.gameId);
+          
+          // Store gameMode in localStorage if available
+          if (gameData.gameMode) {
+            localStorage.setItem('gameMode', gameData.gameMode);
+          }
+        } catch (error) {
+          console.warn('[MatchmakingManager] Error storing game details in localStorage:', error);
+          // Non-fatal error, continue with navigation
         }
         
         // Navigate to the game screen with the game ID
-        if (gameData && gameData.gameId) {
-          router.push(`/play/game/${gameData.gameId}`);
+        console.log(`[MatchmakingManager] Navigating to game: /play/game/${gameData.gameId}`);
+        
+        // Notify parent component if callback is provided
+        if (onGameFound) {
+          console.log('[MatchmakingManager] Calling onGameFound callback with gameId:', gameData.gameId);
+          onGameFound(gameData.gameId);
+        } else {
+          console.log('[MatchmakingManager] No onGameFound callback provided, handling navigation internally');
+          
+          // Use setTimeout to ensure the navigation happens after state updates
+          setTimeout(() => {
+            console.log(`[MatchmakingManager] Executing navigation to /play/game/${gameData.gameId}`);
+            router.push(`/play/game/${gameData.gameId}`);
+          }, 100);
         }
       };
       
       const handleMatchmakingError = (error: any) => {
-        console.error('Matchmaking error:', error);
-        setError(error.message || 'An error occurred during matchmaking');
+        console.error('[MatchmakingManager] Matchmaking error:', error);
+        const errorMessage = error.message || 'An error occurred during matchmaking';
+        setError(errorMessage);
         setIsMatchmaking(false);
+        
+        if (onError) {
+          onError(errorMessage);
+        }
       };
+      
+      const handleMatchmakingStatus = (status: any) => {
+        console.log('[MatchmakingManager] Matchmaking status update:', status);
+      };
+      
+      const handleConnectionStatus = (status: string, details?: string) => {
+        console.log(`[MatchmakingManager] Socket connection status: ${status}${details ? ` (${details})` : ''}`);
+        
+        // If we're matchmaking and the socket disconnects, show an error
+        if (status === 'disconnected' && isMatchmaking) {
+          console.error('[MatchmakingManager] Socket disconnected during matchmaking');
+          setError('Connection to game server lost. Please try again.');
+          setIsMatchmaking(false);
+          if (onError) onError('Connection to game server lost. Please try again.');
+        }
+        
+        // If connection fails completely, show an error
+        if (status === 'failed' && isMatchmaking) {
+          console.error('[MatchmakingManager] Socket connection failed during matchmaking');
+          setError('Unable to connect to game server. Please try again later.');
+          setIsMatchmaking(false);
+          if (onError) onError('Unable to connect to game server. Please try again later.');
+        }
+      };
+      
+      // Initialize socket if not already connected
+      if (!socketService.isConnected()) {
+        console.log('[MatchmakingManager] Initializing socket connection');
+        socketService.getSocket();
+      }
       
       // Register event listeners
       socketService.onMatchFound(handleMatchFound);
       socketService.onMatchmakingError(handleMatchmakingError);
+      socketService.onMatchmakingStatus(handleMatchmakingStatus);
+      socketService.onConnectionStatusChange(handleConnectionStatus);
       
       // Clean up listeners when component unmounts
       return () => {
+        listenersSetupRef.current = false;
+        console.log('[MatchmakingManager] Cleaning up socket listeners');
         socketService.offMatchFound(handleMatchFound);
         socketService.offMatchmakingError(handleMatchmakingError);
+        socketService.offMatchmakingStatus(handleMatchmakingStatus);
+        socketService.offConnectionStatusChange(handleConnectionStatus);
         
         // Cancel matchmaking if component unmounts while matchmaking is active
         if (isMatchmaking) {
+          console.log('[MatchmakingManager] Component unmounting while matchmaking is active - cancelling matchmaking');
           socketService.cancelMatchmaking();
         }
       };
-    }, [router, isMatchmaking, side]);
+    }, [router, isMatchmaking, side, onError, onGameFound, timeControl]);
     
-    const startMatchmaking = (mode: string, time: string, playSide: string) => {
-      console.log('StartMatchmaking called with:', { mode, time, playSide });
+    const startMatchmaking = (
+      mode: string, 
+      time: string, 
+      playSide: string, 
+      betOptions?: {
+        betChallengeId?: string;
+        betType?: BetType;
+        stakeAmount?: number;
+        opponentId?: string;
+      }
+    ) => {
+      console.log('StartMatchmaking called with:', { mode, time, playSide, betOptions });
       setError(null);
       setIsMatchmaking(true);
       setGameMode(mode);
       setTimeControl(time);
       setSide(playSide);
+      
+      // Store bet challenge ID if provided
+      if (betOptions?.betChallengeId) {
+        setBetChallengeId(betOptions.betChallengeId);
+      }
       
       try {
         // Map the time value to the correct game mode and time control
@@ -150,7 +251,7 @@ const MatchmakingManager = forwardRef<MatchmakingManagerHandle, MatchmakingManag
               timeControlString = '5+0';
               effectiveGameMode = 'Blitz';
             } else {
-              timeControlString = '10+0';
+              timeControlString = `${timeValue}+0`;
               effectiveGameMode = 'Rapid';
             }
         }
@@ -161,42 +262,60 @@ const MatchmakingManager = forwardRef<MatchmakingManagerHandle, MatchmakingManag
         console.log('MatchmakingManager stored timeControl in localStorage:', timeControlString);
         console.log('MatchmakingManager stored gameMode in localStorage:', effectiveGameMode);
         
-        // Get or initialize socket
+        // Ensure socket is initialized and connected
         const socket = socketService.getSocket();
         const isConnected = socketService.isConnected();
-        console.log('Socket connection status:', isConnected);
+        console.log('Socket connection status before matchmaking:', isConnected);
         
+        // If socket is not connected, try to connect and retry matchmaking
         if (!isConnected) {
           console.log("Socket not connected, attempting to connect...");
-          socket.connect();
           
+          // Force socket reconnection
+          if (socket) {
+            socket.connect();
+          }
+          
+          // Wait for connection and then start matchmaking
           setTimeout(() => {
-            if (socketService.isConnected()) {
-              console.log("Socket connected after retry");
-              socketService.startMatchmaking({
+            const reconnected = socketService.isConnected();
+            console.log("Socket connection status after retry:", reconnected);
+            
+            if (reconnected) {
+              console.log("Socket connected after retry, starting matchmaking");
+              const options = {
                 gameMode: effectiveGameMode,
                 timeControl: timeControlString,
                 rated: true,
-                preferredSide: playSide
-              });
+                preferredSide: playSide,
+                ...(betOptions?.betChallengeId ? { betChallengeId: betOptions.betChallengeId } : {})
+              };
+              socketService.startMatchmaking(options);
             } else {
               console.error("Socket connection failed after retry");
               setError("Unable to connect to game server. Please try again.");
               setIsMatchmaking(false);
+              if (onError) onError("Unable to connect to game server. Please try again.");
             }
-          }, 1000);
+          }, 1500); // Increased timeout to allow more time for connection
         } else {
-          socketService.startMatchmaking({
+          // Socket is already connected, start matchmaking immediately
+          console.log("Socket already connected, starting matchmaking immediately");
+          const options = {
             gameMode: effectiveGameMode,
             timeControl: timeControlString,
             rated: true,
-            preferredSide: playSide
-          });
+            preferredSide: playSide,
+            ...(betOptions?.betChallengeId ? { betChallengeId: betOptions.betChallengeId } : {})
+          };
+          socketService.startMatchmaking(options);
         }
       } catch (err) {
         console.error('Error in startMatchmaking:', err);
-        setError("An error occurred while starting matchmaking");
+        const errorMessage = err instanceof Error ? err.message : "An error occurred while starting matchmaking";
+        setError(errorMessage);
         setIsMatchmaking(false);
+        if (onError) onError(errorMessage);
       }
     };
     
@@ -232,74 +351,33 @@ const MatchmakingManager = forwardRef<MatchmakingManagerHandle, MatchmakingManag
         
         import('@/utils/sideSelection').then(module => {
           // Run the comprehensive test of all combinations
-          console.log('Running side selection logic tests...');
-          module.testAllCombinations();
+          const testCases = [
+            { player1: 'white', player2: 'white' },
+            { player1: 'white', player2: 'black' },
+            { player1: 'white', player2: 'random' },
+            { player1: 'black', player2: 'white' },
+            { player1: 'black', player2: 'black' },
+            { player1: 'black', player2: 'random' },
+            { player1: 'random', player2: 'white' },
+            { player1: 'random', player2: 'black' },
+            { player1: 'random', player2: 'random' },
+          ];
           
-          // Add explanation about the server-side assignment
-          console.log('\n====== IMPORTANT NOTE ======');
-          console.log('Side selection is now handled by the server to ensure consistency.');
-          console.log('Both clients receive their final color assignment without needing to calculate it.');
-          console.log('============================');
-        }).catch(err => {
-          console.error('Failed to load sideSelection module:', err);
+          console.log('Running side selection test cases:');
+          testCases.forEach((testCase, i) => {
+            const result = module.determinePlayerColor(
+              testCase.player1 as SidePreference,
+              testCase.player2 as SidePreference,
+              gameId as string
+            );
+            console.log(`Test ${i+1}: player1=${testCase.player1}, player2=${testCase.player2} => player1 is ${result.player1Color}, player2 is ${result.player2Color}`);
+          });
         });
       };
     }
     
-    // Expose the startMatchmaking function via ref
-    useImperativeHandle(ref, () => ({
-      startMatchmaking
-    }));
-
-    // Set up socket event listeners
-    React.useEffect(() => {
-      const socket = socketService.getSocket();
-      
-      socket.on('gameFound', (data: { gameId: string }) => {
-        console.log('Game found:', data);
-        onGameFound?.(data.gameId);
-      });
-
-      socket.on('matchmakingError', (error: string) => {
-        console.error('Matchmaking error:', error);
-        onError?.(error);
-      });
-
-      return () => {
-        socket.off('gameFound');
-        socket.off('matchmakingError');
-      };
-    }, [onGameFound, onError]);
-
-    return (
-      <>
-        {error && !isMatchmaking && (
-          <div className="fixed bottom-4 right-4 bg-red-600 text-white p-4 rounded-md shadow-lg z-50">
-            <div className="font-semibold">Error</div>
-            <div>{error}</div>
-          </div>
-        )}
-        
-        {/* Expose methods for parent components */}
-        <div style={{ display: 'none' }}
-          data-matchmaking-active={isMatchmaking}
-          id="matchmaking-manager-control"
-        >
-          <button 
-            onClick={() => startMatchmaking(gameMode, timeControl, side)}
-            id="start-matchmaking-button"
-          >
-            Start Matchmaking
-          </button>
-          <button 
-            onClick={cancelMatchmaking}
-            id="cancel-matchmaking-button"
-          >
-            Cancel Matchmaking
-          </button>
-        </div>
-      </>
-    );
+    // Invisible component - no UI, just logic
+    return null;
   }
 );
 

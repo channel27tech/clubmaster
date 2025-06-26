@@ -5,22 +5,18 @@
  */
 export const useToast = () => {
   const success = (message: string) => {
-    console.log('✅ Success:', message);
     // In a real app: toast.success(message)
   };
 
   const error = (message: string) => {
-    console.error('❌ Error:', message);
     // In a real app: toast.error(message)
   };
 
   const info = (message: string) => {
-    console.info('ℹ️ Info:', message);
     // In a real app: toast.info(message)
   };
 
   const warning = (message: string) => {
-    console.warn('⚠️ Warning:', message);
     // In a real app: toast.warning(message)
   };
 

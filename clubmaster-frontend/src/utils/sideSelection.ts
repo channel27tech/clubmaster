@@ -11,18 +11,27 @@ export type SidePreference = 'white' | 'black' | 'random';
 export type PlayerColor = 'white' | 'black';
 
 /**
- * Test utility to verify side selection logic serverside (admin use)
+ * Result of the side determination process
+ */
+export interface SideDeterminationResult {
+  player1Color: PlayerColor;
+  player2Color: PlayerColor;
+  explanation: string;
+}
+
+/**
+ * Determine player colors based on their preferences
  * 
  * @param player1Preference - Player 1's side preference
  * @param player2Preference - Player 2's side preference
  * @param gameId - Game ID to use for consistency
- * @returns Analysis of the expected outcome
+ * @returns Object with assigned colors for both players
  */
-export function analyzeSideAssignment(
+export function determinePlayerColor(
   player1Preference: SidePreference,
   player2Preference: SidePreference,
   gameId: string
-): string {
+): SideDeterminationResult {
   // Hash function for deterministic decisions
   const deterministicRandom = (id: string): boolean => {
     let hash = 0;
@@ -96,16 +105,34 @@ export function analyzeSideAssignment(
     explanation = 'Fallback case - Player1 gets white by default';
   }
 
+  return { player1Color, player2Color, explanation };
+}
+
+/**
+ * Test utility to verify side selection logic serverside (admin use)
+ * 
+ * @param player1Preference - Player 1's side preference
+ * @param player2Preference - Player 2's side preference
+ * @param gameId - Game ID to use for consistency
+ * @returns Analysis of the expected outcome
+ */
+export function analyzeSideAssignment(
+  player1Preference: SidePreference,
+  player2Preference: SidePreference,
+  gameId: string
+): string {
+  const result = determinePlayerColor(player1Preference, player2Preference, gameId);
+  
   // Validate the result - make sure we have one white and one black
-  const valid = (player1Color === 'white' && player2Color === 'black') || 
-                (player1Color === 'black' && player2Color === 'white');
+  const valid = (result.player1Color === 'white' && result.player2Color === 'black') || 
+                (result.player1Color === 'black' && result.player2Color === 'white');
 
   return `
-  Player1: ${player1Preference} → ${player1Color}
-  Player2: ${player2Preference} → ${player2Color}
+  Player1: ${player1Preference} → ${result.player1Color}
+  Player2: ${player2Preference} → ${result.player2Color}
   Game ID: ${gameId}
   Result: ${valid ? '✓ VALID' : '❌ INVALID'} 
-  Explanation: ${explanation}
+  Explanation: ${result.explanation}
   `;
 }
 
@@ -116,16 +143,10 @@ export function testAllCombinations(): void {
   const preferences: SidePreference[] = ['white', 'black', 'random'];
   const gameId = `game_${Date.now()}`;
   
-  console.log('--------- SIDE SELECTION LOGIC TEST ---------');
-  console.log(`Using game ID: ${gameId}`);
-  console.log('--------------------------------------------');
-  
   // Test all combinations
   for (const p1Pref of preferences) {
     for (const p2Pref of preferences) {
-      console.log(`CASE: Player1(${p1Pref}) vs Player2(${p2Pref})`);
-      console.log(analyzeSideAssignment(p1Pref, p2Pref, gameId));
-      console.log('--------------------------------------------');
+      analyzeSideAssignment(p1Pref, p2Pref, gameId);
     }
   }
 } 

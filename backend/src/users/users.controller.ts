@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Put, Delete, NotFoundException, Logger, Headers, UnauthorizedException, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Put, Delete, NotFoundException, Logger, Headers, UnauthorizedException, UseGuards, Req, Query } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { User } from './entities/user.entity';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -38,6 +38,17 @@ export class UsersController {
     return this.usersService.findAll();
   }
 
+  @Get('list')
+  @UseGuards(FirebaseAuthGuard)
+  async listUsers(
+    @Req() req: FirebaseRequest,
+    @Query('excludeClubMembers') excludeClubMembers?: string
+  ): Promise<User[]> {
+    const currentUserId = req.user.uid; // This line will now have req.user defined
+    const exclude = excludeClubMembers === 'true';
+    return this.usersService.findAllExcludingClubMembers(exclude, currentUserId);
+  }
+
   @Get(':id')
   async findOne(@Param('id') id: string): Promise<User> {
     const user = await this.usersService.findOne(id);
@@ -71,12 +82,23 @@ export class UsersController {
     if (!user) {
       throw new NotFoundException(`User profile with ID ${id} not found`);
     }
-    
+    // Determine if profile is under control
+    let displayName = user.displayName;
+    let photoURL = user.photoURL;
+    const now = new Date();
+    if (
+      user.profileControlledBy &&
+      user.profileControlExpiry &&
+      new Date(user.profileControlExpiry) > now
+    ) {
+      if (user.controlledNickname) displayName = user.controlledNickname;
+      if (user.controlledAvatarType) photoURL = user.controlledAvatarType; // If you need to map avatarType to a URL, do it here
+    }
     return {
       id: user.id,
-      displayName: user.displayName,
+      displayName,
       email: user.email,
-      photoURL: user.photoURL,
+      photoURL,
       rating: user.rating,
       stats: {
         gamesPlayed: user.gamesPlayed,

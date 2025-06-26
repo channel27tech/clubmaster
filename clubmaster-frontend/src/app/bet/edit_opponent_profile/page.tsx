@@ -2,11 +2,8 @@
 import React, { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-
-const OPPONENT = {
-  name: "Abhishektn27x",
-  avatar: "/images/sample-opponent-avatar.png", // Replace with real image if available
-};
+import { useRouter, useSearchParams } from "next/navigation";
+import { auth } from '@/firebase';
 
 const PROFILE_IMAGES = [
   "/bet_images/bet_profile_1.svg",
@@ -24,16 +21,63 @@ const NICKNAMES = [
   "Chess Jester",
   "The Great Sacrifice",
   "Queen's Gambit Reject",
-"Rookie Mistake",
-"Castle Crusher",
-"En Passant Phantom",
-"Fork Whisperer",
+  "Rookie Mistake",
+  "Castle Crusher",
+  "En Passant Phantom",
+  "Fork Whisperer",
 ];
 
 export default function EditOpponentProfile() {
-  const [selectedProfile, setSelectedProfile] = useState(0);
-  const [selectedNickname, setSelectedNickname] = useState<null | number>(null);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const opponentId = searchParams.get("opponentId");
+
+  const [selectedProfile, setSelectedProfile] = useState<number | null>(null);
+  const [selectedNickname, setSelectedNickname] = useState<number | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSave = async () => {
+    if (!opponentId || selectedProfile === null || selectedNickname === null) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        setError('You must be logged in to perform this action.');
+        setLoading(false);
+        return;
+      }
+      const token = await user.getIdToken();
+      const res = await fetch("/api/bet/profile-control?targetUserId=" + encodeURIComponent(opponentId), {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          avatarType: PROFILE_IMAGES[selectedProfile],
+          nickname: NICKNAMES[selectedNickname],
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setError(data.error || "Failed to update profile");
+        setLoading(false);
+        return;
+      }
+      setShowSuccess(true);
+      setTimeout(() => {
+        setShowSuccess(false);
+        router.push("/club/clubs"); // or wherever you want to redirect
+      }, 1500);
+    } catch (e) {
+      setError("An error occurred. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="min-h-screen w-full flex flex-col items-center  bg-[#333939]">
@@ -51,16 +95,7 @@ export default function EditOpponentProfile() {
       </div>
 
       {/* Opponent Avatar & Name */}
-      <div className="flex flex-col items-center mt-2 mb-4">
-        <Image
-          src={OPPONENT.avatar}
-          alt="Opponent Avatar"
-          width={80}
-          height={80}
-          className="rounded-full border-4 border-[#333939] bg-[#fff]"
-        />
-        <span className="mt-2 text-[16px] text-[#FAF3DD] font-semibold" style={{ fontFamily: 'Roboto' }}>{OPPONENT.name}</span>
-      </div>
+      {/* Optionally fetch/display real opponent info here if available */}
 
       {/* Choose Their New Profile */}
       <div className="w-full max-w-[430px] mb-4">
@@ -117,6 +152,7 @@ export default function EditOpponentProfile() {
             fontFamily: 'Roboto',
             fontSize: 16,
           }}
+          onClick={() => router.back()}
         >
           Cancel
         </button>
@@ -129,11 +165,17 @@ export default function EditOpponentProfile() {
             fontFamily: 'Roboto',
             fontSize: 16,
           }}
-          onClick={() => setShowSuccess(true)}
+          onClick={handleSave}
+          disabled={loading || selectedProfile === null || selectedNickname === null}
         >
-          Save
+          {loading ? 'Saving...' : 'Save'}
         </button>
       </div>
+
+      {/* Error Message */}
+      {error && (
+        <div className="text-red-400 text-center mt-2">{error}</div>
+      )}
 
       {/* Success Popup Modal */}
       {showSuccess && (
@@ -177,7 +219,7 @@ export default function EditOpponentProfile() {
               zIndex: 2,
             }}>
               <Image
-                src={PROFILE_IMAGES[selectedProfile]}
+                src={selectedProfile !== null ? PROFILE_IMAGES[selectedProfile] : PROFILE_IMAGES[0]}
                 alt="Updated Profile"
                 width={76}
                 height={76}

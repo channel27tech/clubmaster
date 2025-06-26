@@ -5,6 +5,7 @@ import BottomNavigation from "../../components/BottomNavigation";
 import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
 import firebaseApp from "../../../lib/firebase"; // Your Firebase app initialization
+import { differenceInMilliseconds } from 'date-fns';
 
 // Helper function to convert file to base64 (similar to backend's imageProcessor)
 const convertFileToBase64 = (file: File): Promise<string> => {
@@ -17,6 +18,7 @@ const convertFileToBase64 = (file: File): Promise<string> => {
 };
 
 interface UserProfile {
+  id?: string;
   username: string;
   first_name: string | null;
   last_name: string | null;
@@ -26,6 +28,10 @@ interface UserProfile {
   photo_url?: string | null; // Original google photo url
   display_name?: string;
   email?: string;
+  profileControlledBy?: string;
+  profileControlExpiry?: string;
+  profileLocked?: boolean;
+  profileLockExpiry?: string;
   // Add other fields your user profile might have from the DB
 }
 
@@ -137,6 +143,9 @@ export default function EditProfilePage() {
         return;
       }
 
+      // Log the user-entered location
+      console.log('User-entered location:', location);
+      
       const response = await fetch("/api/profile/update", {
         method: "POST",
         headers: {
@@ -178,6 +187,14 @@ export default function EditProfilePage() {
     }
   };
   
+  // Determine if profile is locked or controlled
+  const isProfileControlled = currentUser?.profileControlledBy && currentUser?.profileControlExpiry &&
+    currentUser.profileControlledBy !== currentUser.id &&
+    differenceInMilliseconds(new Date(currentUser.profileControlExpiry), new Date()) > 0;
+  const isProfileLocked = currentUser?.profileLocked && currentUser?.profileLockExpiry &&
+    differenceInMilliseconds(new Date(currentUser.profileLockExpiry), new Date()) > 0;
+  const isEditingDisabled = isProfileControlled || isProfileLocked;
+
   if (isFetchingProfile) {
     return (
         <div className="min-h-screen flex flex-col items-center justify-center bg-[#333939] max-w-[430px] mx-auto">
@@ -205,7 +222,7 @@ export default function EditProfilePage() {
       </div>
       {/* Green Profile header with border */}
       <div className="flex justify-center px-4">
-        <div className="w-full max-w-[380px] bg-[#4A7C59] rounded-[10px] py-2 text-center text-lg font-semibold text-[#FAF3DD] mb-6 border" style={{ borderColor: '#E9CB6B' }}>Edit Profile</div>
+        <div className="w-full max-w-[380px]  py-2 text-center text-[22px] font-semibold text-[#FAF3DD] mt-3" >Edit Profile</div>
       </div>
 
       {error && <p className="text-red-500 text-center mb-4 p-2 bg-red-100 border border-red-500 rounded-md mx-4 max-w-[380px] self-center">{error}</p>}
@@ -213,6 +230,17 @@ export default function EditProfilePage() {
 
       {/* Profile fields form */}
       <form onSubmit={handleSave} className="flex-1 w-full max-w-[380px] mx-auto flex flex-col gap-3">
+        {/* Show warning if editing is disabled */}
+        {isEditingDisabled && (
+          <div className="mb-4 p-2 bg-yellow-100 border border-yellow-500 rounded-md text-yellow-800 text-center">
+            {isProfileControlled && currentUser?.profileControlExpiry && (
+              <>Your profile is controlled due to a lost bet and cannot be edited until {new Date(currentUser.profileControlExpiry).toLocaleString()}.</>
+            )}
+            {isProfileLocked && currentUser?.profileLockExpiry && (
+              <> Your profile is locked and cannot be edited until {new Date(currentUser.profileLockExpiry).toLocaleString()}.</>
+            )}
+          </div>
+        )}
         {/* Profile Picture */}
         <div className="flex items-center justify-between px-2 py-2">
           <label htmlFor="profilePictureInput" className="text-[#D9D9D9] text-base cursor-pointer">Profile Picture</label>
@@ -231,8 +259,9 @@ export default function EditProfilePage() {
                 accept="image/*" 
                 onChange={handlePictureChange} 
                 className="hidden" 
+                disabled={!!isEditingDisabled}
             />
-             <button type="button" onClick={() => document.getElementById('profilePictureInput')?.click()} className="text-sm text-[#E9CB6B] hover:underline">
+             <button type="button" onClick={() => !isEditingDisabled && document.getElementById('profilePictureInput')?.click()} className="text-sm text-[#E9CB6B] hover:underline" disabled={!!isEditingDisabled}>
                 Change
             </button>
           </div>
@@ -248,6 +277,7 @@ export default function EditProfilePage() {
             onChange={(e) => setUsername(e.target.value)}
             className="bg-[#1E2424] text-[#FAF3DD] p-2 rounded-[5px] border border-[#4A5C59] focus:border-[#E9CB6B] outline-none"
             required
+            disabled={!!isEditingDisabled}
           />
         </div>
 
@@ -260,6 +290,7 @@ export default function EditProfilePage() {
             value={firstName}
             onChange={(e) => setFirstName(e.target.value)}
             className="bg-[#1E2424] text-[#FAF3DD] p-2 rounded-[5px] border border-[#4A5C59] focus:border-[#E9CB6B] outline-none"
+            disabled={!!isEditingDisabled}
           />
         </div>
 
@@ -272,6 +303,7 @@ export default function EditProfilePage() {
             value={lastName}
             onChange={(e) => setLastName(e.target.value)}
             className="bg-[#1E2424] text-[#FAF3DD] p-2 rounded-[5px] border border-[#4A5C59] focus:border-[#E9CB6B] outline-none"
+            disabled={!!isEditingDisabled}
           />
         </div>
 
@@ -284,6 +316,7 @@ export default function EditProfilePage() {
             value={location}
             onChange={(e) => setLocation(e.target.value)}
             className="bg-[#1E2424] text-[#FAF3DD] p-2 rounded-[5px] border border-[#4A5C59] focus:border-[#E9CB6B] outline-none"
+            disabled={!!isEditingDisabled}
           />
         </div>
 
@@ -291,9 +324,9 @@ export default function EditProfilePage() {
         <div className="w-full px-2 pt-4">
             <button 
                 type="submit" 
-                disabled={isLoading || isFetchingProfile}
+                disabled={!!isLoading || !!isFetchingProfile || !!isEditingDisabled}
                 className="w-full text-[#D9D9D9] text-lg font-semibold py-3 border rounded-[10px] disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ background: '#152317', borderColor: '#E9CB6B' }}
+                style={{ background: '#4A7C59', borderColor: '#E9CB6B' }}
             >
                 {isLoading ? 'Saving...' : 'Save'}
             </button>

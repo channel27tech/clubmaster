@@ -20,6 +20,8 @@ const publicPaths = [
 // Paths that guest users can access (in addition to public paths)
 const guestAllowedPaths = [
   '/play',
+  '/play/game', // Allow access to game pages
+  '/matchmaking', // Allow access to matchmaking
   // Add any other paths that guest users should be able to access
 ];
 
@@ -30,7 +32,7 @@ const guestAllowedPaths = [
 export default function RouteGuard({ children }: RouteGuardProps) {
   const router = useRouter();
   const pathname = usePathname();
-  const { user, isLoading, isGuest } = useAuth();
+  const { user, loading, isGuest } = useAuth();
   const [authorized, setAuthorized] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
 
@@ -38,10 +40,16 @@ export default function RouteGuard({ children }: RouteGuardProps) {
     console.log("RouteGuard - Auth state:", { 
       userExists: !!user, 
       isGuest, 
-      isLoading, 
+      loading, 
       pathname 
     });
     
+    // Always allow access to /login and its subpages
+    if (pathname && pathname.startsWith('/login')) {
+      setAuthorized(true);
+      setCheckingAuth(false);
+      return;
+    }
     // Authentication check function
     const authCheck = () => {
       // Check if we're on a public path (anyone can access)
@@ -91,13 +99,13 @@ export default function RouteGuard({ children }: RouteGuardProps) {
     };
 
     // Only check auth status when Firebase auth loading is complete
-    if (!isLoading) {
+    if (!loading) {
       authCheck();
     }
-  }, [user, isLoading, isGuest, pathname, router]);
+  }, [user, loading, isGuest, pathname, router]);
 
   // Show loading when checking authentication
-  if (isLoading || checkingAuth) {
+  if (loading || checkingAuth) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: "#333939" }}>
         <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-[#E9CB6B]"></div>

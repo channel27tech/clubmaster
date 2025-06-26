@@ -23,6 +23,7 @@ export const canAbortGame = (gameState: {
   
   // Check if no moves have been made yet using all available signals
   // Game can only be aborted before any moves are made
+  // Use strict equality check to ensure hasWhiteMoved is explicitly false
   const noMovesMade = gameState.hasWhiteMoved === false && !hasMovesInHistory;
   
   return noMovesMade;
@@ -47,6 +48,15 @@ interface MoveControlsProps {
     length: number;
     currentMoveIndex: number;
   };
+  whitePlayer?: {
+    username: string;
+    userId?: string;
+  };
+  blackPlayer?: {
+    username: string;
+    userId?: string;
+  };
+  playerColor?: 'white' | 'black' | null;
 }
 
 const MoveControls: React.FC<MoveControlsProps> = ({
@@ -58,7 +68,10 @@ const MoveControls: React.FC<MoveControlsProps> = ({
   gameState,
   onResign,
   onAbortGame,
-  moveHistory
+  moveHistory,
+  whitePlayer,
+  blackPlayer,
+  playerColor,
 }) => {
   // Socket context for game actions
   const { socket } = useSocket();
@@ -87,8 +100,21 @@ const MoveControls: React.FC<MoveControlsProps> = ({
 
   // Handle options button click
   const handleOptionsClick = useCallback(() => {
-    setIsOptionsDialogOpen(true);
+    setIsOptionsDialogOpen((prev) => !prev);
   }, []);
+
+  // Add effect to close dialog if Options button is clicked again while open
+  useEffect(() => {
+    if (!isOptionsDialogOpen) return;
+    const button = optionsButtonRef.current;
+    if (!button) return;
+    const handleClick = (e: MouseEvent) => {
+      // If the dialog is open and the button is clicked, close the dialog
+      setIsOptionsDialogOpen(false);
+    };
+    button.addEventListener('click', handleClick);
+    return () => button.removeEventListener('click', handleClick);
+  }, [isOptionsDialogOpen]);
 
   // Handle options dialog close
   const handleOptionsClose = useCallback(() => {
@@ -291,7 +317,16 @@ const MoveControls: React.FC<MoveControlsProps> = ({
       } else {
         // I am the recipient (data.playerId is someone else's ID).
         console.log(`[${myCurrentSocketId}] Received draw_request from opponent ${data.playerId}. Showing 'Accept/Decline' modal.`);
-        setDrawOfferFromOpponent(data.playerId); // Store who sent it for the modal text
+        
+        // Find the opponent's username based on their ID
+        let opponentUsername = "Your opponent";
+        if (whitePlayer?.userId === data.playerId) {
+          opponentUsername = whitePlayer.username;
+        } else if (blackPlayer?.userId === data.playerId) {
+          opponentUsername = blackPlayer.username;
+        }
+        
+        setDrawOfferFromOpponent(opponentUsername); // Store opponent's username instead of ID
         setShowDrawOfferModal(true);             // Show "Opponent offered a draw" modal
         setIsDrawOfferPending(false);            // Recipient is not pending their own offer.
         setAmOfferingDraw(false);                // Recipient is not in the process of offering.
@@ -386,9 +421,10 @@ const MoveControls: React.FC<MoveControlsProps> = ({
         <button 
           className={`flex flex-col items-center ${!canGoBack ? 'opacity-50' : ''}`}
           onClick={() => {
-            onBack();
-            // Play button click sound only for back button
-            soundEnabled && playSound('BUTTON_CLICK', soundEnabled, 1.0, 'Back');
+            // First play the sound
+            if (soundEnabled) playSound('BUTTON_CLICK', soundEnabled, 1.0, 'Back');
+            // Then trigger the navigation with a slight delay
+            requestAnimationFrame(() => onBack());
           }}
           disabled={!canGoBack}
         >
@@ -402,9 +438,10 @@ const MoveControls: React.FC<MoveControlsProps> = ({
         <button 
           className={`flex flex-col items-center ${!canGoForward ? 'opacity-50' : ''}`}
           onClick={() => {
-            onForward();
-            // Play button click sound only for forward button
-            soundEnabled && playSound('BUTTON_CLICK', soundEnabled, 1.0, 'Forward');
+            // First play the sound
+            if (soundEnabled) playSound('BUTTON_CLICK', soundEnabled, 1.0, 'Forward');
+            // Then trigger the navigation with a slight delay
+            requestAnimationFrame(() => onForward());
           }}
           disabled={!canGoForward}
         >
@@ -419,8 +456,9 @@ const MoveControls: React.FC<MoveControlsProps> = ({
           isOpen={isOptionsDialogOpen}
           onClose={handleOptionsClose}
           gameState={gameState}
+          moveHistory={moveHistory}
           onResign={handleResignRequest}
-          onAbort={handleAbortRequest}
+          onAbort={showAbortOption ? handleAbortRequest : undefined}
           soundEnabled={soundEnabled}
           onSoundToggle={handleSoundToggle}
           onDrawOffer={handleDrawOfferClick}

@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
+import { bettingPopups } from '@/data/bettingPopups';
 
 interface BetChallengeNotificationProps {
   isOpen: boolean;
@@ -32,6 +33,23 @@ const BetChallengeNotification: React.FC<BetChallengeNotificationProps> = ({
 }) => {
   const notificationRef = useRef<HTMLDivElement>(null);
   const [flagError, setFlagError] = useState(false);
+  const [profileImageError, setProfileImageError] = useState(false);
+  const [showInfoPopup, setShowInfoPopup] = useState(false);
+  const defaultProfileImage = '/images/profile_waiting_screen.png';
+
+  // Get the correct betting popup data based on the betting type
+  const getBettingPopupIndex = (): number => {
+    switch (bettingType) {
+      case 'Temporary Profile Control':
+        return 0;
+      case 'Temporary Profile Lock':
+        return 1;
+      case 'Rating Stake':
+        return 2;
+      default:
+        return 0;
+    }
+  };
 
   // Optional: Play notification sound when opened
   useEffect(() => {
@@ -60,8 +78,9 @@ const BetChallengeNotification: React.FC<BetChallengeNotificationProps> = ({
   useEffect(() => {
     if (isOpen) {
       setFlagError(false);
+      setProfileImageError(false);
     }
-  }, [isOpen, challengerCountryCode]);
+  }, [isOpen, challengerCountryCode, challengerProfileImage]);
 
   // Log when notification should open or close
   useEffect(() => {
@@ -77,10 +96,10 @@ const BetChallengeNotification: React.FC<BetChallengeNotificationProps> = ({
       console.log(`[BetChallengeNotification] Is name null? ${challengerName === null}`);
       console.log(`[BetChallengeNotification] Is name empty string? ${challengerName === ""}`);
       console.log(`[BetChallengeNotification] Profile image URL: ${challengerProfileImage}`);
-      console.log(`[BetChallengeNotification] Is using default image? ${challengerProfileImage === '/images/profile_waiting_screen.png'}`);
+      console.log(`[BetChallengeNotification] Is using default image? ${challengerProfileImage === defaultProfileImage}`);
       console.log(`[BetChallengeNotification] ======================================`);
     }
-  }, [isOpen, challengerName, bettingType, challengerProfileImage]);
+  }, [isOpen, challengerName, bettingType, challengerProfileImage, defaultProfileImage]);
 
   if (!isOpen) return null;
 
@@ -105,6 +124,7 @@ const BetChallengeNotification: React.FC<BetChallengeNotificationProps> = ({
 
   const handleShowInfo = () => {
     console.log('[BetChallengeNotification] Show info button clicked');
+    setShowInfoPopup(true);
     try {
       onShowInfo();
     } catch (error) {
@@ -112,7 +132,99 @@ const BetChallengeNotification: React.FC<BetChallengeNotificationProps> = ({
     }
   };
 
+  // Determine the profile image source with proper fallback
+  const profileImageSrc = profileImageError || !challengerProfileImage ? 
+    defaultProfileImage : challengerProfileImage;
+  
+  // Get the betting popup data
+  const popupIndex = getBettingPopupIndex();
+  const popupData = bettingPopups[popupIndex];
+
   return (
+    <>
+      {/* Info Popup */}
+      {showInfoPopup && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          background: 'rgba(0,0,0,0.45)',
+          zIndex: 10000,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}>
+          <div style={{
+            background: '#4C5454',
+            borderRadius: 14,
+            maxWidth: 340,
+            width: '90vw',
+            boxShadow: '0 4px 32px rgba(0,0,0,0.18)',
+            overflow: 'hidden',
+            position: 'relative',
+          }}>
+            {/* Header */}
+            <div style={{
+              background: '#4A7C59',
+              color: '#fff',
+              padding: '16px 24px 12px 24px',
+              fontWeight: 700,
+              fontSize: 18,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: "flex-end",
+            }}>
+              <button
+                onClick={() => setShowInfoPopup(false)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#fff',
+                  fontSize: 22,
+                  cursor: 'pointer',
+                  marginLeft: 12,
+                  lineHeight: 1,
+                }}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            {/* Description */}
+            <span className="flex justify-center items-center mt-3 front-roboto text-semibold text-[16px] text-white">
+              {popupData.title}
+            </span>
+            <div style={{
+              color: '#ffffff',
+              fontWeight: "regular",
+              fontSize: 16,
+              fontFamily:"roboto",
+              padding: '18px 20px 0 20px',
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+            }}>
+              {popupData.description}
+            </div>
+            {/* Points */}
+            <ul style={{
+              color: '#ffffff',
+              fontWeight: 400,
+              fontSize: 14,
+              padding: '12px 28px 24px 32px',
+              margin: 0,
+              listStyle: 'disc',
+            }}>
+              {popupData.points.map((pt, i) => (
+                <li key={i} style={{ marginBottom: 6 }}>{pt}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+
     <div 
       className="fixed top-0 left-1/2 transform -translate-x-1/2 z-[9999] w-full max-w-md"
       role="alert"
@@ -125,12 +237,16 @@ const BetChallengeNotification: React.FC<BetChallengeNotificationProps> = ({
             {/* Challenger profile picture */}
             <div className="mr-4">
               <Image 
-                src={challengerProfileImage}
+                  src={profileImageSrc}
                 alt={`${challengerName}'s profile`}
                 width={64}
                 height={64}
                 style={{ borderRadius: '50%', border: '2px solid #fff' }}
-                onError={() => console.warn('[BetChallengeNotification] Profile image failed to load')}
+                  onError={() => {
+                    console.warn('[BetChallengeNotification] Profile image failed to load:', profileImageSrc);
+                    setProfileImageError(true);
+                  }}
+                  priority
               />
             </div>
             
@@ -234,6 +350,7 @@ const BetChallengeNotification: React.FC<BetChallengeNotificationProps> = ({
         </div>
       </div>
     </div>
+    </>
   );
 };
 

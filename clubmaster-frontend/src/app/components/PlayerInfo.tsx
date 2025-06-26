@@ -43,6 +43,30 @@ const PlayerInfo: React.FC<PlayerInfoProps> = ({
   // Determine styles based on position (top/bottom)
   const isTop = position === 'top';
   
+  // Helper function to get the best profile image to display
+  const getBestProfileImage = (): string => {
+    // Check if photoURL is a base64 string (custom uploaded photo)
+    const isBase64Image = photoURL?.startsWith('data:image');
+    
+    if (photoURL) {
+      return photoURL;
+    }
+    
+    // Fallback to default avatar based on position
+    return isTop ? "/icons/avatar1.svg" : "/icons/avatar2.svg";
+  };
+  
+  // Helper function to get the best username to display
+  const getBestUsername = (): string => {
+    // Check if username is valid
+    if (username && username !== 'Loading...') {
+      return username;
+    }
+    
+    // Fallback to position-based generic name
+    return isTop ? "White Player" : "Black Player";
+  };
+  
   // Function to render captured pieces
   const renderCapturedPieces = () => {
     const sortedCapturedPieces = [...capturedPieces].sort((a, b) => {
@@ -78,13 +102,24 @@ const PlayerInfo: React.FC<PlayerInfoProps> = ({
               <div className="absolute -top-1.5 left-1/2 transform -translate-x-1/2 w-3 h-3 rounded-full bg-green-500 animate-pulse z-10"></div>
             )}
             <div className="w-[41px] h-[41px] flex items-center justify-center">
+              <div className="w-[41px] h-[41px] overflow-hidden rounded-[4px]">
               <Image 
-                src={photoURL ? photoURL : (isTop ? "/icons/avatar1.svg" : "/icons/avatar2.svg")}
+                  src={getBestProfileImage()}
                 alt={`${username}'s Avatar`}
                 width={41}
                 height={41}
-                className="w-[41px] h-[41px] object-cover rounded-full"
+                  className="w-full h-full object-cover"
+                  onError={(e) => {
+                    // If image fails to load, replace with fallback
+                    e.currentTarget.style.display = 'none';
+                    e.currentTarget.parentElement!.innerHTML = `
+                      <div class="w-[41px] h-[41px] flex items-center justify-center bg-[#4A7C59] rounded-[4px] text-white text-lg font-bold">
+                        ${username ? username.charAt(0).toUpperCase() : 'P'}
+                      </div>
+                    `;
+                  }}
               />
+              </div>
             </div>
           </div>
           
@@ -93,7 +128,7 @@ const PlayerInfo: React.FC<PlayerInfoProps> = ({
             {/* Player name and rating */}
             <div className="flex items-center gap-2">
               <h3 className="font-roboto font-[500] text-[16px] tracking-[0.25%] text-[#FAF3DD]">
-                {username}
+                {getBestUsername()}
                 {rating && <span className="ml-1">({rating})</span>}
               </h3>
               

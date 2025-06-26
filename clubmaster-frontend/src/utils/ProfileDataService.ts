@@ -21,6 +21,13 @@ export interface UserProfile {
   custom_photo_base64?: string | null;
   joinDate?: string | Date | null;
   friends?: Array<{ id: string; displayName: string; photoURL?: string }>;
+  // Bet profile control fields
+  profileControlledBy?: string | null;
+  profileControlExpiry?: string | Date | null;
+  profileLocked?: boolean;
+  profileLockExpiry?: string | Date | null;
+  controlledNickname?: string | null;
+  controlledAvatarType?: string | null;
 }
 
 /**
@@ -105,8 +112,6 @@ export class ProfileDataService {
    */
   async fetchUserProfile(userId: string): Promise<UserProfile | null> {
     try {
-      console.log(`Fetching profile data for Firebase UID: ${userId}`);
-      
       // Use browser-side API route when running in browser
       if (typeof window !== 'undefined') {
         try {
@@ -132,10 +137,8 @@ export class ProfileDataService {
           }
           
           const data = await response.json() as UserProfile;
-          console.log('Profile data fetched successfully:', data);
           return data;
         } catch (error) {
-          console.error('Error fetching from frontend API route:', error);
           // Fall back to direct backend call
         }
       }
@@ -144,7 +147,6 @@ export class ProfileDataService {
       const response = await fetch(`${this.baseUrl}/profile/${userId}`);
       
       if (response.status === 404) {
-        console.warn(`User not found for Firebase UID: ${userId}`);
         // Return default values when user not found
         return {
           id: userId,
@@ -163,10 +165,8 @@ export class ProfileDataService {
       }
       
       const data = await response.json() as UserProfile;
-      console.log('Profile data fetched successfully:', data);
       return data;
     } catch (error) {
-      console.error('Error fetching user profile:', error);
       // Return default values on error
       return {
         id: userId,
@@ -188,11 +188,9 @@ export class ProfileDataService {
    */
   async fetchGameHistory(userId: string): Promise<GameHistoryEntry[]> {
     try {
-      console.log(`Fetching game history for Firebase UID: ${userId}`);
       const response = await fetch(`${this.baseUrl}/profile/${userId}/games`);
       
       if (response.status === 404) {
-        console.warn(`User not found for Firebase UID: ${userId}, returning empty game history`);
         return [];
       }
       
@@ -201,10 +199,8 @@ export class ProfileDataService {
       }
       
       const data = await response.json() as GameHistoryEntry[];
-      console.log('Game history fetched successfully:', data);
       return data;
     } catch (error) {
-      console.error('Error fetching game history:', error);
       return []; // Return empty array on error
     }
   }
@@ -303,8 +299,6 @@ export class ProfileDataService {
       // Display text without time control category prefix
       const displayText = `vs ${game.opponentName} (${game.opponentRating}) | ${resultIcon}${resultText}`;
       
-      console.log(`Game ${game.id} - Time Control Icon: ${timeControlIcon}, Display Text: ${displayText}`);
-      
       return {
         id: game.id,
         date: gameDate,
@@ -331,6 +325,51 @@ export class ProfileDataService {
         }
       };
     });
+  }
+
+  /**
+   * Fetch another user's profile data by ID (for opponents, friends, etc.)
+   * @param userId User ID to fetch profile for
+   * @returns User profile data or default values if not found
+   */
+  async fetchOtherUserProfile(userId: string): Promise<UserProfile | null> {
+    try {
+      // Direct backend call for other users' profiles
+      const response = await fetch(`${this.baseUrl}/profile/${userId}`);
+      
+      if (response.status === 404) {
+        // Return default values when user not found
+        return {
+          id: userId,
+          displayName: 'Chess Player',
+          photoURL: '/images/dp 1.svg',
+          rating: 1500,
+          gamesPlayed: 0,
+          gamesWon: 0,
+          gamesLost: 0,
+          gamesDraw: 0
+        };
+      }
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch user profile: ${response.statusText}`);
+      }
+      
+      const data = await response.json() as UserProfile;
+      return data;
+    } catch (error) {
+      // Return default values on error
+      return {
+        id: userId,
+        displayName: 'Chess Player',
+        photoURL: '/images/dp 1.svg',
+        rating: 1500,
+        gamesPlayed: 0,
+        gamesWon: 0,
+        gamesLost: 0,
+        gamesDraw: 0
+      };
+    }
   }
 }
 

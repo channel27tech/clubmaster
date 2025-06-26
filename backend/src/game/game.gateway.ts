@@ -72,4 +72,86 @@ export class GameGateway {
       this.logger.error(`Failed to determine game end details for timeout in game ${data.gameId}`);
     }
   }
+
+  @SubscribeMessage('startMatchmaking')
+  async handleStartMatchmaking(@ConnectedSocket() client: Socket, @MessageBody() payload: any) {
+    this.logger.log(
+      `Client ${client.id} requested to start matchmaking: ${JSON.stringify(payload)}`,
+    );
+    try {
+      if (!payload) throw new Error('Invalid payload for matchmaking');
+      const firebaseUid = payload.firebaseUid || 'guest';
+      const username = payload.username || `Player-${client.id.substring(0, 5)}`;
+      let userId: string | undefined;
+      let rating = 1500;
+      let isGuest = true;
+      let gamesPlayed = 0;
+      if (firebaseUid !== 'guest') {
+        try {
+          const user = await this.usersService.findByFirebaseUid(firebaseUid);
+          if (user) {
+            userId = user.id;
+            rating = user.rating;
+            isGuest = false;
+            gamesPlayed = user.gamesPlayed || 0;
+            this.logger.log(`Found registered user: ${username} (${userId}), Rating: ${rating}, Games played: ${gamesPlayed}`);
+          } else {
+            this.logger.warn(`Firebase user ${firebaseUid} not found in database, treating as guest`);
+          }
+        } catch (error) {
+          this.logger.error(`Error fetching user data for ${firebaseUid}: ${error.message}`, error.stack);
+        }
+      } else {
+        this.logger.log(`User is a guest: ${username}`);
+      }
+      const gameOptions = {
+        gameMode: payload.gameMode || 'Blitz',
+        timeControl: payload.timeControl || '5+0',
+        rated: payload.rated !== undefined ? payload.rated : true,
+        preferredSide: payload.preferredSide || 'random',
+      };
+      this.logger.log(
+        `Adding player ${client.id} to matchmaking queue with options: ${JSON.stringify(gameOptions)}, userId: ${userId || 'guest'}, rating: ${rating}`
+      );
+      this.matchmakingService.addPlayerToQueue(
+        client,
+        gameOptions,
+        rating,
+        userId,
+        username,
+        isGuest,
+        payload.betChallengeId // Pass betChallengeId if present
+      );
+      if (userId) {
+        this.userActivityService.registerActivity(userId);
+      }
+      setTimeout(() => {
+        this.logger.log(`Triggering immediate matchmaking check for player ${client.id}`);
+        this.matchmakingService.processMatchmakingNow();
+      }, 500);
+      return {
+        event: 'matchmakingStarted',
+        data: {
+          success: true,
+          message: 'Matchmaking started',
+          queueInfo: gameOptions
+        },
+      };
+    } catch (error) {
+      this.logger.error(`Error starting matchmaking for client ${client.id}:`, error.stack || error.message);
+      client.emit('matchmakingError', {
+        message: 'Failed to start matchmaking',
+        error: error.message,
+        retryAllowed: true
+      });
+      return {
+        event: 'matchmakingStarted',
+        data: {
+          success: false,
+          message: 'Failed to start matchmaking',
+          error: error.message,
+        },
+      };
+    }
+  }
 }

@@ -16,6 +16,13 @@ const DrawConfirmationDialog: React.FC<DrawConfirmationDialogProps> = ({
   opponentName,
 }) => {
   const dialogRef = useRef<HTMLDivElement>(null);
+  
+  // Debug log to check opponentName value
+  useEffect(() => {
+    if (isOpen && isIncoming) {
+      console.log('DrawConfirmationDialog received opponentName:', opponentName);
+    }
+  }, [isOpen, isIncoming, opponentName]);
 
   // Handle click outside dialog to close
   useEffect(() => {
@@ -54,6 +61,17 @@ const DrawConfirmationDialog: React.FC<DrawConfirmationDialogProps> = ({
       }
     }
   }, [isOpen]);
+  
+  // Helper function to get the best username to display
+  const getBestUsername = (): string => {
+    // Check if opponentName is valid and not empty
+    if (opponentName && opponentName !== 'undefined' && opponentName.trim() !== '') {
+      return opponentName;
+    }
+    
+    // Fallback to generic name
+    return "Your opponent";
+  };
 
   if (!isOpen) return null;
 
@@ -78,7 +96,7 @@ const DrawConfirmationDialog: React.FC<DrawConfirmationDialogProps> = ({
           </h2>
           <p className="mb-4 text-center text-sm">
             {isIncoming
-              ? `${opponentName ? opponentName + ' has' : 'Your opponent has'} offered a draw.`
+              ? `${getBestUsername()} has offered a draw.`
               : 'Offer a draw to your opponent?'}
           </p>
           <div className="flex justify-center space-x-3 w-full">

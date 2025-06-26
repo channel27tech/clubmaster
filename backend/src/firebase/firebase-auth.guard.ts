@@ -10,7 +10,10 @@ export class FirebaseAuthGuard implements CanActivate {
     const request = context.switchToHttp().getRequest();
     const authHeader = request.headers.authorization;
 
+    // Enhanced request debugging
     this.logger.log(`🔒 Processing ${request.method} request to ${request.url}`);
+    this.logger.log(`🔍 Request cookies: ${request.headers.cookie ? 'Present' : 'None'}`);
+    this.logger.log(`🔍 Auth header present: ${!!authHeader}`);
     
     if (!authHeader) {
       this.logger.warn('❌ Missing Authorization header');
@@ -29,6 +32,10 @@ export class FirebaseAuthGuard implements CanActivate {
       throw new UnauthorizedException('Empty token provided');
     }
 
+    // Debug token format (show first few chars only, never log full tokens)
+    const tokenPreview = token.substring(0, 10) + '...';
+    this.logger.log(`🔑 Token preview: ${tokenPreview}`);
+    this.logger.log(`🔑 Token length: ${token.length} characters`);
     this.logger.log('🔑 Attempting to verify Firebase token...');
 
     try {
@@ -36,7 +43,9 @@ export class FirebaseAuthGuard implements CanActivate {
       const decodedToken = await admin.auth().verifyIdToken(token);
       
       // Log successful verification
-      this.logger.log(`✅ Token verified for user ID: ${decodedToken.uid.substring(0, 6)}...`);
+      this.logger.log(`✅ Token verified for user ID: ${decodedToken.uid}`);
+      this.logger.log(`✅ Email: ${decodedToken.email || 'Not provided'}`);
+      this.logger.log(`✅ Email verified: ${decodedToken.email_verified}`);
       
       // Attach Firebase user data to request objects (both conventions)
       const userData = {
@@ -54,8 +63,9 @@ export class FirebaseAuthGuard implements CanActivate {
       
       return true;
     } catch (error) {
-      // Handle different Firebase auth error codes with appropriate messages
+      // Enhanced error logging
       this.logger.error(`❌ Token verification failed: ${error.message}`, error.stack);
+      this.logger.error(`❌ Error code: ${error.code}`);
       
       let message = 'Invalid Firebase token';
       

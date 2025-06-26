@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Club } from './club.entity';
@@ -8,6 +8,7 @@ import { User } from '../users/entities/user.entity';
 import * as fs from 'fs';
 import * as path from 'path';
 import { ClubMember } from '../club-member/club-member.entity';
+import { UpdateClubDto } from './dto/update-club.dto';
 
 @Injectable()
 export class ClubService {
@@ -174,5 +175,76 @@ export class ClubService {
       members,
       memberCount: members.length 
     };
+  }
+
+  async updateClub(clubId: number, updateClubDto: UpdateClubDto, firebaseUid: string) {
+    const club = await this.clubRepository.findOne({ where: { id: clubId } });
+    if (!club) throw new NotFoundException('Club not found');
+
+    const user = await this.userRepository.findOne({ where: { firebaseUid } });
+    if (!user || club.superAdminId !== user.id) throw new ForbiddenException('Only super admin can edit');
+
+    // Prevent location edit for private_by_location
+    if (club.type === 'private_by_location' && updateClubDto.location) {
+      delete updateClubDto.location;
+    }
+
+    // If name is changing, check uniqueness
+    if (updateClubDto.name && updateClubDto.name !== club.name) {
+      const exists = await this.clubRepository.findOne({ where: { name: updateClubDto.name } });
+      if (exists) throw new BadRequestException('Club name already exists');
+    }
+
+    // Handle logo upload if needed (reuse logic from create)
+    if (updateClubDto.logo && updateClubDto.logo.startsWith('data:image/')) {
+      const matches = updateClubDto.logo.match(/^data:image\/(png|jpeg|jpg|svg\+xml);base64,(.+)$/);
+      if (matches) {
+        const ext = matches[1] === 'svg+xml' ? 'svg' : matches[1];
+        const data = matches[2];
+        const buffer = Buffer.from(data, 'base64');
+        const filename = `club_${Date.now()}.${ext}`;
+        const uploadDir = path.join(__dirname, '../../public/uploads');
+        if (!fs.existsSync(uploadDir)) {
+          fs.mkdirSync(uploadDir, { recursive: true });
+        }
+        const filePath = path.join(uploadDir, filename);
+        try {
+          fs.writeFileSync(filePath, buffer);
+          updateClubDto.logo = `/uploads/${filename}`;
+        } catch (err) {
+          updateClubDto.logo = '/uploads/default-logo.png';
+        }
+      } else {
+        updateClubDto.logo = '/uploads/default-logo.png';
+      }
+    }
+
+    Object.assign(club, updateClubDto);
+    return this.clubRepository.save(club);
+  }
+
+  async deleteClubWithChecks(clubId: number, firebaseUid: string) {
+    const club = await this.clubRepository.findOne({ where: { id: clubId } });
+    if (!club) throw new NotFoundException('Club not found');
+
+    // Find user by Firebase UID
+    const user = await this.userRepository.findOne({ where: { firebaseUid } });
+    if (!user || club.superAdminId !== user.id) throw new ForbiddenException('Only super admin can delete');
+
+    // Fetch all members for the club
+    const members = await this.clubMemberRepository.find({ where: { clubId } });
+    // Enforce precondition: only super admin can remain
+    if (members.length > 1) throw new BadRequestException('Remove all members before deleting the club');
+
+    // Delete all club-related records in a transaction
+    await this.clubMemberRepository.manager.transaction(async manager => {
+      // Remove all memberships (including super admin)
+      await manager.getRepository(ClubMember).delete({ clubId });
+      // (Optional) Delete other related records here if needed
+      // Delete the club itself
+      await manager.getRepository(Club).delete(clubId);
+    });
+
+    return { message: 'Club and all memberships deleted successfully' };
   }
 } 

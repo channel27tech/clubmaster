@@ -36,10 +36,10 @@ export default function LoginPage() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   
-  // Redirect to home if already logged in
+  // Redirect to home if already logged in as a registered user (not guest)
   useEffect(() => {
-    if (user) {
-      console.log("Already logged in, redirecting to home");
+    if (user && !user.isAnonymous) {
+      console.log("Already logged in as registered user, redirecting to home");
       router.push('/');
     }
   }, [user, router]);
@@ -95,10 +95,16 @@ export default function LoginPage() {
     setAuthError(null);
     setError(null);
     try {
+      if (user && user.isAnonymous) {
+        // Already a guest, just go to /play
+        router.push('/play');
+        setLoadingGuest(false);
+        return;
+      }
       console.log("Starting guest login flow...");
       await continueAsGuest();
       console.log("Guest login successful");
-      // The redirect will happen automatically in the useEffect that watches user state
+      router.push('/play');
     } catch (error) {
       console.error("Guest login failed:", error);
       setAuthError("Failed to continue as guest. Please try again.");

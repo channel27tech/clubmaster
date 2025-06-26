@@ -5,6 +5,7 @@ import React, { useEffect, useState } from "react";
 import { useAuth } from "../../context/AuthContext";
 import profileDataService, { FormattedGameEntry } from "../../utils/ProfileDataService";
 import type { UserProfile } from "../../utils/ProfileDataService";
+import { differenceInMilliseconds } from 'date-fns';
  
 // Import formatJoinDate utility, with a fallback implementation
 let formatJoinDate: (date?: Date | null) => string;
@@ -131,6 +132,10 @@ export default function UserProfile() {
       if (profileData) {
         // Store the complete profile data
         setUserProfileData(profileData);
+        // Store backend user ID for bet result detection
+        if (typeof window !== 'undefined' && profileData.id) {
+          localStorage.setItem('backendUserId', profileData.id);
+        }
         console.log('Full profile data received:', {
           effective_photo_url: profileData.effective_photo_url,
           photoURL: profileData.photoURL,
@@ -185,6 +190,30 @@ export default function UserProfile() {
     }
   };
  
+  // Helper: is profile under bet control?
+  const isProfileControlled = userProfileData?.profileControlledBy && userProfileData?.profileControlExpiry &&
+    userProfileData.profileControlledBy !== userProfileData.id &&
+    differenceInMilliseconds(new Date(userProfileData.profileControlExpiry), new Date()) > 0;
+  // Helper: is profile locked?
+  const isProfileLocked = userProfileData?.profileLocked && userProfileData?.profileLockExpiry &&
+    differenceInMilliseconds(new Date(userProfileData.profileLockExpiry), new Date()) > 0;
+
+  // Debug log for restriction logic
+  console.log('Profile debug:', {
+    id: userProfileData?.id,
+    profileControlledBy: userProfileData?.profileControlledBy,
+    profileControlExpiry: userProfileData?.profileControlExpiry,
+    isProfileControlled
+  });
+
+  // Determine display name and avatar
+  const displayName = isProfileControlled && userProfileData?.controlledNickname
+    ? userProfileData.controlledNickname
+    : (userProfileData?.username || userProfileData?.displayName || userData.displayName || "Chess Player");
+  const avatarSrc = isProfileControlled && userProfileData?.controlledAvatarType
+    ? userProfileData.controlledAvatarType
+    : (userProfileData?.effective_photo_url || userProfileData?.photoURL || userData.photoURL || "/images/dp 1.svg");
+ 
   // Show loading state
   if (isLoading) {
     return (
@@ -221,7 +250,7 @@ export default function UserProfile() {
         <div className="relative w-full flex flex-col items-center mb-4 ">
           <div className="w-[100px] h-[100px] rounded-full overflow-hidden border-4 border-[#8FC0A9] bg-[#333939] -mt-8">
             <Image
-              src={userProfileData?.effective_photo_url || userProfileData?.photoURL || userData.photoURL || "/images/dp 1.svg"}
+              src={avatarSrc}
               alt="Profile"
               width={100}
               height={100}
@@ -229,8 +258,19 @@ export default function UserProfile() {
             />
           </div>
           <span className="mt-4 text-[#FAF3DD] text-[20px] font-medium font-poppins">
-            {userProfileData?.username || userProfileData?.displayName || userData.displayName || "Chess Player"}
+            {displayName}
           </span>
+          {/* Show bet control/lock message if applicable */}
+          {(isProfileControlled || isProfileLocked) && (
+            <span className="text-[#E07A5F] text-[13px] font-medium font-roboto mt-1">
+              {isProfileControlled && userProfileData?.profileControlExpiry && (
+                <>Profile is controlled due to a lost bet until {new Date(userProfileData.profileControlExpiry).toLocaleString()}.</>
+              )}
+              {isProfileLocked && userProfileData?.profileLockExpiry && (
+                <> Profile is locked until {new Date(userProfileData.profileLockExpiry).toLocaleString()}.</>
+              )}
+            </span>
+          )}
           <span className="text-[#8FC0A9] text-[12px] font-medium font-roboto mt-2">
             {formatJoinDate(userData.joinDate)}
           </span>
@@ -248,8 +288,7 @@ export default function UserProfile() {
               <span className="text-[#8FC0A9] text-[12px] font-medium font-roboto">Wins</span>
             </div>
             <div className="flex flex-col items-center">
- 
-  <span className="text-[#FAF3DD] text-[16px] font-semibold font-roboto">{userData.gamesLost}</span>
+              <span className="text-[#FAF3DD] text-[16px] font-semibold font-roboto">{userData.gamesLost}</span>
               <span className="text-[#8FC0A9] text-[12px] font-medium font-roboto">Losses</span>
             </div>
             <div className="flex flex-col items-center">

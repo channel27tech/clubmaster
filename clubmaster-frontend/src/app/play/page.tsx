@@ -8,6 +8,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import Head from "next/head";
+import { useAuth } from '../../context/AuthContext';
 
 // Define the window interface to properly type the window extensions
 interface ExtendedWindow extends Window {
@@ -35,10 +36,8 @@ const PlayPage: React.FC = () => {
   const [playAs, setPlayAs] = useState<string>('white');
   const [isMatchmaking, setIsMatchmaking] = useState<boolean>(false);
   const router = useRouter();
+  const { isGuest } = useAuth();
   
-  // State for the notification info popup
-  const [notificationInfoPopup, setNotificationInfoPopup] = useState<null | 0 | 1 | 2>(null);
-
   // Function to get time value based on game mode
   const getTimeFromGameMode = (mode: string): number => {
     switch (mode.toLowerCase()) {
@@ -113,54 +112,6 @@ const PlayPage: React.FC = () => {
       window.cancelMatchmakingDebug();
     }
   };
-  
-  // Content for bet information popup
-  const bettingPopups = [
-    {
-      title: "Temporary profile control",
-      description: "Win the game to gain temporary control over your opponent's profile for 24 hours.",
-      points: [
-        "What You Can Do:",
-        "Change Display Name: Choose from 6 predefined nicknames to update your opponent's display name.",
-        "Change Profile Picture: Select from 4 predefined avatars to change their profile picture.",
-        "Duration:",
-        "All changes are temporary and will automatically revert back to the original after 24 hours.",
-        "Conditions:",
-        "If You Win: You gain control over your opponent's profile as described.",
-        "If You Lose: Your opponent gains control over your profile with the same options.",
-        "If the Game is a Draw: No profile changes are made; both profiles remain unchanged.",
-      ],
-    },
-    {
-      title: "Temporary profile lock",
-      description: "Win the game to temporarily lock your opponent's profile for 24 hours.",
-      points: [
-        "What Happens:",
-        "Profile Lock: Your opponent cannot change their display name or profile picture.",
-        "Duration:",
-        "The lock remains in effect for 24 hours after the game ends.",
-        "Conditions:",
-        "If You Win: Your opponent's profile becomes locked as described.",
-        "If You Lose: Your profile becomes locked for 24 hours.",
-        "If the Game is a Draw: No profiles are locked; both remain unchanged.",
-      ],
-    },
-    {
-      title: "Rating Stakes",
-      description: "Win the game to deduct rating points from your opponent.",
-      points: [
-        "What Happens:",
-        "Reduce Opponent's Rating: Deduct the agreed-upon rating points from your opponent's total rating.",
-        "Standard Rating Gain: You only receive the standard rating increase for a normal game win.",
-        "Duration:",
-        "The rating deduction is applied immediately after the game ends and is reflected in the leaderboard rankings.",
-        "Conditions:",
-        "If You Win: Your opponent's rating decreases by the agreed points, and you gain the standard game rating increase.",
-        "If You Lose: Your rating decreases by the agreed points.",
-        "If the Game is a Draw: No changes are made to either player's rating; both remain unchanged.",
-      ],
-    },
-  ];
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-black">
@@ -170,102 +121,36 @@ const PlayPage: React.FC = () => {
         <link rel="icon" href="/favicon.ico" />
       </Head>
 
-      {/* Notification Info Popup */}
-      {notificationInfoPopup !== null && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          width: '100vw',
-          height: '100vh',
-          background: 'rgba(0,0,0,0.45)',
-          zIndex: 10000,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}>
-          <div style={{
-            background: '#4C5454',
-            borderRadius: 14,
-            maxWidth: 340,
-            width: '90vw',
-            boxShadow: '0 4px 32px rgba(0,0,0,0.18)',
-            overflow: 'hidden',
-            position: 'relative',
-          }}>
-            {/* Header */}
-            <div style={{
-              background: '#4A7C59',
-              color: '#fff',
-              padding: '16px 24px 12px 24px',
-              fontWeight: 700,
-              fontSize: 18,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: "flex-end",
-            }}>
-              <button
-                onClick={() => setNotificationInfoPopup(null)}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: '#fff',
-                  fontSize: 22,
-                  cursor: 'pointer',
-                  marginLeft: 12,
-                  lineHeight: 1,
-                }}
-                aria-label="Close"
-              >
-                ×
-              </button>
-            </div>
-            {/* Description */}
-            <span className="flex justify-center items-center mt-3 front-roboto text-semibold text-[16px] text-white">{bettingPopups[notificationInfoPopup].title}</span>
-            <div style={{
-              color: '#ffffff',
-              fontWeight: "regular",
-              fontSize: 16,
-              fontFamily:"roboto",
-              padding: '18px 20px 0 20px',
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-            }}>{bettingPopups[notificationInfoPopup].description}</div>
-            {/* Points */}
-            <ul style={{
-              color: '#ffffff',
-              fontWeight: 400,
-              fontSize: 14,
-              padding: '12px 28px 24px 32px',
-              margin: 0,
-              listStyle: 'disc',
-            }}>
-              {bettingPopups[notificationInfoPopup].points.map((pt, i) => (
-                <li key={i} style={{ marginBottom: 6 }}>{pt}</li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      )}
-      
-      {isMatchmaking ? (
-        <WaitingScreen 
-          gameType={activeTab.toLowerCase()}
-          timeInMinutes={selectedTime}
+      {/* Waiting screen for matchmaking */}
+      {isMatchmaking && (
+        <WaitingScreen
+          title="Finding opponents..."
+          subtitle={`${selectedTime} min ${activeTab}`}
           onCancel={handleCancelMatchmaking}
         />
-      ) : (
-        <div className="w-full max-w-[430px] flex flex-col h-screen sm:h-auto sm:min-h-[600px] sm:max-h-[90vh] sm:rounded-xl sm:shadow-lg sm:my-8" style={{ backgroundColor: '#333939' }}>
-          {/* Header with back button - 21px padding */}
-          <div className="px-[21px] pt-[21px] flex items-center">
-            <Link href="/" className="text-[#BFC0C0] hover:text-gray-300 transition-colors">
-              <FaArrowLeft size={20} />
-            </Link>
+      )}
+
+      {/* Main content */}
+      {!isMatchmaking && (
+        <div className="w-full max-w-[400px] bg-[#363B3B] min-h-screen sm:min-h-0 sm:h-auto sm:rounded-[16px] overflow-hidden shadow-lg flex flex-col">
+          {/* Header with back button and title */}
+          <div className="w-full h-[60px] bg-[#363B3B] flex items-center px-[21px]">
+            <button
+              type="button"
+              className="flex items-center justify-center w-[28px] h-[28px] text-[#FAF3DD]"
+              onClick={() => {
+                if (isGuest) {
+                  router.push('/login');
+                } else {
+                  router.push('/');
+                }
+              }}
+            >
+              <FaArrowLeft />
+            </button>
             <h1 className="text-[22px] font-semibold mx-auto text-[#FAF3DD] font-poppins tracking-[0.25%]">Match Setup</h1>
           </div>
-          
-          <div className="flex flex-col flex-1 px-[21px] pt-[21px] pb-[21px]">
+          <div className="flex-1 flex flex-col px-[21px] pt-[21px] pb-[120px]"> {/* Add extra bottom padding for fixed buttons */}
             {/* Game mode selection and time buttons in a grid layout */}
             <div className="grid grid-cols-3 gap-x-[16px] mb-[21px]">
               {/* Column 1: Bullet */}
@@ -358,29 +243,31 @@ const PlayPage: React.FC = () => {
                 </div>
               </div>
             </div>
-            
-            {/* Action buttons - 16px gap between buttons */}
-            <div className="mt-auto flex flex-col gap-[16px]">
+          </div>
+          {/* Fixed action buttons at the bottom */}
+          <div className="fixed left-1/2 bottom-[21px] w-full max-w-[400px] -translate-x-1/2 px-[21px] z-50">
+            <div className="flex flex-col gap-[16px]">
               <button
                 onClick={handleStartMatchmaking}
                 className="h-[57px] bg-[#4A7C59] hover:bg-[#3d6549] rounded-[10px] font-semibold transition-colors w-full border-2 border-[#E9CB6B] text-[#FAF3DD] text-[18px] font-poppins"
               >
                 Play Random
               </button>
-              
               <button
                 onClick={() => console.log('Create link')}
                 className="h-[57px] bg-[#4C5454] hover:bg-[#3d4343] rounded-[10px] font-semibold transition-colors w-full text-[#FAF3DD] text-[18px] font-poppins"
               >
                 Create Link
               </button>
-              
-              <button
-                onClick={() => router.push('/bet/match_setup_screen')}
-                className="h-[57px] bg-[#4C5454] hover:bg-[#3d4343] rounded-[10px] font-semibold transition-colors w-full text-[#FAF3DD] text-[18px] font-poppins"
-              >
-                Create Bet Challenge
-              </button>
+              {/* Only show Create Bet Challenge if not guest */}
+              {!isGuest && (
+                <button
+                  onClick={() => router.push('/bet/match_setup_screen')}
+                  className="h-[57px] bg-[#4C5454] hover:bg-[#3d4343] rounded-[10px] font-semibold transition-colors w-full text-[#FAF3DD] text-[18px] font-poppins"
+                >
+                  Create Bet Challenge
+                </button>
+              )}
             </div>
           </div>
         </div>

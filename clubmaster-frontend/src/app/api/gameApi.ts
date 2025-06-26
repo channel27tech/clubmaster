@@ -1,11 +1,5 @@
 import { auth } from "@/firebase";
-
-// Interface for player data returned from the API
-export interface PlayerData {
-  username: string;
-  rating: number;
-  photoURL: string | null;
-}
+import { PlayerData } from '../utils/types';
 
 // Interface for detailed player data with rating changes
 export interface PlayerResultData extends PlayerData {
@@ -38,21 +32,15 @@ export interface GameResultResponse {
 
 /**
  * Fetches player data for a specific game
- * @param gameId The ID of the game to fetch player data for
+ * @param gameId The ID of the game to fetch player data for (MUST be the same as received from the server, can be customId or UUID)
  * @returns Promise resolving to player data for white and black players
  */
 export async function fetchGamePlayers(gameId: string): Promise<GamePlayersResponse> {
   // Use the full game ID as received - the backend will handle the extraction if needed
   console.log('Using full gameId for API call:', gameId);
 
-  // Define potential API URLs to try (in order of preference)
-  const potentialPorts = [3001, 3002, 3003, 3004, 3005, 3006, 3007, 3008, 3009, 3010];
-  const baseUrl = 'http://localhost';
-  let lastError = null;
-  
-  // We'll use this variable to track which port we're currently trying
-  let currentPort = potentialPorts[0];
-  let apiUrl = `${baseUrl}:${currentPort}`;
+  // Use the same port as the socket service (3001) instead of trying multiple ports
+  const apiUrl = 'http://localhost:3001';
   
   try {
     // Get the current user's token for authentication
@@ -64,64 +52,87 @@ export async function fetchGamePlayers(gameId: string): Promise<GamePlayersRespo
     
     const token = await user.getIdToken();
     
-    // Try each port until one works
-    for (let i = 0; i < potentialPorts.length; i++) {
-      currentPort = potentialPorts[i];
-      apiUrl = `${baseUrl}:${currentPort}`;
+    console.log(`[fetchGamePlayers] Connecting to backend API at ${apiUrl} for game ${gameId}...`);
+    
+    // Ensure gameId is properly encoded for URL
+    const encodedGameId = encodeURIComponent(gameId);
+    
+    // Add a debug log to help diagnose if this is a bet game
+    const isBetGame = localStorage.getItem('isBetGame') === 'true';
+    const betType = localStorage.getItem('betType');
+    console.log(`[fetchGamePlayers] Game context: isBetGame=${isBetGame}, betType=${betType}`);
+    
+    const response = await fetch(`${apiUrl}/games/${encodedGameId}/players`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      signal: AbortSignal.timeout(5000) // Longer timeout for a single connection attempt
+    });
+
+    if (!response.ok) {
+      console.error(`[fetchGamePlayers] API responded with status: ${response.status} ${response.statusText}`);
       
-      try {
-        console.log(`Attempting to connect to backend on port ${currentPort}...`);
-        const response = await fetch(`${apiUrl}/games/${gameId}/players`, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
+      // For bet games, we'll create temporary data as a fallback
+      if (isBetGame) {
+        console.log('[fetchGamePlayers] Using fallback temporary player data for bet game');
+        
+        const opponentId = localStorage.getItem('opponentId');
+        const opponentName = localStorage.getItem('opponentName');
+        const myId = user.uid;
+        const myName = user.displayName || 'You';
+        
+        // Generate temporary player data
+        return {
+          whitePlayer: {
+            username: myName,
+            rating: 1500,
+            photoURL: user.photoURL,
+            userId: myId,
+            isGuest: false,
+            capturedPieces: []
           },
-          // Set a short timeout to quickly move to the next port if this one doesn't respond
-          signal: AbortSignal.timeout(2000)
-        });
-
-        if (!response.ok) {
-          console.warn(`Port ${currentPort} responded but returned status: ${response.status} ${response.statusText}`);
-          continue; // Try the next port
-        }
-
-        // If we get here, we found a working port!
-        console.log(`Successfully connected to backend on port ${currentPort}`);
-        const data = await response.json();
-        
-        // Validate the response data
-        if (!data || !data.whitePlayer || !data.blackPlayer) {
-          console.error('Invalid player data received:', data);
-          throw new Error('Invalid player data format received from server');
-        }
-        
-        // Log the successful data retrieval
-        console.log('Player data retrieved successfully:', {
-          white: `${data.whitePlayer.username} (${data.whitePlayer.rating})`,
-          black: `${data.blackPlayer.username} (${data.blackPlayer.rating})`
-        });
-        
-        return data;
-      } catch (portError: any) {
-        console.warn(`Failed to connect to port ${currentPort}: ${portError?.message || 'Unknown error'}`);
-        lastError = portError;
-        // Continue to the next port
+          blackPlayer: {
+            username: opponentName || 'Opponent',
+            rating: 1500,
+            photoURL: null,
+            userId: opponentId || 'unknown',
+            isGuest: false,
+            capturedPieces: []
+          }
+        };
       }
+      
+      throw new Error(`API error: ${response.status} ${response.statusText}`);
+    }
+
+    // If we get here, we successfully connected
+    console.log(`[fetchGamePlayers] Successfully connected to backend API at ${apiUrl}`);
+    const data = await response.json();
+    
+    // Validate the response data
+    if (!data || !data.whitePlayer || !data.blackPlayer) {
+      console.error('[fetchGamePlayers] Invalid player data received:', data);
+      throw new Error('Invalid player data format received from server');
     }
     
-    // If we get here, none of the ports worked
-    throw new Error(`Failed to connect to backend on any port. Last error: ${lastError?.message || 'Unknown error'}`);
-  
+    // Log the successful data retrieval
+    console.log('[fetchGamePlayers] Player data retrieved successfully:', {
+      white: `${data.whitePlayer.username} (${data.whitePlayer.rating})`,
+      black: `${data.blackPlayer.username} (${data.blackPlayer.rating})`
+    });
+    
+    return data;
   } catch (error) {
     // Provide more detailed error information for debugging
     if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
-      console.error('Network error when connecting to the backend server. Please check if the backend is running and accessible.');
-      console.error(`Attempted to connect to: ${apiUrl}/games/${gameId}/players`);
-      console.error('Original error:', error);
+      console.error('[fetchGamePlayers] Network error when connecting to the backend server. Please check if the backend is running and accessible.');
+      console.error(`[fetchGamePlayers] Attempted to connect to: ${apiUrl}/games/${gameId}/players`);
+      console.error('[fetchGamePlayers] Original error:', error);
       throw new Error(`Network error: Unable to connect to the backend server at ${apiUrl}. Please check if the server is running.`);
     } else {
-      console.error('Error fetching game players:', error);
+      console.error('[fetchGamePlayers] Error fetching game players:', error);
       throw error;
     }
   }
@@ -129,93 +140,82 @@ export async function fetchGamePlayers(gameId: string): Promise<GamePlayersRespo
 
 /**
  * Fetches game result data including player details and rating changes
- * @param gameId The ID of the game to fetch result data for
+ * @param gameId The ID of the game to fetch result data for (MUST be the same as received from the server)
  * @returns Promise resolving to game result data with player details and rating changes
  */
 export async function fetchGameResult(gameId: string): Promise<GameResultResponse> {
   console.log('Fetching game result data for gameId:', gameId);
 
-  // Define potential API URLs to try (in order of preference)
-  const potentialPorts = [3001, 3002, 3003, 3004, 3005, 3006, 3007, 3008, 3009, 3010];
-  const baseUrl = 'http://localhost';
+  // Define multiple possible API URLs to try in order
+  const apiUrls = [
+    'http://localhost:3001',  // Primary API URL
+    'http://localhost:3000/api',  // Next.js API route fallback
+    window.location.origin    // Current origin as last resort
+  ];
+  
+  // Ensure gameId is properly encoded for URL
+  const encodedGameId = encodeURIComponent(gameId);
+  
+  // Get the current user's token for authentication
+  const user = auth.currentUser;
+  
+  if (!user) {
+    throw new Error('User not authenticated');
+  }
+  
+  const token = await user.getIdToken();
+  
+  // Try each API URL in sequence
   let lastError = null;
   
-  // We'll use this variable to track which port we're currently trying
-  let currentPort = potentialPorts[0];
-  let apiUrl = `${baseUrl}:${currentPort}`;
-  
-  try {
-    // Get the current user's token for authentication
-    const user = auth.currentUser;
-    
-    if (!user) {
-      throw new Error('User not authenticated');
-    }
-    
-    const token = await user.getIdToken();
-    
-    // Try each port until one works
-    for (let i = 0; i < potentialPorts.length; i++) {
-      currentPort = potentialPorts[i];
-      apiUrl = `${baseUrl}:${currentPort}`;
+  for (const apiUrl of apiUrls) {
+    try {
+      console.log(`Trying to connect to backend API at ${apiUrl} for game result...`);
       
-      try {
-        console.log(`Attempting to connect to backend on port ${currentPort} for game result...`);
-        const response = await fetch(`${apiUrl}/games/${gameId}/result`, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          // Set a short timeout to quickly move to the next port if this one doesn't respond
-          signal: AbortSignal.timeout(2000)
-        });
+      const response = await fetch(`${apiUrl}/games/${encodedGameId}/result`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        signal: AbortSignal.timeout(3000) // Shorter timeout to move to next URL faster
+      });
 
-        if (!response.ok) {
-          console.warn(`Port ${currentPort} responded but returned status: ${response.status} ${response.statusText}`);
-          continue; // Try the next port
-        }
-
-        // If we get here, we found a working port!
-        console.log(`Successfully connected to backend on port ${currentPort}`);
-        const data = await response.json();
-        
-        // Validate the response data
-        if (!data || !data.whitePlayer || !data.blackPlayer) {
-          console.error('Invalid game result data received:', data);
-          throw new Error('Invalid game result data format received from server');
-        }
-        
-        // Log the successful data retrieval
-        console.log('Game result data retrieved successfully:', {
-          status: data.status,
-          resultType: data.resultType,
-          endReason: data.endReason,
-          white: `${data.whitePlayer.username} (${data.whitePlayer.rating}) ${data.whitePlayer.ratingChange >= 0 ? '+' : ''}${data.whitePlayer.ratingChange}`,
-          black: `${data.blackPlayer.username} (${data.blackPlayer.rating}) ${data.blackPlayer.ratingChange >= 0 ? '+' : ''}${data.blackPlayer.ratingChange}`
-        });
-        
-        return data;
-      } catch (portError: any) {
-        console.warn(`Failed to connect to port ${currentPort} for game result: ${portError?.message || 'Unknown error'}`);
-        lastError = portError;
-        // Continue to the next port
+      if (!response.ok) {
+        console.warn(`API at ${apiUrl} responded with status: ${response.status} ${response.statusText}`);
+        lastError = new Error(`API error: ${response.status} ${response.statusText}`);
+        continue; // Try next URL
       }
-    }
-    
-    // If we get here, none of the ports worked
-    throw new Error(`Failed to connect to backend on any port for game result. Last error: ${lastError?.message || 'Unknown error'}`);
-  
-  } catch (error) {
-    // Provide more detailed error information for debugging
-    if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
-      console.error('Network error when connecting to the backend server. Please check if the backend is running and accessible.');
-      console.error(`Attempted to connect to: ${apiUrl}/games/${gameId}/result`);
-      console.error('Original error:', error);
-      throw new Error(`Network error: Unable to connect to the backend server at ${apiUrl}. Please check if the server is running.`);
-    } else {
-      console.error('Error fetching game result:', error);
-      throw error;
+
+      // If we get here, we successfully connected
+      console.log(`Successfully connected to backend API at ${apiUrl}`);
+      const data = await response.json();
+      
+      // Validate the response data
+      if (!data || !data.whitePlayer || !data.blackPlayer) {
+        console.warn(`Invalid game result data received from ${apiUrl}:`, data);
+        lastError = new Error('Invalid game result data format received from server');
+        continue; // Try next URL
+      }
+      
+      // Log the successful data retrieval
+      console.log('Game result data retrieved successfully:', {
+        status: data.status,
+        resultType: data.resultType,
+        endReason: data.endReason,
+        white: `${data.whitePlayer.username} (${data.whitePlayer.rating}) ${data.whitePlayer.ratingChange >= 0 ? '+' : ''}${data.whitePlayer.ratingChange}`,
+        black: `${data.blackPlayer.username} (${data.blackPlayer.rating}) ${data.blackPlayer.ratingChange >= 0 ? '+' : ''}${data.blackPlayer.ratingChange}`
+      });
+      
+      return data;
+    } catch (error) {
+      console.warn(`Error connecting to ${apiUrl}:`, error);
+      lastError = error;
+      // Continue to next URL
     }
   }
+  
+  // If we get here, all URLs failed
+  console.error('All API URLs failed for game result fetch');
+  throw lastError || new Error('Failed to fetch game result from any API endpoint');
 }

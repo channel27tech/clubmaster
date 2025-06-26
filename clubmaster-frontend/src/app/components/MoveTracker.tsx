@@ -55,6 +55,8 @@ interface ChessMoveDisplay {
 
 interface MoveTrackerProps {
   moves: string[]; // Array of SAN strings from parent
+  currentMoveIndex?: number; // Index of the currently selected move (-1 for initial position)
+  onMoveClick?: (moveIndex: number) => void; // Callback when a move is clicked
 }
 
 // Helper to infer piece character from SAN for icon display
@@ -68,7 +70,7 @@ const getPieceCharFromSan = (san: string): string => {
   return 'p'; // Pawn move (e.g., e4, d5, exd5)
 };
 
-const MoveTracker: React.FC<MoveTrackerProps> = ({ moves }) => {
+const MoveTracker: React.FC<MoveTrackerProps> = ({ moves, currentMoveIndex = -1, onMoveClick }) => {
   const [formattedMoves, setFormattedMoves] = useState<ChessMoveDisplay[]>([]);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -95,16 +97,39 @@ const MoveTracker: React.FC<MoveTrackerProps> = ({ moves }) => {
     setFormattedMoves(newFormattedMoves);
   }, [moves]);
 
-  // Scroll to the last move when formattedMoves changes
+  // Scroll to the selected move when currentMoveIndex changes
   useEffect(() => {
-    if (scrollContainerRef.current && formattedMoves.length > 0) {
-      // Scroll to the last move item
-      const lastMoveElement = scrollContainerRef.current.lastElementChild;
-      if (lastMoveElement) {
-        lastMoveElement.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'end' });
+    if (scrollContainerRef.current && currentMoveIndex >= 0) {
+      // Calculate which formatted move contains our current move index
+      const moveNumber = Math.floor(currentMoveIndex / 2) + 1;
+      
+      // Find the element with that move number
+      const moveElements = scrollContainerRef.current.querySelectorAll('[data-move-number]');
+      const targetElement = Array.from(moveElements).find(
+        (el) => Number(el.getAttribute('data-move-number')) === moveNumber
+      );
+      
+      if (targetElement) {
+        targetElement.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
       }
     }
-  }, [formattedMoves]);
+  }, [currentMoveIndex]);
+
+  // Handle click on a move
+  const handleMoveClick = (moveNumber: number, isWhite: boolean) => {
+    if (!onMoveClick) return;
+    
+    // Calculate the actual move index from the move number and color
+    const moveIndex = (moveNumber - 1) * 2 + (isWhite ? 0 : 1);
+    onMoveClick(moveIndex);
+  };
+
+  // Handle click on initial position
+  const handleInitialPositionClick = () => {
+    if (onMoveClick) {
+      onMoveClick(-1); // -1 represents the initial position
+    }
+  };
 
   return (
     <div className="w-full bg-[#1F2323] border-b border-black">
@@ -113,14 +138,33 @@ const MoveTracker: React.FC<MoveTrackerProps> = ({ moves }) => {
         className="flex items-center h-[25px] overflow-x-auto whitespace-nowrap touch-pan-x no-scrollbar"
         style={{ scrollbarWidth: 'none' }} // For Firefox
       >
-        {formattedMoves.map((move, index) => (
+        {/* Initial position indicator */}
+        {moves.length > 0 && (
+          <div 
+            className={`flex items-center flex-shrink-0 px-2 py-[1px] mx-1 cursor-pointer ${currentMoveIndex === -1 ? 'bg-[#4C5454] rounded-[2px]' : 'hover:bg-[#2A2E2E]'}`}
+            onClick={handleInitialPositionClick}
+          >
+            <span className="text-[#9DA692] text-xs">Start</span>
+          </div>
+        )}
+        
+        {formattedMoves.map((move, index) => {
+          // Determine if white or black move is selected
+          const isWhiteSelected = currentMoveIndex === (move.moveNumber - 1) * 2;
+          const isBlackSelected = move.black && currentMoveIndex === (move.moveNumber - 1) * 2 + 1;
+          const isLastMove = index === formattedMoves.length - 1;
+          
+          return (
           <div 
             key={move.moveNumber} 
             data-move-number={move.moveNumber}
-            className={`flex items-center flex-shrink-0 relative ${index === formattedMoves.length - 1 ? 'bg-[#4C5454] rounded-[2px] px-2 py-[1px] mx-1' : ''}`}
+              className={`flex items-center flex-shrink-0 relative ${isLastMove && !isWhiteSelected && !isBlackSelected ? 'bg-[#4C5454] rounded-[2px] px-2 py-[1px] mx-1' : ''}`}
           >
             <span className="text-[#9DA692] text-xs pl-2 pr-1 z-10 w-6">{move.moveNumber}.</span>
-            <div className="flex items-center z-10 px-1">
+              <div 
+                className={`flex items-center z-10 px-1 cursor-pointer rounded-[2px] ${isWhiteSelected ? 'bg-[#4C5454]' : 'hover:bg-[#2A2E2E]'}`}
+                onClick={() => handleMoveClick(move.moveNumber, true)}
+              >
               {CHESS_PIECES[move.white.piece as keyof typeof CHESS_PIECES] && (
                 <div className="flex items-center mr-1">
                   {CHESS_PIECES[move.white.piece as keyof typeof CHESS_PIECES]}
@@ -129,7 +173,10 @@ const MoveTracker: React.FC<MoveTrackerProps> = ({ moves }) => {
               <span className="text-[#9DA692] text-xs">{move.white.notation}</span>
             </div>
             {move.black && (
-              <div className="flex items-center z-10 px-1 mr-2">
+                <div 
+                  className={`flex items-center z-10 px-1 mr-2 cursor-pointer rounded-[2px] ${isBlackSelected ? 'bg-[#4C5454]' : 'hover:bg-[#2A2E2E]'}`}
+                  onClick={() => handleMoveClick(move.moveNumber, false)}
+                >
                 {CHESS_PIECES[move.black.piece as keyof typeof CHESS_PIECES] && (
                   <div className="flex items-center mr-1">
                     {CHESS_PIECES[move.black.piece as keyof typeof CHESS_PIECES]}
@@ -139,7 +186,8 @@ const MoveTracker: React.FC<MoveTrackerProps> = ({ moves }) => {
               </div>
             )}
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

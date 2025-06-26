@@ -6,11 +6,12 @@ import Image from 'next/image';
 import NotificationCard from '../components/NotificationCard';
 import { useNotifications } from '../../context/NotificationsContext';
 import * as notificationService from '../services/notificationService';
+import { useAuth } from '../../context/AuthContext';
 
 // Notification data types based on the NotificationsContext
 interface NotificationData {
   id: string;
-  type: 'GAME_INVITE' | 'FRIEND_REQUEST' | 'CLUB_MEMBER_JOINED' | 'CLUB_ROLE_UPDATE' | 'TOURNAMENT_ALERT' | 'TOURNAMENT_REMINDER';
+  type: 'GAME_INVITE' | 'FRIEND_REQUEST' | 'CLUB_MEMBER_JOINED' | 'CLUB_ROLE_UPDATE' | 'TOURNAMENT_ALERT' | 'TOURNAMENT_REMINDER' | 'CLUB_MEMBER_LEFT' | 'CLUB_MEMBER_REMOVED' | 'SUPER_ADMIN_TRANSFER_REQUEST' | 'SUPER_ADMIN_TRANSFER';
   title: string;
   message: string;
   avatarUrl: string;
@@ -37,20 +38,43 @@ export default function NotificationPage() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(true);
   const [notifications, setNotifications] = useState<NotificationData[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const { markAsRead } = useNotifications();
+  const { user } = useAuth();
 
   // Fetch notifications from the API
   useEffect(() => {
     const fetchNotificationsData = async () => {
       setIsLoading(true);
+      setError(null);
+      
+      // Check if the user is authenticated
+      if (!user) {
+        setError("You must be logged in to view notifications");
+        setIsLoading(false);
+        return;
+      }
       
       try {
-        // Try to fetch from API first
-        const result = await notificationService.fetchNotifications(50, 0);
+        // Fetch ALL notifications regardless of status
+        const result = await notificationService.fetchNotifications(50, 0, 'ALL');
         
-        if (result.notifications.length > 0) {
+        console.log('Received notifications from API:', result.notifications);
+        console.log('Total notifications count:', result.total);
+        
+        if (result.notifications.length === 0) {
+          console.log('No notifications returned from the API');
+          setNotifications([]);
+          setIsLoading(false);
+          return;
+        }
+        
           // Map API data to the format we need
           const mappedNotifications = result.notifications.map(n => {
+          console.log(`Processing notification ${n.id} of type ${n.type}:`, n);
+          console.log(`Complete raw notification data:`, JSON.stringify(n));
+          console.log(`Notification data keys:`, Object.keys(n.data || {}));
+          
             // Determine actions based on notification type
             let actions: ('accept' | 'reject' | 'view')[] = ['view'];
             
@@ -61,123 +85,222 @@ export default function NotificationPage() {
             }
             
             // Get avatar URL based on the notification type
-            let avatarUrl = '/images/avatars/default.jpg';
+          let avatarUrl = '/white-profile.png';
+          let title = '';
+          let message = '';
+          
+          if (n.type === 'FRIEND_REQUEST') {
+            // For friend requests, use sender information
+            console.log('Friend request data:', n.data);
             
-            if (n.type.includes('CLUB')) {
-              avatarUrl = n.data.clubLogo || '/images/club-logos/clubmaster-gold.svg';
-            } else if (n.type.includes('TOURNAMENT')) {
-              avatarUrl = n.data.tournamentLogo || '/images/club-logos/kings-gambit.svg';
-            } else if (n.type === 'FRIEND_REQUEST' || n.type === 'GAME_INVITE') {
-              avatarUrl = n.data.senderAvatar || '/images/avatars/default.jpg';
+            // For title/username, use the following priority order:
+            const usernamePriorityFields = [
+              'username',           // Primary field - Database username
+              'senderUsername',     // Legacy field matching primary
+              'displayName',        // Secondary field from database or Firebase
+              'senderName',         // Legacy secondary field
+              'senderDisplayName',  // Legacy secondary field 
+              'firebaseName'        // Direct Firebase fallback
+            ];
+            
+            // Find the first field that has a value
+            let foundUsername = false;
+            for (const field of usernamePriorityFields) {
+              if (n.data && n.data[field]) {
+                title = n.data[field];
+                console.log(`Using ${field} field for username: ${title}`);
+                foundUsername = true;
+                break;
+              }
             }
             
-            return {
+            // If no field had a value, use default
+            if (!foundUsername) {
+              title = 'Someone';
+              console.log(`No username fields found, using default: ${title}`);
+              console.log('Available fields:', Object.keys(n.data || {}));
+            }
+            
+            // For avatar, use the following priority order:
+            const avatarPriorityFields = [
+              'custom_photo_base64', // Primary field - Database custom photo
+              'senderCustomPhoto',   // Legacy field matching primary
+              'photoURL',            // Secondary field from database or Firebase
+              'senderPhotoURL',      // Legacy secondary field
+              'firebasePhotoURL'     // Direct Firebase fallback
+            ];
+            
+            // Find the first field that has a value
+            let foundAvatar = false;
+            for (const field of avatarPriorityFields) {
+              if (n.data && n.data[field]) {
+                avatarUrl = n.data[field];
+                console.log(`Using ${field} field for avatar: ${avatarUrl.substring(0, 30)}...`);
+                foundAvatar = true;
+                break;
+              }
+            }
+            
+            // If no field had a value, use default
+            if (!foundAvatar) {
+              avatarUrl = '/white-profile.png';
+              console.log(`No avatar fields found, using default avatar`);
+              console.log('Available fields:', Object.keys(n.data || {}));
+            }
+            
+            message = 'sent you a friend request';
+          } else if (n.type === 'GAME_INVITE') {
+            // Similar approach for game invites
+            console.log('Game invite data:', n.data);
+            
+            // For title/username, use the following priority order:
+            const usernamePriorityFields = [
+              'username',           // Primary field - Database username
+              'senderUsername',     // Legacy field matching primary
+              'displayName',        // Secondary field from database or Firebase
+              'senderName',         // Legacy secondary field
+              'senderDisplayName',  // Legacy secondary field 
+              'firebaseName'        // Direct Firebase fallback
+            ];
+            
+            // Find the first field that has a value
+            let foundUsername = false;
+            for (const field of usernamePriorityFields) {
+              if (n.data && n.data[field]) {
+                title = n.data[field];
+                console.log(`Using ${field} field for username: ${title}`);
+                foundUsername = true;
+                break;
+              }
+            }
+            
+            // If no field had a value, use default
+            if (!foundUsername) {
+              title = 'Someone';
+              console.log(`No username fields found, using default: ${title}`);
+              console.log('Available fields:', Object.keys(n.data || {}));
+            }
+            
+            // For avatar, use the following priority order:
+            const avatarPriorityFields = [
+              'custom_photo_base64', // Primary field - Database custom photo
+              'senderCustomPhoto',   // Legacy field matching primary
+              'photoURL',            // Secondary field from database or Firebase
+              'senderPhotoURL',      // Legacy secondary field
+              'firebasePhotoURL'     // Direct Firebase fallback
+            ];
+            
+            // Find the first field that has a value
+            let foundAvatar = false;
+            for (const field of avatarPriorityFields) {
+              if (n.data && n.data[field]) {
+                avatarUrl = n.data[field];
+                console.log(`Using ${field} field for avatar: ${avatarUrl.substring(0, 30)}...`);
+                foundAvatar = true;
+                break;
+              }
+            }
+            
+            // If no field had a value, use default
+            if (!foundAvatar) {
+              avatarUrl = '/white-profile.png';
+              console.log(`No avatar fields found, using default avatar`);
+              console.log('Available fields:', Object.keys(n.data || {}));
+            }
+            
+            message = 'invited you to play a game';
+          } else if (n.type && (n.type.includes('CLUB') || n.type.includes('ADMIN'))) {
+            console.log('Club notification data:', n.data);
+            
+            // Handle club-related notifications
+            if (n.data) {
+              avatarUrl = n.data.clubLogo || '/images/club-logos/clubmaster-gold.svg';
+              title = n.data.title || n.data.clubName || 'Club Notification';
+              message = n.message || (n.data && n.data.message) || '';
+              
+              // Special handling for club member notifications
+              if (n.type === 'CLUB_MEMBER_REMOVED') {
+                avatarUrl = n.data.clubLogo || '/images/avatars/default.jpg';
+                title = n.data.clubName || 'Club';
+                if (n.data.removedByName) {
+                  message = `You have been removed from the club ${n.data.clubName} by ${n.data.removedByName}.`;
+                } else {
+                  message = n.data.message || `You have been removed from the club ${n.data.clubName}.`;
+                }
+                console.log('Processed CLUB_MEMBER_REMOVED notification:', { title, message });
+              } else if (n.type === 'CLUB_MEMBER_LEFT') {
+                title = n.data.memberUsername || 'A member';
+                message = n.data.message || `${title} has left your club ${n.data.clubName}.`;
+                avatarUrl = n.data.memberAvatar || '/images/avatars/default.jpg';
+                console.log('Processed CLUB_MEMBER_LEFT notification:', { title, message });
+              } else if (n.type === 'CLUB_MEMBER_JOINED') {
+                avatarUrl = n.data.memberAvatar || '/images/avatars/default.jpg';
+                title = n.data.memberUsername || n.data.memberName || 'New member';
+                message = `${title} has joined the club ${n.data.clubName}.`;
+                console.log('Processed CLUB_MEMBER_JOINED notification:', { title, message });
+              } else if (n.type === 'SUPER_ADMIN_TRANSFER') {
+                title = n.data.clubName || 'Club'; // Use clubName for the title
+                message = n.data.message || `You are the new super admin of the club ${title}`;
+                avatarUrl = n.data.clubLogo || '/images/club-logos/clubmaster-gold.svg'; // Use clubLogo for the avatar
+                console.log('Processed SUPER_ADMIN_TRANSFER notification:', { title, message });
+              }
+            } else {
+              console.warn(`Club notification ${n.id} has no data object`);
+              title = 'Club Notification';
+              message = n.message || 'You have a new club notification';
+            }
+          } else if (n.type && n.type.includes('TOURNAMENT')) {
+            avatarUrl = (n.data && n.data.tournamentLogo) || '/images/club-logos/kings-gambit.svg';
+            title = (n.data && (n.data.title || n.data.tournamentName)) || 'Tournament Notification';
+            message = n.message || (n.data && n.data.message) || '';
+          } else {
+            // Default for other notification types
+            title = (n.data && n.data.title) || n.type || 'Notification';
+            message = n.message || (n.data && n.data.message) || '';
+          }
+          
+          const mappedNotification = {
               id: n.id,
               type: n.type as any,
-              title: n.data.title || n.type,
-              message: n.message || n.data.message || '',
+            title: title,
+            message: message,
               avatarUrl,
-              timestamp: n.timestamp,
+            timestamp: n.timestamp || new Date(),
               actions,
-              read: n.read
+            read: n.read || false
             };
+          
+          console.log('Mapped notification:', mappedNotification);
+          return mappedNotification;
           });
           
           setNotifications(mappedNotifications);
-          setIsLoading(false);
-          return;
-        }
-      } catch (error) {
+      } catch (error: any) {
         console.error("Error fetching notifications:", error);
-        // Fall back to mock data if API call fails
-      }
-      
-      // Fallback to mock data
-      const mockNotifications: NotificationData[] = [
-        {
-          id: '1',
-          type: 'CLUB_ROLE_UPDATE',
-          title: 'Clubmaster premier league',
-          message: 'Congrats. You are the one of the player to play in Champions league. Best of luck.',
-          avatarUrl: '/images/club-logos/clubmaster-gold.svg',
-          timestamp: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // 30 days ago
-          actions: ['view'],
-          read: false
-        },
-        {
-          id: '2',
-          type: 'CLUB_MEMBER_JOINED',
-          title: 'Clubmaster premier league',
-          message: 'Admin added you to the Champions League.',
-          avatarUrl: '/images/club-logos/clubmaster-gold.svg',
-          timestamp: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-          actions: ['view'],
-          read: false
-        },
-        {
-          id: '3',
-          type: 'TOURNAMENT_ALERT',
-          title: 'King\'s Gambit',
-          message: 'Admin added you to the tournament.',
-          avatarUrl: '/images/club-logos/kings-gambit.svg',
-          timestamp: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-          actions: ['accept', 'reject'],
-          read: false
-        },
-        {
-          id: '4',
-          type: 'TOURNAMENT_ALERT',
-          title: 'Athani Club',
-          message: 'Athani club invited you to join King\'s Gambit Tournament.',
-          avatarUrl: '/images/club-logos/athani.svg',
-          timestamp: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-          actions: ['accept', 'reject'],
-          read: false
-        },
-        {
-          id: '5',
-          type: 'TOURNAMENT_REMINDER',
-          title: 'Akhil',
-          message: 'I need to quit from tournament Add another player, so I can left.',
-          avatarUrl: '/images/avatars/akhil.jpg',
-          timestamp: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-          actions: ['view'],
-          read: false
-        },
-        {
-          id: '6',
-          type: 'TOURNAMENT_ALERT',
-          title: 'Athani Club',
-          message: 'The admin removed you from the tournament.',
-          avatarUrl: '/images/club-logos/athani.svg',
-          timestamp: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-          actions: ['view'],
-          read: false
-        },
-        {
-          id: '7',
-          type: 'CLUB_ROLE_UPDATE',
-          title: 'Athani Club',
-          message: 'Congrats. You are the one of the player to play in Champions league. Best of luck.',
-          avatarUrl: '/images/club-logos/athani.svg',
-          timestamp: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-          actions: ['view'],
-          read: false
+        
+        // Handle different error types
+        if (error.message?.includes('401')) {
+          setError("Authentication error. Please sign in again.");
+        } else if (error.message?.includes('User not authenticated')) {
+          setError("You need to be logged in to view notifications.");
+        } else {
+          setError("Unable to load notifications. Please try again later.");
         }
-      ];
-
-      setNotifications(mockNotifications);
+      } finally {
       setIsLoading(false);
+      }
     };
-
     fetchNotificationsData();
-  }, []);
+  }, [user]);
 
   // Handle the action buttons
   const handleAction = async (notificationId: string, action: string) => {
     // Find the notification to get its type
     const notification = notifications.find(n => n.id === notificationId);
     if (!notification) return;
+    
+    // Log the action being taken
+    console.log(`Taking action '${action}' on notification ${notificationId} of type ${notification.type}`);
     
     if (action === 'view') {
       // Mark as read both locally and on the server
@@ -190,7 +313,7 @@ export default function NotificationPage() {
       );
       
       // Handle navigation based on notification type
-      if (notification.type === 'CLUB_ROLE_UPDATE' || notification.type === 'CLUB_MEMBER_JOINED') {
+      if (notification.type === 'CLUB_ROLE_UPDATE' || notification.type === 'CLUB_MEMBER_JOINED' || notification.type === 'SUPER_ADMIN_TRANSFER') {
         router.push('/club/detail');
       } else if (notification.type.includes('TOURNAMENT')) {
         router.push('/tournament');
@@ -204,6 +327,7 @@ export default function NotificationPage() {
         }
         
         // Call the API to handle the action
+        console.log(`Sending ${action} action to API for notification ${notificationId}`);
         const success = await notificationService.handleNotificationAction(
           notificationId,
           action,
@@ -213,19 +337,219 @@ export default function NotificationPage() {
         if (!success) {
           // If the action failed, revert the optimistic update
           console.error(`Action ${action} failed for notification ${notificationId}`);
-          // Re-fetch notifications
-          const result = await notificationService.fetchNotifications(50, 0);
-          // Map to our format
-          // (simplified for this example - would need the same mapping logic as above)
+          
+          // Re-fetch notifications - only unread ones
+          const result = await notificationService.fetchNotifications(50, 0, 'UNREAD');
+          
+          // Map to our format (simplified for brevity)
+          const refreshedNotifications = result.notifications.map(n => {
+            // Determine actions based on type
+            let actions: ('accept' | 'reject' | 'view')[] = ['view'];
+            if (n.type === 'FRIEND_REQUEST' || n.type === 'GAME_INVITE') {
+              actions = ['accept', 'reject'];
+            }
+            
+            // Get title with priority order using all possible fields
+            let title = '';
+            
+            // Log the notification data for debugging
+            console.log(`Refresh - Notification data for ${n.id}:`, n.data);
+            
+            // For title/username, use the first available field in this priority order:
+            const usernamePriorityFields = [
+              'username',           // Database username (primary)
+              'senderUsername',     // Legacy field
+              'senderName',         // Legacy field
+              'senderDisplayName',  // Legacy field 
+              'displayName',        // Common fallback
+              'firebaseName'        // Firebase fallback
+            ];
+            
+            // Find the first field that has a value
+            let foundUsername = false;
+            for (const field of usernamePriorityFields) {
+              if (n.data[field]) {
+                title = n.data[field];
+                console.log(`Refresh - Using ${field} field for username: ${title}`);
+                foundUsername = true;
+                break;
+              }
+            }
+            
+            // If no field had a value, use default
+            if (!foundUsername) {
+              title = 'Someone';
+              console.log(`Refresh - No username fields found, using default: ${title}`);
+              console.log('Refresh - Available fields:', Object.keys(n.data));
+            }
+            
+            // Get avatar with priority order
+            let avatarUrl = '/white-profile.png';
+            
+            // For avatar, use the first available field in this priority order:
+            const avatarPriorityFields = [
+              'custom_photo_base64', // Database custom photo (primary)
+              'senderCustomPhoto',   // Legacy field
+              'senderPhotoURL',      // Legacy field
+              'photoURL',            // Common fallback
+              'firebasePhotoURL'     // Firebase fallback
+            ];
+            
+            // Find the first field that has a value
+            let foundAvatar = false;
+            for (const field of avatarPriorityFields) {
+              if (n.data[field]) {
+                avatarUrl = n.data[field];
+                console.log(`Refresh - Using ${field} field for avatar: ${avatarUrl.substring(0, 30)}...`);
+                foundAvatar = true;
+                break;
+              }
+            }
+            
+            // If no field had a value, use default
+            if (!foundAvatar) {
+              avatarUrl = '/white-profile.png';
+              console.log(`Refresh - No avatar fields found, using default avatar`);
+              console.log('Refresh - Available fields:', Object.keys(n.data));
+            }
+            
+            return {
+              id: n.id,
+              type: n.type as any,
+              title: title,
+              message: n.message || n.data.message || '',
+              avatarUrl: avatarUrl,
+              timestamp: n.timestamp,
+              actions,
+              read: n.read
+            };
+          });
+          
+          setNotifications(refreshedNotifications);
+        } else {
+          console.log(`Successfully processed ${action} for notification ${notificationId}`);
         }
       } catch (error) {
         console.error('Error handling notification action:', error);
+        
+        // Re-fetch notifications on error to ensure UI is consistent
+        try {
+          const result = await notificationService.fetchNotifications(50, 0, 'UNREAD');
+          // Use the same mapping logic as above for consistency
+          const refreshedNotifications = result.notifications.map(n => {
+            // Determine actions based on type
+            let actions: ('accept' | 'reject' | 'view')[] = ['view'];
+            if (n.type === 'FRIEND_REQUEST' || n.type === 'GAME_INVITE') {
+              actions = ['accept', 'reject'];
+            }
+            
+            // Get title with priority order using all possible fields
+            let title = '';
+            
+            // Log the notification data for debugging
+            console.log(`Refresh - Notification data for ${n.id}:`, n.data);
+            
+            // For title/username, use the first available field in this priority order:
+            const usernamePriorityFields = [
+              'username',           // Database username (primary)
+              'senderUsername',     // Legacy field
+              'senderName',         // Legacy field
+              'senderDisplayName',  // Legacy field 
+              'displayName',        // Common fallback
+              'firebaseName'        // Firebase fallback
+            ];
+            
+            // Find the first field that has a value
+            let foundUsername = false;
+            for (const field of usernamePriorityFields) {
+              if (n.data[field]) {
+                title = n.data[field];
+                console.log(`Refresh - Using ${field} field for username: ${title}`);
+                foundUsername = true;
+                break;
+              }
+            }
+            
+            // If no field had a value, use default
+            if (!foundUsername) {
+              title = 'Someone';
+              console.log(`Refresh - No username fields found, using default: ${title}`);
+              console.log('Refresh - Available fields:', Object.keys(n.data));
+            }
+            
+            // Get avatar with priority order
+            let avatarUrl = '/white-profile.png';
+            
+            // For avatar, use the first available field in this priority order:
+            const avatarPriorityFields = [
+              'custom_photo_base64', // Database custom photo (primary)
+              'senderCustomPhoto',   // Legacy field
+              'senderPhotoURL',      // Legacy field
+              'photoURL',            // Common fallback
+              'firebasePhotoURL'     // Firebase fallback
+            ];
+            
+            // Find the first field that has a value
+            let foundAvatar = false;
+            for (const field of avatarPriorityFields) {
+              if (n.data[field]) {
+                avatarUrl = n.data[field];
+                console.log(`Refresh - Using ${field} field for avatar: ${avatarUrl.substring(0, 30)}...`);
+                foundAvatar = true;
+                break;
+              }
+            }
+            
+            // If no field had a value, use default
+            if (!foundAvatar) {
+              avatarUrl = '/white-profile.png';
+              console.log(`Refresh - No avatar fields found, using default avatar`);
+              console.log('Refresh - Available fields:', Object.keys(n.data));
+            }
+            
+            return {
+              id: n.id,
+              type: n.type as any,
+              title: title,
+              message: n.message || n.data.message || '',
+              avatarUrl: avatarUrl,
+              timestamp: n.timestamp,
+              actions,
+              read: n.read
+            };
+          });
+          
+          setNotifications(refreshedNotifications);
+        } catch (refreshError) {
+          console.error('Error refreshing notifications:', refreshError);
+        }
       }
     }
   };
 
+  // Login button handler
+  const handleLogin = () => {
+    router.push('/login');
+  };
+
   // Notification Card Component - Matches Clubmaster App Style
   const NotificationItem = ({ notification }: { notification: NotificationData }) => {
+    const [imgError, setImgError] = useState(false);
+
+    // Handle image loading errors
+    const handleImageError = () => {
+      setImgError(true);
+    };
+
+    // Determine the fallback image to use
+    const getAvatarSrc = () => {
+      if (imgError) {
+        // If the image failed to load, use one of the profile images from the public directory
+        return '/white-profile.png';
+      }
+      return notification.avatarUrl;
+    };
+
     return (
       <div className="bg-[#4C5454] rounded-xl shadow-md p-4 mb-4 hover:bg-[#5A5E5E] transition-colors">
         <div className="flex">
@@ -233,11 +557,13 @@ export default function NotificationPage() {
           <div className="relative mr-3 flex-shrink-0">
             <div className="w-12 h-12 rounded-full overflow-hidden bg-[#3E4546] flex items-center justify-center">
               <Image 
-                src={notification.avatarUrl} 
+                src={getAvatarSrc()}
                 alt={notification.title}
                 width={48}
                 height={48}
                 className="w-full h-full object-cover"
+                onError={handleImageError}
+                priority
               />
             </div>
           </div>
@@ -245,7 +571,9 @@ export default function NotificationPage() {
           {/* Content */}
           <div className="flex-1 min-w-0">
             <div className="flex justify-between">
-              <h3 className="text-[#FAF3DD] font-medium text-base">{notification.title}</h3>
+              <h3 className="text-[#FAF3DD] font-medium text-base">
+                {notification.title}
+              </h3>
               <span className="text-[#BDBDBD] text-xs">{timeAgo(notification.timestamp)}</span>
             </div>
             <p className="text-[#BDBDBD] text-sm mt-1 mb-3">{notification.message}</p>
@@ -271,7 +599,7 @@ export default function NotificationPage() {
               {notification.actions.includes('reject') && (
                 <button 
                   onClick={() => handleAction(notification.id, 'reject')}
-                  className="bg-[#979797] text-[#FAF3DD] text-sm font-medium px-4 py-2 rounded-md hover:bg-[#878787] transition-colors"
+                  className="bg-[#E57373] text-[#FAF3DD] text-sm font-medium px-4 py-2 rounded-md hover:bg-[#D32F2F] transition-colors"
                 >
                   Reject
                 </button>
@@ -306,6 +634,30 @@ export default function NotificationPage() {
         {isLoading ? (
           <div className="flex items-center justify-center h-64">
             <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-[#E9CB6B]"></div>
+          </div>
+        ) : error ? (
+          <div className="flex flex-col items-center justify-center h-64 text-[#B0B0B0]">
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M12 8V12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M12 16H12.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            <p className="mt-4 text-lg">{error}</p>
+            {error.includes('authentication') || error.includes('logged in') ? (
+              <button 
+                onClick={handleLogin}
+                className="mt-4 bg-[#4A7C59] text-[#FAF3DD] text-sm font-medium px-4 py-2 rounded-md hover:bg-[#3D6A4A] transition-colors"
+              >
+                Log In
+              </button>
+            ) : (
+              <button 
+                onClick={() => window.location.reload()}
+                className="mt-4 bg-[#4A7C59] text-[#FAF3DD] text-sm font-medium px-4 py-2 rounded-md hover:bg-[#3D6A4A] transition-colors"
+              >
+                Retry
+              </button>
+            )}
           </div>
         ) : notifications.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-[#B0B0B0]">
