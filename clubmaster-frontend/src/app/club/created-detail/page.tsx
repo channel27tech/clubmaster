@@ -5,6 +5,7 @@ import Image from 'next/image';
 import BottomNavigation from '../../components/BottomNavigation';
 import { useAuth } from '../../../context/AuthContext';
 import { ShareLinkModal } from '../share-link/page';
+import { TournamentOptionsModal } from '../../tournament-modals';
 
 // Define club type
 interface ClubData {
@@ -17,6 +18,7 @@ interface ClubData {
   points: number;
   credits: number;
   superAdminId: number;
+  rank?: number;
 }
 
 interface ClubMember {
@@ -40,6 +42,7 @@ export default function ClubCreatedDetailPage() {
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);  
   const [members, setMembers] = useState<any[]>([]);
+  const [showTournamentModal, setShowTournamentModal] = useState(false);
 
   const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -143,8 +146,14 @@ export default function ClubCreatedDetailPage() {
     router.push('/club/clubs'); // Navigate back to clubs page after leaving
   };
 
+  const handleBecomeClubmaster = async (date: string, time: string) => {
+    setShowTournamentModal(false);
+    // TODO: Implement become clubmaster logic
+    console.log('Become Clubmaster clicked', { date, time });
+  };
+
   return (
-    <div className="min-h-screen bg-[#333939] flex flex-col w-full max-w-[400px] mx-auto relative">
+    <div className="min-h-screen bg-[#333939] flex flex-col w-full max-w-[430px] mx-auto relative">
       {/* Header */}
       <div className="bg-[#333939] p-4 flex items-center justify-between">
         <button 
@@ -314,8 +323,9 @@ export default function ClubCreatedDetailPage() {
 
       {/* Create Tournament Button */}
       {isSuperAdmin && (
-        <div className="fixed bottom-16 left-1/2 -translate-x-1/2 w-full max-w-[400px] px-4 py-3 bg-[#333939]">
+        <div className="fixed bottom-16 left-1/2 -translate-x-1/2 w-full max-w-[430px] px-4 py-3">
           <button 
+            onClick={() => setShowTournamentModal(true)}
             className="w-full py-3 rounded-lg bg-[#4A7C59] text-[#FAF3DD] font-medium border border-[#E9CB6B]"
           >
             Create Tournament
@@ -388,6 +398,12 @@ export default function ClubCreatedDetailPage() {
         <ShareLinkModal isOpen={showShareModal} onClose={() => setShowShareModal(false)} />
       )}
 
+      {/* Tournament Options Modal */}
+      <TournamentOptionsModal
+        isOpen={showTournamentModal}
+        onClose={() => setShowTournamentModal(false)}
+        onBecomeClubmaster={handleBecomeClubmaster}
+      />
 
       {/* Bottom Navigation */}
       <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[400px] z-10">
