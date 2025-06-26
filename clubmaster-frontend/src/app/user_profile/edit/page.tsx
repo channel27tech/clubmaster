@@ -222,7 +222,7 @@ export default function EditProfilePage() {
       </div>
       {/* Green Profile header with border */}
       <div className="flex justify-center px-4">
-        <div className="w-full max-w-[380px] bg-[#4A7C59] rounded-[10px] py-2 text-center text-lg font-semibold text-[#FAF3DD] mb-6 border" style={{ borderColor: '#E9CB6B' }}>Edit Profile</div>
+        <div className="w-full max-w-[380px]  py-2 text-center text-[22px] font-semibold text-[#FAF3DD] mt-3" >Edit Profile</div>
       </div>
 
       {error && <p className="text-red-500 text-center mb-4 p-2 bg-red-100 border border-red-500 rounded-md mx-4 max-w-[380px] self-center">{error}</p>}
@@ -326,7 +326,7 @@ export default function EditProfilePage() {
                 type="submit" 
                 disabled={!!isLoading || !!isFetchingProfile || !!isEditingDisabled}
                 className="w-full text-[#D9D9D9] text-lg font-semibold py-3 border rounded-[10px] disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ background: '#152317', borderColor: '#E9CB6B' }}
+                style={{ background: '#4A7C59', borderColor: '#E9CB6B' }}
             >
                 {isLoading ? 'Saving...' : 'Save'}
             </button>

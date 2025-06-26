@@ -412,4 +412,43 @@ export class ClubMemberService {
     // Remove the member
     await this.clubMemberRepository.remove(member);
   }
+
+  async promoteMemberToAdmin(superAdminId: string, memberId: string, clubId: string): Promise<void> {
+    // Convert clubId to number
+    const clubIdNum = parseInt(clubId, 10);
+    if (isNaN(clubIdNum)) throw new BadRequestException('Invalid club ID');
+
+    // Check if the requester is super admin
+    const requesterMembership = await this.clubMemberRepository.findOne({
+      where: { userId: superAdminId, clubId: clubIdNum }
+    });
+    if (!requesterMembership || requesterMembership.role !== 'super_admin') {
+      throw new ForbiddenException('Only super admin can promote members to admin');
+    }
+
+    // Find the target member
+    const member = await this.clubMemberRepository.findOne({
+      where: { userId: memberId, clubId: clubIdNum }
+    });
+    if (!member) throw new NotFoundException('Member not found');
+    if (member.role === 'super_admin') throw new ForbiddenException('Cannot change role of super admin');
+    if (member.role === 'admin') throw new BadRequestException('Member is already an admin');
+
+    // Promote to admin
+    member.role = 'admin';
+    await this.clubMemberRepository.save(member);
+
+    // Optionally, send notification
+    try {
+      await this.clubNotificationHelper.sendRoleUpdateNotification(
+        memberId,
+        superAdminId,
+        clubId,
+        '', // club name if needed
+        'admin'
+      );
+    } catch (error) {
+      this.logger.error(`Failed to send role update notification: ${error.message}`);
+    }
+  }
 } 
