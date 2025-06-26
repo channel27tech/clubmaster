@@ -17,7 +17,7 @@ if (typeof document !== 'undefined') {
   `;
   document.head.appendChild(styleEl);
 }
-
+ 
 interface WaitingScreenProps {
   gameType?: string;
   onCancel: () => void;
@@ -265,15 +265,15 @@ const WaitingScreen: React.FC<WaitingScreenProps> = ({
                     justifyContent: 'center'
                   }}
                 >
-                  <Image 
-                    src="/icons/avatar1.svg"
-                    alt="Player Avatar"
-                    width={41}
-                    height={41}
+              <Image 
+                src="/icons/avatar1.svg"
+                alt="Player Avatar"
+                width={41}
+                height={41}
                     className="w-full h-full"
                     style={{ objectFit: 'contain' }}
                     unoptimized={true}
-                  />
+              />
                 </div>
               </div>
             </div>
@@ -375,15 +375,15 @@ const WaitingScreen: React.FC<WaitingScreenProps> = ({
                     justifyContent: 'center'
                   }}
                 >
-                  <Image 
+              <Image 
                     src={userProfileImage}
-                    alt="Player Avatar"
-                    width={48}
-                    height={48}
+                alt="Player Avatar"
+                width={48}
+                height={48}
                     className="w-full h-full"
                     style={{ objectFit: 'contain' }}
                     unoptimized={true}
-                  />
+              />
                 </div>
               </div>
             </div>

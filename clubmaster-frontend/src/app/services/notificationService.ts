@@ -1,20 +1,18 @@
 import { Notification } from '../../context/NotificationsContext';
 import { getAuth } from 'firebase/auth';
 
-// Hardcoded API URL with the correct path structure
-// The backend likely has the endpoints without the /api prefix
-const API_URL = 'http://localhost:3001';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 /**
  * Fetch notifications from the API
  * @param limit - Number of notifications to fetch
  * @param offset - Offset for pagination
- * @param status - Filter by notification status (defaults to UNREAD)
+ * @param status - Filter by notification status (defaults to ALL)
  */
 export const fetchNotifications = async (
-  limit: number = 20, 
+  limit: number = 50, 
   offset: number = 0, 
-  status: 'READ' | 'UNREAD' | 'PROCESSED' | 'ALL' = 'UNREAD'
+  status: 'READ' | 'UNREAD' | 'PROCESSED' | 'ALL' = 'ALL'
 ): Promise<{ notifications: Notification[]; total: number }> => {
   try {
     // Build the query parameters
@@ -34,8 +32,13 @@ export const fetchNotifications = async (
     }
     
     const token = await user.getIdToken();
+    console.log('fetchNotifications: user', user.uid);
+    console.log('fetchNotifications: token exists', !!token);
 
-    const response = await fetch(`${API_URL}/notifications?${params.toString()}`, {
+    const url = `${API_URL}/notifications?${params.toString()}`;
+    console.log('Fetching notifications from:', url);
+    
+    const response = await fetch(url, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -45,31 +48,44 @@ export const fetchNotifications = async (
     });
 
     if (!response.ok) {
+      console.error(`Error response from API: ${response.status} ${response.statusText}`);
       throw new Error(`Failed to fetch notifications: ${response.status} ${response.statusText}`);
     }
 
     const data = await response.json();
+    console.log('Raw API response:', data);
+    
+    if (!data.notifications || !Array.isArray(data.notifications)) {
+      console.error('API returned invalid notifications format:', data);
+      return { notifications: [], total: 0 };
+    }
     
     // Transform the data to match the Notification interface
     const notifications: Notification[] = data.notifications.map((n: any) => {
       // Log the raw notification data for debugging
       console.log('Raw notification from server:', n);
+      console.log('Raw notification type:', n.type);
+      console.log('Raw notification data:', JSON.stringify(n.data || {}));
+      
+      // Ensure data is always an object
+      const safeData = n.data || {};
       
       return {
         id: n.id,
         type: n.type,
-        message: n.data?.message || '',
-        data: n.data || {},
-        timestamp: new Date(n.createdAt),
+        message: safeData.message || '',
+        data: safeData,
+        timestamp: new Date(n.createdAt || Date.now()),
         senderUserId: n.senderUserId,
         read: n.status === 'READ' || n.status === 'PROCESSED', 
         processed: n.status === 'PROCESSED'
       };
     });
 
+    console.log(`Transformed ${notifications.length} notifications`);
     return {
       notifications,
-      total: data.total
+      total: data.total || notifications.length
     };
   } catch (error) {
     console.error('Error fetching notifications:', error);
@@ -78,7 +94,7 @@ export const fetchNotifications = async (
       total: 0
     };
   }
-};
+}
 
 /**
  * Mark a notification as read

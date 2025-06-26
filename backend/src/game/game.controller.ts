@@ -25,6 +25,19 @@ export class GameController {
     }
    
     // Use the customId-aware lookup with multiple fallback strategies
+    // Use the customId-aware lookup
+    const game = await this.gameRepositoryService.findOneByCustomId(id);
+    if (!game) {
+      this.logger.error(`Game with ID ${id} not found`);
+      throw new NotFoundException(`Game with ID ${id} not found`);
+    }
+    this.logger.log(`[GameController] Found game for customId ${id}: ${game.id}`);
+    
+    this.logger.debug(`Found game with ID: ${game.id}, white player ID: ${game.whitePlayerId}, black player ID: ${game.blackPlayerId}`);
+
+    // Always try to get real player data from database
+    let whitePlayer, blackPlayer;
+    
     try {
       const game = await this.gameRepositoryService.findOneByCustomId(id);
       if (!game) {

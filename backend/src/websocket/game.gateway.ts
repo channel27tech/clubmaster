@@ -1328,7 +1328,7 @@ export class GameGateway
       game.lastMoveTime = new Date();
       
       // Apply the move
-      let moveResult;
+        let moveResult;
       try {
         if (payload.san) {
           moveResult = game.chessInstance.move(payload.san);
@@ -1339,17 +1339,17 @@ export class GameGateway
             promotion: payload.promotion ? payload.promotion.toLowerCase() as any : undefined
           });
         }
-        
-        if (!moveResult) {
+          
+          if (!moveResult) {
           this.logger.error(`Invalid move attempted in game ${payload.gameId}`);
-          return {
-            event: 'moveMadeResponse',
-            data: {
-              success: false,
+            return {
+              event: 'moveMadeResponse',
+              data: {
+                success: false,
               message: 'Invalid move',
-            },
-          };
-        }
+              },
+            };
+          }
       } catch (moveError) {
         this.logger.error(`Error applying move in game ${payload.gameId}: ${moveError.message}`);
         return {
@@ -1404,15 +1404,15 @@ export class GameGateway
         await this.gameManagerService.checkGameEnd(payload.gameId, this.server);
       }
       
-      return {
-        event: 'moveMadeResponse',
-        data: {
-          success: true,
+        return {
+          event: 'moveMadeResponse',
+          data: {
+            success: true,
           move: moveResult
         },
       };
       
-    } catch (error) {
+        } catch (error) {
       this.logger.error(`Error in handleMoveMade: ${error.message}`);
       return {
         event: 'moveMadeResponse',
@@ -1929,16 +1929,27 @@ export class GameGateway
               rating: game.whitePlayer.rating || 1500,
               ratingChange: whiteRatingChange,
               // Use optional chaining to safely access photoURL if it exists
-              photoURL: game.whitePlayer.photoURL || null
+              photoURL: game.whitePlayer.photoURL || null,
+              userId: game.whitePlayer.userId
             },
             blackPlayer: {
               username: game.blackPlayer.username,
               rating: game.blackPlayer.rating || 1500,
               ratingChange: blackRatingChange,
               // Use optional chaining to safely access photoURL if it exists
-              photoURL: game.blackPlayer.photoURL || null
+              photoURL: game.blackPlayer.photoURL || null,
+              userId: game.blackPlayer.userId
             },
-            finalFEN: chessInstance.fen()
+            finalFEN: chessInstance.fen(),
+            // Include these fields to match the GameResultData interface
+            whiteRatingChange: { 
+              ratingChange: whiteRatingChange,
+              newRating: (game.whitePlayer.rating || 1500) + whiteRatingChange
+            },
+            blackRatingChange: {
+              ratingChange: blackRatingChange, 
+              newRating: (game.blackPlayer.rating || 1500) + blackRatingChange
+            }
           };
           
           // Log the payload we're about to emit

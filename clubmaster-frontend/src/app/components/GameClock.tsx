@@ -40,12 +40,12 @@ const GameClock: React.FC<GameClockProps> = ({
   useEffect(() => {
     if (initialTime !== lastInitialTimeRef.current) {
       console.log(`[GameClock] initialTime changed from ${lastInitialTimeRef.current} to ${initialTime}`);
-      setRemainingTime(initialTime);
+    setRemainingTime(initialTime);
       lastInitialTimeRef.current = initialTime;
-      hasCalledTimeOut.current = false;
-      hasPlayedLowTimeSound.current = false;
-      isTimeOutRef.current = false;
-      shouldPlaySoundRef.current = false;
+    hasCalledTimeOut.current = false;
+    hasPlayedLowTimeSound.current = false;
+    isTimeOutRef.current = false;
+    shouldPlaySoundRef.current = false;
     }
   }, [initialTime]);
 
@@ -59,7 +59,7 @@ const GameClock: React.FC<GameClockProps> = ({
       onTimeUpdate(remainingTime);
     }
   }, [remainingTime, onTimeUpdate]);
-
+  
   // Log when isActive changes
   useEffect(() => {
     console.log(`[GameClock] isActive changed to ${isActive}, remainingTime=${remainingTime}`);
@@ -71,34 +71,34 @@ const GameClock: React.FC<GameClockProps> = ({
       timerRef.current = null;
       console.log(`[GameClock] Cleared timer due to isActive change to ${isActive}`);
     }
-    
+
     // Start a new timer if this clock is now active
     if (isActive && remainingTime > 0) {
       console.log(`[GameClock] Starting new timer, remainingTime=${remainingTime}`);
       timerRef.current = setInterval(() => {
         if (isMountedRef.current && isActiveRef.current) {
-          setRemainingTime((prevTime: number) => {
-            const newTime = prevTime - 1;
-            
-            // Check if time is about to run low
+        setRemainingTime((prevTime: number) => {
+          const newTime = prevTime - 1;
+          
+          // Check if time is about to run low
             if (newTime === 60 && !hasPlayedLowTimeSound.current) {
               shouldPlaySoundRef.current = true;
+          }
+          
+            // If time reaches zero, clear interval and mark for timeout
+          if (newTime <= 0 && !hasCalledTimeOut.current) {
+            if (timerRef.current) {
+              clearInterval(timerRef.current);
+              timerRef.current = null;
             }
             
-            // If time reaches zero, clear interval and mark for timeout
-            if (newTime <= 0 && !hasCalledTimeOut.current) {
-              if (timerRef.current) {
-                clearInterval(timerRef.current);
-                timerRef.current = null;
-              }
-              
               // Mark for timeout instead of calling directly
               isTimeOutRef.current = true;
-              return 0;
-            }
-            
-            return newTime;
-          });
+            return 0;
+          }
+          
+          return newTime;
+        });
         }
       }, 1000);
     }

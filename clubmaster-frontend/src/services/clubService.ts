@@ -29,4 +29,31 @@ export const joinClub = async (clubId: number, token: string, inviteToken?: stri
     }
   );
   return response.data;
+};
+
+export const deleteClub = async (clubId: number, token: string) => {
+  const response = await axios.delete(
+    `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/club/${clubId}`,
+    {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    }
+  );
+  return response.data;
+};
+
+export const removeMemberFromClub = async (clubId: number, userId: string, token: string) => {
+  const response = await axios.post(
+    `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/club-member/club/${clubId}/remove/${userId}`,
+    {},
+    {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    }
+  );
+  return response.data;
 }; 

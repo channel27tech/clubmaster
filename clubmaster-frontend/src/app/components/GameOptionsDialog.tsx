@@ -13,6 +13,10 @@ interface GameOptionsDialogProps {
     hasWhiteMoved?: boolean;
     isGameOver?: boolean;
   };
+  moveHistory?: {
+    length: number;
+    currentMoveIndex: number;
+  };
   onResign: () => void;
   onAbort?: () => void;
   soundEnabled: boolean;
@@ -24,6 +28,7 @@ const GameOptionsDialog: React.FC<GameOptionsDialogProps> = ({
   isOpen,
   onClose,
   gameState,
+  moveHistory,
   onResign,
   onAbort,
   soundEnabled,
@@ -34,9 +39,8 @@ const GameOptionsDialog: React.FC<GameOptionsDialogProps> = ({
   console.log('DIRECT GameOptionsDialog props gameState:', JSON.stringify(gameState));
   console.log('DIRECT GameOptionsDialog onAbort available:', !!onAbort);
 
-  // Fix: Simplified check for movesMade that works with the actual game state data
-  // Explicitly check if white has moved, treating undefined as 'no moves made yet'
-  const movesMade = gameState.hasWhiteMoved === true;
+  // Robust movesMade check: true if hasWhiteMoved is true OR moveHistory has moves
+  const movesMade = gameState.hasWhiteMoved === true || (moveHistory && moveHistory.length > 0);
 
   console.log('DIRECT GameOptionsDialog moves made check:', movesMade);
   

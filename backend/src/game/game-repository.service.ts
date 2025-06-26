@@ -141,7 +141,7 @@ export class GameRepositoryService {
     }
     this.logger.log(`[GameRepositoryService] Attempting to save game record to DB with customId: ${gameData.customId} and dbId: ${gameData.id}`);
     try {
-      const game = this.gamesRepository.create(gameData);
+    const game = this.gamesRepository.create(gameData);
       const savedGame = await this.gamesRepository.save(game);
       if (!savedGame) {
         this.logger.error(`[GameRepositoryService] ERROR saving game record to DB: save returned null/undefined`);
@@ -162,8 +162,76 @@ export class GameRepositoryService {
       return null;
     }
     
-    await this.gamesRepository.update(id, gameData);
-    return this.findOne(id);
+    this.logger.log(`Updating game ${id} with data: ${JSON.stringify(gameData)}`);
+    
+    try {
+      // Find the game first to make sure it exists and to log before/after values
+      const beforeGame = await this.findOne(id);
+      if (!beforeGame) {
+        this.logger.warn(`Game not found for update: ${id}`);
+        return null;
+      }
+      
+      // Log important changes for debugging
+      if (gameData.whitePlayerRatingAfter !== undefined || gameData.blackPlayerRatingAfter !== undefined) {
+        this.logger.log(`Rating update for game ${id}:`);
+        this.logger.log(`Before - White: ${beforeGame.whitePlayerRating}, Black: ${beforeGame.blackPlayerRating}`);
+        this.logger.log(`After  - White: ${gameData.whitePlayerRatingAfter || beforeGame.whitePlayerRatingAfter || beforeGame.whitePlayerRating}, Black: ${gameData.blackPlayerRatingAfter || beforeGame.blackPlayerRatingAfter || beforeGame.blackPlayerRating}`);
+      }
+      
+      // Perform the update
+      const result = await this.gamesRepository.update(id, gameData);
+      this.logger.log(`Update result for game ${id}: ${result.affected} row(s) affected`);
+      
+      if (result.affected === 0) {
+        this.logger.error(`Game update failed: No rows affected for game ID ${id}`);
+        
+        // Try direct update as a fallback
+        this.logger.log(`Attempting direct update via query builder as fallback`);
+        const directResult = await this.gamesRepository.createQueryBuilder()
+          .update(Game)
+          .set(gameData)
+          .where("id = :id", { id })
+          .execute();
+          
+        this.logger.log(`Direct update result: ${directResult.affected} row(s) affected`);
+        
+        if (directResult.affected === 0) {
+          this.logger.error(`Direct update also failed for game ${id}`);
+          return null;
+        }
+      }
+      
+      // Get the updated game
+      const afterGame = await this.findOne(id);
+      if (!afterGame) {
+        this.logger.warn(`Game not found after update: ${id}`);
+        return null;
+      }
+      
+      // Verify rating updates if applicable
+      if (gameData.whitePlayerRatingAfter !== undefined || gameData.blackPlayerRatingAfter !== undefined) {
+        this.logger.log(`Verified rating update for game ${id}:`);
+        this.logger.log(`White: ${beforeGame.whitePlayerRating} → ${afterGame.whitePlayerRatingAfter}`);
+        this.logger.log(`Black: ${beforeGame.blackPlayerRating} → ${afterGame.blackPlayerRatingAfter}`);
+        
+        // Check if ratings were actually updated
+        if (gameData.whitePlayerRatingAfter !== undefined && 
+            afterGame.whitePlayerRatingAfter !== gameData.whitePlayerRatingAfter) {
+          this.logger.error(`White player rating not updated correctly. Expected: ${gameData.whitePlayerRatingAfter}, Actual: ${afterGame.whitePlayerRatingAfter}`);
+        }
+        
+        if (gameData.blackPlayerRatingAfter !== undefined && 
+            afterGame.blackPlayerRatingAfter !== gameData.blackPlayerRatingAfter) {
+          this.logger.error(`Black player rating not updated correctly. Expected: ${gameData.blackPlayerRatingAfter}, Actual: ${afterGame.blackPlayerRatingAfter}`);
+        }
+      }
+      
+      return afterGame;
+    } catch (error) {
+      this.logger.error(`Error updating game ${id}: ${error.message}`, error.stack);
+      return null;
+    }
   }
 
   async endGame(

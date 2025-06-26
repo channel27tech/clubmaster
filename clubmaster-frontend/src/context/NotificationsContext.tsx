@@ -40,10 +40,10 @@ export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ child
   const [socket, setSocket] = useState<Socket | null>(null);
   const auth = useAuth();
   const user = auth?.user;
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
   // Create and connect to the socket
   useEffect(() => {
-    // Check if user is authenticated and has<<<<<<< HEAD
     // Check if user is authenticated and has an ID property
     if (!user || !user.uid) {
       return;
@@ -51,18 +51,48 @@ export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ child
 
     let notificationsSocket: Socket | null = null;
 
+    // Initial fetch of notifications
+    const fetchNotifications = async () => {
+      try {
+        const url = `${API_URL}/notifications?limit=20`;
+        console.log('Fetching notifications from:', url);
+        const response = await fetch(url);
+        if (response.ok) {
+          const data = await response.json();
+          setNotifications(
+            data.notifications.map((n: any) => ({
+              ...n,
+              timestamp: new Date(n.createdAt),
+              read: n.status === 'READ',
+            }))
+          );
+        }
+      } catch (error) {
+        console.error('Failed to fetch notifications:', error);
+      }
+    };
+
+    // Connect to WebSocket for real-time notifications
     const connectSocket = async () => {
       try {
-        // Get Firebase token
-        const token = await user.getIdToken();
+        // Get token: use guest token for anonymous users
+        let token: string;
+        if (user.isAnonymous) {
+          token = `guest_${user.uid}`;
+        } else {
+          token = await user.getIdToken();
+        }
         
         // Create socket connection
-        notificationsSocket = io('http://localhost:3001', {
+        notificationsSocket = io(`${API_URL}/notifications`, {
           path: '/socket.io', // Using default Socket.IO path
           reconnection: true,
           reconnectionAttempts: 5,
           reconnectionDelay: 1000,
           transports: ['websocket'],
+          query: {
+            userId: user.uid // Add the userId as a query parameter
+          },
           auth: {
             token // Send token in the initial connection
           }
@@ -72,7 +102,7 @@ export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ child
         notificationsSocket.on('connect', () => {
           console.log('Connected to notifications socket');
           
-          // Authenticate with the socket server using Firebase token
+          // Authenticate with the socket server using token
           notificationsSocket?.emit('authenticate', { token });
           console.log('Notifications socket connection established:', notificationsSocket);
         });
@@ -86,15 +116,15 @@ export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ child
         });
 
         // Listen for new notifications
-        notificationsSocket.on('notification', (notification: any) => {
+        notificationsSocket.on('new_notification', (notification: any) => {
           console.log('Received new notification:', notification);
           // Transform the notification to match our interface
           const newNotification: Notification = {
             id: notification.id,
             type: notification.type,
-            message: notification.data?.message || '',
+            message: notification.message || notification.data?.message || '',
             data: notification.data || {},
-            timestamp: new Date(notification.createdAt || Date.now()),
+            timestamp: new Date(notification.timestamp || Date.now()),
             senderUserId: notification.senderUserId,
             read: false
           };
@@ -109,6 +139,8 @@ export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ child
       }
     };
 
+    // Fetch initial notifications and connect to socket
+    fetchNotifications();
     connectSocket();
 
     // Clean up on unmount
@@ -118,14 +150,19 @@ export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ child
         setSocket(null);
       }
     };
-  }, [user]);
+  }, [user, API_URL]);
 
   // Reconnect socket when the token might have changed
   useEffect(() => {
     const reconnectInterval = setInterval(async () => {
       if (socket && user) {
         try {
-          const token = await user.getIdToken(true); // Force refresh token
+          let token: string;
+          if (user.isAnonymous) {
+            token = `guest_${user.uid}`;
+          } else {
+            token = await user.getIdToken(true); // Force refresh token
+          }
           socket.emit('authenticate', { token });
         } catch (error) {
           console.error('Failed to refresh authentication token:', error);
@@ -148,21 +185,38 @@ export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ child
   };
 
   // Mark a notification as read
-  const markAsRead = (notificationId: string) => {
-    setNotifications(prevNotifications => 
-      prevNotifications.map(notification => 
-        notification.id === notificationId 
-          ? { ...notification, read: true } 
-          : notification
-      )
-    );
+  const markAsRead = async (notificationId: string) => {
+    try {
+      setNotifications(prev => 
+        prev.map(n => n.id === notificationId ? { ...n, read: true } : n)
+      );
+      const url = `${API_URL}/notifications/${notificationId}/read`;
+      console.log('Marking notification as read:', url);
+      await fetch(url, {
+        method: 'PATCH',
+      });
+    } catch (error) {
+      console.error('Failed to mark notification as read:', error);
+      setNotifications(prev => 
+        prev.map(n => n.id === notificationId ? { ...n, read: false } : n)
+      );
+    }
   };
 
   // Mark all notifications as read
-  const markAllAsRead = () => {
-    setNotifications(prevNotifications => 
-      prevNotifications.map(notification => ({ ...notification, read: true }))
-    );
+  const markAllAsRead = async () => {
+    try {
+      setNotifications(prev => 
+        prev.map(n => ({ ...n, read: true }))
+      );
+      const url = `${API_URL}/notifications/read-all`;
+      console.log('Marking all notifications as read:', url);
+      await fetch(url, {
+        method: 'PATCH',
+      });
+    } catch (error) {
+      console.error('Failed to mark all notifications as read:', error);
+    }
   };
 
   // Get count of unread notifications
@@ -171,10 +225,19 @@ export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ child
   };
 
   // Delete a notification
-  const deleteNotification = (notificationId: string) => {
-    setNotifications(prevNotifications => 
-      prevNotifications.filter(notification => notification.id !== notificationId)
-    );
+  const deleteNotification = async (notificationId: string) => {
+    try {
+      setNotifications(prev => 
+        prev.filter(n => n.id !== notificationId)
+      );
+      const url = `${API_URL}/notifications/${notificationId}`;
+      console.log('Deleting notification:', url);
+      await fetch(url, {
+        method: 'DELETE',
+      });
+    } catch (error) {
+      console.error('Failed to delete notification:', error);
+    }
   };
 
   // Calculate total unread count
