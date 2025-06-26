@@ -103,11 +103,11 @@ const PlayerInfo: React.FC<PlayerInfoProps> = ({
             )}
             <div className="w-[41px] h-[41px] flex items-center justify-center">
               <div className="w-[41px] h-[41px] overflow-hidden rounded-[4px]">
-                <Image 
+              <Image 
                   src={getBestProfileImage()}
-                  alt={`${username}'s Avatar`}
-                  width={41}
-                  height={41}
+                alt={`${username}'s Avatar`}
+                width={41}
+                height={41}
                   className="w-full h-full object-cover"
                   onError={(e) => {
                     // If image fails to load, replace with fallback
@@ -118,7 +118,7 @@ const PlayerInfo: React.FC<PlayerInfoProps> = ({
                       </div>
                     `;
                   }}
-                />
+              />
               </div>
             </div>
           </div>

@@ -70,12 +70,14 @@ export interface GameResultData {
     username: string;
     isGuest: boolean;
     rating?: number;
+    ratingChange?: number;
   };
   blackPlayer: {
     userId?: string;
     username: string;
     isGuest: boolean;
     rating?: number;
+    ratingChange?: number;
   };
 }
 
@@ -301,7 +303,10 @@ export class GameManagerService {
   makeMove(gameId: string, move: string, socketId: string): boolean {
     const game = this.activeGames.get(gameId);
     if (!game) return false;
-    
+    // BET LOG: Move received
+    if (game.gameMode && game.gameMode.toLowerCase().includes('bet')) {
+      this.logger.log(`[bet] Move received: gameId=${gameId}, move=${move}, socketId=${socketId}`);
+    }
     // Helper to get userId from socketId
     const getUserIdBySocket = (sid: string): string | undefined => {
       if (game.whitePlayer.socketId === sid) return game.whitePlayer.userId;
@@ -322,6 +327,9 @@ export class GameManagerService {
       }
     }
     if (!isValidTurn) {
+      if (game.gameMode && game.gameMode.toLowerCase().includes('bet')) {
+        this.logger.warn(`[bet] Move rejected (not player's turn): gameId=${gameId}, move=${move}, socketId=${socketId}`);
+      }
       this.logger.warn(`[makeMove] Move rejected: Not player's turn. gameId=${gameId}, expectedSocket=${game.whiteTurn ? game.whitePlayer.socketId : game.blackPlayer.socketId}, gotSocket=${socketId}, expectedUserId=${game.whiteTurn ? game.whitePlayer.userId : game.blackPlayer.userId}, gotUserId=${getUserIdBySocket(socketId)}`);
       return false;
     }
@@ -329,8 +337,15 @@ export class GameManagerService {
       // Make the move
       const result = game.chessInstance.move(move) as Move | null;
       if (!result) {
+        if (game.gameMode && game.gameMode.toLowerCase().includes('bet')) {
+          this.logger.warn(`[bet] Move rejected (invalid move): gameId=${gameId}, move=${move}, socketId=${socketId}`);
+        }
         this.logger.warn(`[makeMove] Move rejected: Invalid move string. gameId=${gameId}, move=${move}`);
         return false;
+      }
+      // BET LOG: Move accepted
+      if (game.gameMode && game.gameMode.toLowerCase().includes('bet')) {
+        this.logger.log(`[bet] Move accepted: gameId=${gameId}, move=${move}, socketId=${socketId}`);
       }
       // Update game state
       game.pgn = game.chessInstance.pgn();
@@ -733,40 +748,124 @@ export class GameManagerService {
                 
                 // Update player ratings in the database if they have user IDs
                 if (game.whitePlayer.userId && game.blackPlayer.userId) {
+                    this.logger.log(`Starting rating updates for game ${gameId}:`);
+                    this.logger.log(`White player (${game.whitePlayer.username}, ID: ${game.whitePlayer.userId}): ${whiteRating} → ${whiteRatingChange.newRating} (${whiteRatingChange.ratingChange > 0 ? '+' : ''}${whiteRatingChange.ratingChange})`);
+                    this.logger.log(`Black player (${game.blackPlayer.username}, ID: ${game.blackPlayer.userId}): ${blackRating} → ${blackRatingChange.newRating} (${blackRatingChange.ratingChange > 0 ? '+' : ''}${blackRatingChange.ratingChange})`);
+                    
                     try {
-                        // Update white player's rating
-                        await this.usersService.updateRating(game.whitePlayer.userId, whiteRatingChange.newRating);
+                        // Find both users by their IDs (could be Firebase UIDs or database UUIDs)
+                        this.logger.log(`Looking up white player with ID: ${game.whitePlayer.userId}`);
+                        let whiteUser = await this.usersService.findUserByAnyId(game.whitePlayer.userId);
                         
-                        // Update black player's rating
-                        await this.usersService.updateRating(game.blackPlayer.userId, blackRatingChange.newRating);
+                        this.logger.log(`Looking up black player with ID: ${game.blackPlayer.userId}`);
+                        let blackUser = await this.usersService.findUserByAnyId(game.blackPlayer.userId);
                         
-                        // Update game statistics based on result
-                        if (gameEndDetails.result === GameResult.WHITE_WINS) {
-                            await this.usersService.incrementGameStats(game.whitePlayer.userId, 'win');
-                            await this.usersService.incrementGameStats(game.blackPlayer.userId, 'loss');
-                        } else if (gameEndDetails.result === GameResult.BLACK_WINS) {
-                            await this.usersService.incrementGameStats(game.whitePlayer.userId, 'loss');
-                            await this.usersService.incrementGameStats(game.blackPlayer.userId, 'win');
-                        } else if (gameEndDetails.result === GameResult.DRAW) {
-                            await this.usersService.incrementGameStats(game.whitePlayer.userId, 'draw');
-                            await this.usersService.incrementGameStats(game.blackPlayer.userId, 'draw');
+                        // Log results of user lookups
+                        if (!whiteUser) {
+                            this.logger.error(`White player not found with ID: ${game.whitePlayer.userId}`);
+                        } else {
+                            this.logger.log(`Found white player: ${whiteUser.displayName || whiteUser.username || 'Unknown'} (DB ID: ${whiteUser.id}, Firebase UID: ${whiteUser.firebaseUid || 'None'}, Current Rating: ${whiteUser.rating})`);
+                        }
+                        
+                        if (!blackUser) {
+                            this.logger.error(`Black player not found with ID: ${game.blackPlayer.userId}`);
+                        } else {
+                            this.logger.log(`Found black player: ${blackUser.displayName || blackUser.username || 'Unknown'} (DB ID: ${blackUser.id}, Firebase UID: ${blackUser.firebaseUid || 'None'}, Current Rating: ${blackUser.rating})`);
+                        }
+                        
+                        if (whiteUser && blackUser) {
+                            // Update white player's rating - use database ID, not Firebase UID
+                            this.logger.log(`Updating white player rating: DB ID ${whiteUser.id} from ${whiteUser.rating} to ${whiteRatingChange.newRating}`);
+                            try {
+                                const updatedWhitePlayer = await this.usersService.updateRating(whiteUser.id, whiteRatingChange.newRating);
+                                this.logger.log(`White player rating updated successfully. User: ${updatedWhitePlayer.displayName || updatedWhitePlayer.username}, Old rating: ${whiteRating}, New rating: ${updatedWhitePlayer.rating}`);
+                                
+                                // Verify the rating was actually updated
+                                const verifyWhiteUpdate = await this.usersService.findOne(whiteUser.id);
+                                if (verifyWhiteUpdate && verifyWhiteUpdate.rating === whiteRatingChange.newRating) {
+                                    this.logger.log(`✅ Verified white player rating update: ${whiteRating} → ${verifyWhiteUpdate.rating}`);
+                                } else {
+                                    this.logger.error(`❌ White player rating verification failed! Expected: ${whiteRatingChange.newRating}, Actual: ${verifyWhiteUpdate?.rating || 'unknown'}`);
+                                }
+                            } catch (error) {
+                                this.logger.error(`Error updating white player rating: ${error.message}`, error.stack);
+                            }
+                        
+                            // Update black player's rating - use database ID, not Firebase UID
+                            this.logger.log(`Updating black player rating: DB ID ${blackUser.id} from ${blackUser.rating} to ${blackRatingChange.newRating}`);
+                            try {
+                                const updatedBlackPlayer = await this.usersService.updateRating(blackUser.id, blackRatingChange.newRating);
+                                this.logger.log(`Black player rating updated successfully. User: ${updatedBlackPlayer.displayName || updatedBlackPlayer.username}, Old rating: ${blackRating}, New rating: ${updatedBlackPlayer.rating}`);
+                                
+                                // Verify the rating was actually updated
+                                const verifyBlackUpdate = await this.usersService.findOne(blackUser.id);
+                                if (verifyBlackUpdate && verifyBlackUpdate.rating === blackRatingChange.newRating) {
+                                    this.logger.log(`✅ Verified black player rating update: ${blackRating} → ${verifyBlackUpdate.rating}`);
+                                } else {
+                                    this.logger.error(`❌ Black player rating verification failed! Expected: ${blackRatingChange.newRating}, Actual: ${verifyBlackUpdate?.rating || 'unknown'}`);
+                                }
+                            } catch (error) {
+                                this.logger.error(`Error updating black player rating: ${error.message}`, error.stack);
+                            }
+                        
+                            // Update game statistics based on result - use database IDs
+                            this.logger.log(`Updating game statistics based on result: ${gameEndDetails.result}`);
+                            try {
+                                if (gameEndDetails.result === GameResult.WHITE_WINS) {
+                                    await this.usersService.incrementGameStats(whiteUser.id, 'win');
+                                    await this.usersService.incrementGameStats(blackUser.id, 'loss');
+                                    this.logger.log(`Game stats updated: White player win, Black player loss`);
+                                } else if (gameEndDetails.result === GameResult.BLACK_WINS) {
+                                    await this.usersService.incrementGameStats(whiteUser.id, 'loss');
+                                    await this.usersService.incrementGameStats(blackUser.id, 'win');
+                                    this.logger.log(`Game stats updated: White player loss, Black player win`);
+                                } else if (gameEndDetails.result === GameResult.DRAW) {
+                                    await this.usersService.incrementGameStats(whiteUser.id, 'draw');
+                                    await this.usersService.incrementGameStats(blackUser.id, 'draw');
+                                    this.logger.log(`Game stats updated: Draw for both players`);
+                                }
+                            } catch (error) {
+                                this.logger.error(`Error updating game statistics: ${error.message}`, error.stack);
+                            }
+                        } else {
+                            this.logger.error(`Could not update ratings because one or both users were not found in the database`);
                         }
                         
                         // Store ratings in the game record
-                        const dbGame = await this.gameRepositoryService.findOne(gameId);
+                        this.logger.log(`Finding game record in database for ID: ${gameId}`);
+                        // Try to find the game by its database ID if available
+                        const dbId = game.dbGameId || gameId;
+                        const dbGame = await this.gameRepositoryService.findOne(dbId);
+                        
                         if (dbGame) {
-                            // Update game with both before and after ratings
-                            await this.gameRepositoryService.update(gameId, {
-                                whitePlayerRating: whiteRating,
-                                blackPlayerRating: blackRating,
-                                whitePlayerRatingAfter: whiteRatingChange.newRating,
-                                blackPlayerRatingAfter: blackRatingChange.newRating
-                            });
-                            this.logger.log(`Game ${gameId} updated with rating information in database`);
+                            this.logger.log(`Found game record with ID: ${dbGame.id}. Updating with rating information.`);
+                            try {
+                                // Update game with both before and after ratings
+                                await this.gameRepositoryService.update(dbGame.id, {
+                                    whitePlayerRating: whiteRating,
+                                    blackPlayerRating: blackRating,
+                                    whitePlayerRatingAfter: whiteRatingChange.newRating,
+                                    blackPlayerRatingAfter: blackRatingChange.newRating
+                                });
+                                this.logger.log(`Game ${dbGame.id} updated with rating information in database`);
+                                
+                                // Double-check that the ratings were saved
+                                const verifyGame = await this.gameRepositoryService.findOne(dbGame.id);
+                                if (verifyGame) {
+                                    this.logger.log(`Verified game ratings in database: White: ${verifyGame.whitePlayerRating} → ${verifyGame.whitePlayerRatingAfter}, Black: ${verifyGame.blackPlayerRating} → ${verifyGame.blackPlayerRatingAfter}`);
+                                }
+                            } catch (error) {
+                                this.logger.error(`Error updating game record with rating information: ${error.message}`, error.stack);
+                            }
+                        } else {
+                            this.logger.warn(`Could not find game record for ID: ${dbId}. Rating information not saved to game record.`);
                         }
                     } catch (error) {
                         this.logger.error(`Error updating ratings in database: ${error.message}`, error.stack);
+                        // Continue execution even if rating updates fail - we don't want to block the game end process
                     }
+                } else {
+                    this.logger.warn(`Cannot update ratings: Missing user IDs. White player ID: ${game.whitePlayer.userId}, Black player ID: ${game.blackPlayer.userId}`);
                 }
             }
         } else {
@@ -804,12 +903,14 @@ export class GameManagerService {
         username: game.whitePlayer.username,
         isGuest: game.whitePlayer.isGuest,
         rating: game.whitePlayer.rating,
+        ratingChange: whiteRatingChange?.ratingChange || 0,
       },
       blackPlayer: {
         userId: game.blackPlayer.userId,
         username: game.blackPlayer.username,
         isGuest: game.blackPlayer.isGuest,
         rating: game.blackPlayer.rating,
+        ratingChange: blackRatingChange?.ratingChange || 0,
       },
     };
 
@@ -985,6 +1086,15 @@ export class GameManagerService {
     return Array.from(this.activeGames.values());
   }
 
+  /**
+   * Helper method to validate UUID format
+   */
+  private isValidUuid(id: string): boolean {
+    if (!id) return false;
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    return uuidRegex.test(id);
+  }
+  
   /**
    * Handle bet result for a game if there is an associated bet
    */

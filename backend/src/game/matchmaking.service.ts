@@ -234,7 +234,7 @@ export class MatchmakingService {
       const player1 = players[i];
       if (matchedPlayerIds.has(player1.socketId)) continue;
       if (!this.isSocketValid(player1.socket)) {
-        this.logger.warn(`Player ${player1.socketId} has invalid socket, removing from queue`);
+        this.logger.warn(`[normal games] Player ${player1.socketId} has invalid socket, removing from queue`);
         this.matchmakingQueue.delete(player1.socketId);
         continue;
       }
@@ -242,7 +242,7 @@ export class MatchmakingService {
         const player2 = players[j];
         if (matchedPlayerIds.has(player2.socketId)) continue;
         if (!this.isSocketValid(player2.socket)) {
-          this.logger.warn(`Player ${player2.socketId} has invalid socket, removing from queue`);
+          this.logger.warn(`[normal games] Player ${player2.socketId} has invalid socket, removing from queue`);
           this.matchmakingQueue.delete(player2.socketId);
           continue;
         }
@@ -252,13 +252,20 @@ export class MatchmakingService {
           player1.timeControl === player2.timeControl &&
           player1.rated === player2.rated &&
             Math.abs(player1.rating - player2.rating) <= this.MATCH_RATING_DIFFERENCE) {
-          this.logger.log(`Random play match found: ${player1.socketId} vs ${player2.socketId}`);
+          this.logger.log(`[normal games] Trying to match: ${player1.socketId} (side: ${player1.preferredSide}) vs ${player2.socketId} (side: ${player2.preferredSide})`);
+          const colorAssignment = this.assignPlayerColors(player1, player2);
+          if (!colorAssignment || !colorAssignment.whitePlayer || !colorAssignment.blackPlayer) {
+            this.logger.warn(`[normal games] Could not assign colors for ${player1.socketId} (side: ${player1.preferredSide}) and ${player2.socketId} (side: ${player2.preferredSide}) - skipping match.`);
+            continue;
+          } else {
+            this.logger.log(`[normal games] Assigned colors: white=${colorAssignment.whitePlayer.socketId} (${colorAssignment.whitePlayer.preferredSide}), black=${colorAssignment.blackPlayer.socketId} (${colorAssignment.blackPlayer.preferredSide})`);
+          }
           try {
             await this.createMatch(player1, player2);
             matchedPlayerIds.add(player1.socketId);
             matchedPlayerIds.add(player2.socketId);
           } catch (error) {
-            this.logger.error(`Error in createMatch: ${error.message}`);
+            this.logger.error(`[normal games] Error in createMatch: ${error.message}`);
           }
           break;
         }
@@ -379,7 +386,7 @@ export class MatchmakingService {
         userId: whitePlayer.userId,
         rating: whitePlayer.rating,
         username: whitePlayer.username || `Player-${whitePlayerSocketId.substring(0, 5)}`,
-        isGuest: whitePlayer.isGuest || true,
+        isGuest: whitePlayer.isGuest !== false,
         connected: true,
         gamesPlayed: whitePlayer.gamesPlayed || 0,
       };
@@ -389,7 +396,7 @@ export class MatchmakingService {
         userId: blackPlayer.userId,
         rating: blackPlayer.rating,
         username: blackPlayer.username || `Player-${blackPlayerSocketId.substring(0, 5)}`,
-        isGuest: blackPlayer.isGuest || true,
+        isGuest: blackPlayer.isGuest !== false,
         connected: true,
         gamesPlayed: blackPlayer.gamesPlayed || 0,
       };
@@ -807,6 +814,7 @@ export class MatchmakingService {
   }
 
   private assignPlayerColors(player1: Player, player2: Player) {
+    this.logger.log(`[normal games][assignPlayerColors] player1: ${player1.socketId} (side: ${player1.preferredSide}), player2: ${player2.socketId} (side: ${player2.preferredSide})`);
     // Store side preferences for coordinated side assignment
     const player1SidePreference = player1.preferredSide || 'random';
     const player2SidePreference = player2.preferredSide || 'random';
@@ -819,29 +827,29 @@ export class MatchmakingService {
     if (player1SidePreference === 'white' && player2SidePreference === 'black') {
       player1Color = 'white';
       player2Color = 'black';
-      this.logger.log(`Case 1: Player1 chose White, Player2 chose Black - assigned accordingly`);
+      this.logger.log(`[normal games][assignPlayerColors] Matched white/black exactly.`);
     } else if (player1SidePreference === 'black' && player2SidePreference === 'white') {
       player1Color = 'black';
       player2Color = 'white';
-      this.logger.log(`Case 1: Player1 chose Black, Player2 chose White - assigned accordingly`);
+      this.logger.log(`[normal games][assignPlayerColors] Matched black/white exactly.`);
     }
     // CASE 2: One chooses White/Black, other chooses Random
     else if (player1SidePreference === 'white' && player2SidePreference === 'random') {
       player1Color = 'white';
       player2Color = 'black';
-      this.logger.log(`Case 2: Player1 chose White, Player2 chose Random - assigned accordingly`);
+      this.logger.log(`[normal games][assignPlayerColors] Case 2: Player1 chose White, Player2 chose Random - assigned accordingly`);
     } else if (player1SidePreference === 'black' && player2SidePreference === 'random') {
       player1Color = 'black';
       player2Color = 'white';
-      this.logger.log(`Case 2: Player1 chose Black, Player2 chose Random - assigned accordingly`);
+      this.logger.log(`[normal games][assignPlayerColors] Case 2: Player1 chose Black, Player2 chose Random - assigned accordingly`);
     } else if (player1SidePreference === 'random' && player2SidePreference === 'white') {
       player1Color = 'black';
       player2Color = 'white';
-      this.logger.log(`Case 2: Player1 chose Random, Player2 chose White - assigned accordingly`);
+      this.logger.log(`[normal games][assignPlayerColors] Case 2: Player1 chose Random, Player2 chose White - assigned accordingly`);
     } else if (player1SidePreference === 'random' && player2SidePreference === 'black') {
       player1Color = 'white';
       player2Color = 'black';
-      this.logger.log(`Case 2: Player1 chose Random, Player2 chose Black - assigned accordingly`);
+      this.logger.log(`[normal games][assignPlayerColors] Case 2: Player1 chose Random, Player2 chose Black - assigned accordingly`);
     }
     // CASE 3: Both choose Random - assign randomly
     else if (player1SidePreference === 'random' && player2SidePreference === 'random') {
@@ -849,26 +857,26 @@ export class MatchmakingService {
       const player1GetsWhite = Math.random() > 0.5;
       player1Color = player1GetsWhite ? 'white' : 'black';
       player2Color = player1GetsWhite ? 'black' : 'white';
-      this.logger.log(`Case 3: Both chose Random - Player1 gets ${player1Color}`);
+      this.logger.log(`[normal games][assignPlayerColors] Case 3: Both chose Random - Player1 gets ${player1Color}`);
     }
     // CASE 4: Both choose same side (White or Black) - randomly assign
     else if (player1SidePreference === 'white' && player2SidePreference === 'white') {
       const player1GetsWhite = Math.random() > 0.5;
       player1Color = player1GetsWhite ? 'white' : 'black';
       player2Color = player1GetsWhite ? 'black' : 'white';
-      this.logger.log(`Case 4: Both chose White - Player1 gets ${player1Color}`);
+      this.logger.log(`[normal games][assignPlayerColors] Case 4: Both chose White - Player1 gets ${player1Color}`);
     } else if (player1SidePreference === 'black' && player2SidePreference === 'black') {
       const player1GetsBlack = Math.random() > 0.5;
       player1Color = player1GetsBlack ? 'black' : 'white';
       player2Color = player1GetsBlack ? 'white' : 'black';
-      this.logger.log(`Case 4: Both chose Black - Player1 gets ${player1Color}`);
+      this.logger.log(`[normal games][assignPlayerColors] Case 4: Both chose Black - Player1 gets ${player1Color}`);
     }
     // Fallback
     else {
       const player1GetsWhite = Math.random() > 0.5;
       player1Color = player1GetsWhite ? 'white' : 'black';
       player2Color = player1GetsWhite ? 'black' : 'white';
-      this.logger.log(`Fallback case - Player1 gets ${player1Color}`);
+      this.logger.log(`[normal games][assignPlayerColors] Fallback case - Player1 gets ${player1Color}`);
     }
 
     // Get the correct player objects based on assigned colors

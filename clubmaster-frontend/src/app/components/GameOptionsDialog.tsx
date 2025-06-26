@@ -13,6 +13,10 @@ interface GameOptionsDialogProps {
     hasWhiteMoved?: boolean;
     isGameOver?: boolean;
   };
+  moveHistory?: {
+    length: number;
+    currentMoveIndex: number;
+  };
   onResign: () => void;
   onAbort?: () => void;
   soundEnabled: boolean;
@@ -24,6 +28,7 @@ const GameOptionsDialog: React.FC<GameOptionsDialogProps> = ({
   isOpen,
   onClose,
   gameState,
+  moveHistory,
   onResign,
   onAbort,
   soundEnabled,
@@ -34,9 +39,8 @@ const GameOptionsDialog: React.FC<GameOptionsDialogProps> = ({
   console.log('DIRECT GameOptionsDialog props gameState:', JSON.stringify(gameState));
   console.log('DIRECT GameOptionsDialog onAbort available:', !!onAbort);
 
-  // Fix: Simplified check for movesMade that works with the actual game state data
-  // Explicitly check if white has moved, treating undefined as 'no moves made yet'
-  const movesMade = gameState.hasWhiteMoved === true;
+  // Robust movesMade check: true if hasWhiteMoved is true OR moveHistory has moves
+  const movesMade = gameState.hasWhiteMoved === true || (moveHistory && moveHistory.length > 0);
 
   console.log('DIRECT GameOptionsDialog moves made check:', movesMade);
   
@@ -198,12 +202,10 @@ const GameOptionsDialog: React.FC<GameOptionsDialogProps> = ({
   if (!isOpen) return null;
 
   // Show Abort button if:
-  // 1. The game has not had any moves made (hasWhiteMoved is false)
+  // 1. The game has not had any moves made (hasWhiteMoved is strictly false)
   // 2. We have an abort handler to call (passed from MoveControls)
   // 3. The game is not over
-  // Enhanced abort button visibility - explicitly handle hasWhiteMoved being undefined
-  // If hasWhiteMoved is undefined, assume no moves have been made yet
-  const showAbortButton = !!onAbort && !gameState.isGameOver && gameState.hasWhiteMoved !== true;
+  const showAbortButton = !!onAbort && !gameState.isGameOver && gameState.hasWhiteMoved === false;
 
   // Add debug logging for the abort button visibility with simplified conditions
   useEffect(() => {

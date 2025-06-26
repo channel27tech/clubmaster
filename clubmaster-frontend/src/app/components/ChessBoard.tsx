@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import ChessSquare from './ChessSquare';
 import PromotionSelector from './PromotionSelector';
-import { MoveHistoryState, PieceType, PieceColor, generateNotation } from '../utils/moveHistory';
+import { MoveHistoryState, PieceType, PieceColor, generateNotation, BoardSquare, BoardState } from '../utils/moveHistory';
 import { makeMove, getGameStatus, getCurrentBoardState, getChessEngine } from '../utils/chessEngine';
 import { findMovingPiece } from '../utils/boardHelpers';
 
@@ -19,9 +19,10 @@ interface ChessBoardProps {
   onMoveHistoryChange?: (moveHistory: MoveHistoryState) => void;
   playerColor?: 'white' | 'black' | null;
   gameId?: string; // ID of the current game for socket communications
+  boardState?: BoardState; // <-- NEW PROP
 }
 
-const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, gameId }: ChessBoardProps) => {
+const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, gameId, boardState: boardStateProp }: ChessBoardProps) => {
   const boardRef = useRef<HTMLDivElement>(null);
   const [currentPlayer, setCurrentPlayer] = useState<'white' | 'black'>('white');
 
@@ -33,9 +34,46 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
     updateMoveHistory,
     updateBoardState,
     setLastMove,
-    goBack: handleGoBack,
-    goForward: handleGoForward
+    goBack,
+    goForward
   } = useChessHistory(onMoveHistoryChange);
+  
+  // Track if we're in review mode (viewing historical moves)
+  const isInReviewMode = moveHistory.currentMoveIndex !== moveHistory.moves.length - 1 && moveHistory.moves.length > 0;
+  
+  // Log review mode state changes
+  useEffect(() => {
+    console.log(`[REVIEW MODE] ${isInReviewMode ? 'ENABLED' : 'DISABLED'} - currentMoveIndex: ${moveHistory.currentMoveIndex}, totalMoves: ${moveHistory.moves.length}`);
+  }, [isInReviewMode, moveHistory.currentMoveIndex, moveHistory.moves.length]);
+  
+  // Wrap the goBack and goForward functions with our own implementations that include logging
+  const handleGoBack = useCallback(() => {
+    console.log("Going back in move history...");
+    console.log("Before: currentMoveIndex =", moveHistory.currentMoveIndex);
+    
+    // Call the original goBack function from useChessHistory
+    goBack();
+    
+    // Log the updated state after the operation
+    setTimeout(() => {
+      console.log("After: currentMoveIndex =", moveHistory.currentMoveIndex);
+      console.log("Board state updated to historical position");
+    }, 0);
+  }, [goBack, moveHistory]);
+  
+  const handleGoForward = useCallback(() => {
+    console.log("Going forward in move history...");
+    console.log("Before: currentMoveIndex =", moveHistory.currentMoveIndex);
+    
+    // Call the original goForward function from useChessHistory
+    goForward();
+    
+    // Log the updated state after the operation
+    setTimeout(() => {
+      console.log("After: currentMoveIndex =", moveHistory.currentMoveIndex);
+      console.log("Board state updated to historical position");
+    }, 0);
+  }, [goForward, moveHistory]);
 
   const {
     showPromotion,
@@ -81,13 +119,15 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
     onBoardStateUpdate: updateBoardState,
     onMoveHistoryUpdate: updateMoveHistory,
     onLastMoveUpdate: setLastMove,
-    onPlayerTurnChange: setCurrentPlayer
+    onPlayerTurnChange: setCurrentPlayer,
+    isInReviewMode
   });
 
   // Handle square click
   const handleSquareClick = (position: string, piece: { type: PieceType, color: PieceColor } | null) => {
     // If we're in replay mode, don't allow moves
-    if (moveHistory.currentMoveIndex !== moveHistory.moves.length - 1 && moveHistory.moves.length > 0) {
+    if (isInReviewMode) {
+      console.log("In replay mode, moves not allowed. Navigate to latest move first.");
       return;
     }
     
@@ -132,19 +172,32 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
             // Update board state based on chess.js
             const newBoardState = getCurrentBoardState();
             
+            // Get the current game status
+            const gameStatus = getGameStatus();
+            
             // Check if there's a piece at destination (capture)
             let isCapture = false;
+            let capturedPiece: { type: PieceType, color: PieceColor } | undefined = undefined;
             for (const row of boardState.squares) {
               for (const square of row) {
                 if (square.position === position && square.piece) {
                   isCapture = true;
+                  capturedPiece = square.piece as { type: PieceType, color: PieceColor };
                   break;
                 }
               }
             }
             
             // Generate notation for the move
-            const notation = generateNotation(selectedSquare, position, movingPiece, isCapture);
+            const notation = generateNotation(
+              selectedSquare, 
+              position, 
+              movingPiece, 
+              isCapture, 
+              undefined, 
+              gameStatus.isCheck, 
+              gameStatus.isCheckmate
+            );
             
             // Determine if we're in a rewound state
             const isRewound = moveHistory.currentMoveIndex < moveHistory.moves.length - 1;
@@ -160,6 +213,9 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
               to: position,
               piece: movingPiece,
               notation,
+              capturedPiece,
+              check: gameStatus.isCheck,
+              checkmate: gameStatus.isCheckmate,
               boardState: newBoardState
             });
             
@@ -176,6 +232,7 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
             setLastMove({ from: selectedSquare, to: position });
             
             // Don't update current player here - wait for server confirmation
+            // This ensures all clients stay in sync with the server's authoritative state
             
             // Send this move to other players via the moveQueue
             sendMove(
@@ -184,10 +241,10 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
               movingPiece, 
               notation
             );
-      
-      // Clear selection
-      clearSelection();
-    } 
+            
+            // Clear selection
+            clearSelection();
+          }
         }
       } else {
         // If clicking on an invalid square, clear selection
@@ -196,7 +253,7 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
     } else {
       // Selecting a new square
       if (piece && piece.color === playerColor) {
-      selectSquare(position, piece);
+        selectSquare(position, piece);
       }
     }
   };
@@ -209,7 +266,7 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
 
     // Check if there's a piece at the destination (it's a capture)
     let isCapture = false;
-    let capturedPiece = null;
+    let capturedPiece: { type: PieceType; color: PieceColor } | undefined = undefined;
     const toRowIndex = 8 - parseInt(to[1], 10);
     const toColIndex = to.charCodeAt(0) - 'a'.charCodeAt(0);
     
@@ -218,13 +275,10 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
         boardState.squares[toRowIndex][toColIndex] && 
         boardState.squares[toRowIndex][toColIndex].piece) {
       isCapture = true;
-      capturedPiece = boardState.squares[toRowIndex][toColIndex].piece;
+      capturedPiece = boardState.squares[toRowIndex][toColIndex].piece as { type: PieceType; color: PieceColor };
       console.log('Captured piece during promotion:', capturedPiece);
     }
 
-    // First reset the chess engine to the current position to ensure we're working with the correct state
-    const chess = getChessEngine();
-    
     // Make the move in the local chess engine with the promotion piece
     const moveSuccess = makeMove(from, to, promotionPiece);
 
@@ -255,8 +309,9 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
         piece: { type: promotionPiece, color: piece.color },
         notation,
         promotion: promotionPiece,
-        isCapture,
         capturedPiece,
+        check: gameStatus.isCheck,
+        checkmate: gameStatus.isCheckmate,
         boardState: newBoardState
       });
 
@@ -314,9 +369,10 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
   }, [legalMoves]);
 
   // If perspective is black, reverse the board
+  const effectiveBoardState = boardStateProp || boardState;
   const displayBoard = perspective === 'black' 
-    ? [...boardState.squares].reverse().map(row => [...row].reverse()) 
-    : boardState.squares;
+    ? [...effectiveBoardState.squares].reverse().map(row => [...row].reverse()) 
+    : effectiveBoardState.squares;
 
   return (
     <div className="w-full mx-auto relative">
@@ -327,8 +383,8 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
         ref={boardRef}
         className={`aspect-square grid grid-cols-8 grid-rows-8 border-0 sm:border-[13px] sm:border-[#333939] sm:rounded-sm shadow-md ${showPromotion ? 'filter blur-sm' : ''}`}
       >
-        {displayBoard.map((row, rowIndex) => (
-          row.map((square, colIndex) => (
+        {displayBoard.map((row: BoardSquare[], rowIndex: number) => (
+          row.map((square: BoardSquare, colIndex: number) => (
             <ChessSquare
               key={`${rowIndex}-${colIndex}`}
               position={square.position}
@@ -358,8 +414,8 @@ const ChessBoard = ({ perspective = 'white', onMoveHistoryChange, playerColor, g
       
       {/* Export these controls so parent can use them */}
       <div className="hidden">
-        <button onClick={handleGoBack}>Back</button>
-        <button onClick={handleGoForward}>Forward</button>
+        <button id="chess-back-button" onClick={handleGoBack}>Back</button>
+        <button id="chess-forward-button" onClick={handleGoForward}>Forward</button>
       </div>
     </div>
   );

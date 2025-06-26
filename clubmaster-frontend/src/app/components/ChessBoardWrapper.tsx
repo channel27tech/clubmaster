@@ -1,25 +1,31 @@
 'use client';
-import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef, forwardRef, useImperativeHandle } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import PlayerInfo from './PlayerInfo';
 import MoveControls from './MoveControls';
 import GameClock from './GameClock';
 import GameResultScreen from './GameResultScreen';
-import { MoveHistoryState } from '../utils/moveHistory';
-import { getChessEngine, makeMove, resetChessEngine, setChessPosition, getGameStatus, getCurrentBoardState, isThreefoldRepetition, getFen, clearChessState } from '../utils/chessEngine';
-import { useSound } from '../../context/SoundContext';
-import { useSocket } from '../../context/SocketContext';
-import { playSound, preloadSoundEffects } from '../utils/soundEffects';
-import { CapturedPiece, GameResultType, GameEndReason, GameResult, PlayerData } from '../utils/types';
+import WaitingScreen from './WaitingScreen';
 import DisconnectionNotification from './DisconnectionNotification';
-import { fetchGamePlayers } from '../api/gameApi';
-import { Chess } from 'chess.js';
-import { onBetResult, offBetResult } from '@/services/betService';
-import { saveBetResult } from '@/services/betResultService';
-import { useBet } from '../../context/BetContext';
+import { MoveHistoryState, BoardState } from '../utils/moveHistory';
+import { getChessEngine, makeMove, resetChessEngine, setChessPosition, getGameStatus, getCurrentBoardState, isThreefoldRepetition, getFen, clearChessState } from '../utils/chessEngine';
+import { useSocket } from '../../context/SocketContext';
+import { useSound } from '../../context/SoundContext';
 import { useAuth } from '../../context/AuthContext';
 import { BetResult } from '@/types/bet';
+import { 
+  ProfileControlResult,
+  ProfileLockResult, 
+  RatingStakeResult 
+} from './bet-results';
+import { processResultData, getBetResultComponentProps } from '../utils/betResultHelper';
+import { useBet } from '../../context/BetContext';
+import { playSound, preloadSoundEffects } from '../utils/soundEffects';
+import { fetchGamePlayers } from '../api/gameApi';
+import { CapturedPiece, GameResultType, GameEndReason, GameResult, PlayerData } from '../utils/types';
+import { saveBetResult } from '@/services/betResultService';
+import useChessHistory from '../hooks/useChessHistory';
 
 // Use dynamic import in a client component
 const ChessBoard = dynamic(() => import('./ChessBoard'), {
@@ -69,12 +75,171 @@ interface ChessBoardWrapperProps {
   timeControl?: string;
   gameId?: string;
   onSanMoveListChange?: (sanMoves: string[]) => void;
+  onGameEnd?: (isWinner: boolean, isDraw: boolean) => void;
+  currentMoveIndex?: number;
+  onMoveIndexChange?: (moveIndex: number) => void;
 }
 
-export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', gameId = '', onSanMoveListChange }: ChessBoardWrapperProps) {
+// Fix the BoardState type issue by adding an interface or using the existing type
+// Add this near the top of the file, around line 22
+interface BoardState {
+  squares: {
+    position: string;
+    piece: string | null;
+  }[][];
+}
+
+// Fix the GameResult interface to ensure all properties have proper types
+// Add this near the top of the file, around line 30, after the BoardState interface
+interface ExtendedGameResult extends GameResult {
+  playerRating: number;
+  opponentRating: number;
+  playerPhotoURL: string | null;
+  opponentPhotoURL: string | null;
+}
+
+// Define the ref type for exposed methods
+export interface ChessBoardWrapperRef {
+  jumpToMove: (moveIndex: number) => void;
+}
+
+const ChessBoardWrapper = forwardRef<ChessBoardWrapperRef, ChessBoardWrapperProps>(
+  function ChessBoardWrapper(
+    { 
+      playerColor, 
+      timeControl = '5+0', 
+      gameId = '', 
+      onSanMoveListChange,
+      onGameEnd,
+      currentMoveIndex = -1, 
+      onMoveIndexChange 
+    },
+    ref
+  ) {
   // Get game ID from props or use derived from URL if available
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [gameRoomId, setGameRoomId] = useState<string>(gameId);
+  
+  // Track if the game is ready to accept moves
+  // If we have a gameId at initialization, assume the game is ready
+  const [isGameReady, setIsGameReady] = useState(!!gameId);
+  
+  // Helper function to safely save data to localStorage with error handling and cleanup
+  const safeLocalStorage = {
+    setItem: (key: string, value: any) => {
+      try {
+        // First try to remove any old game results (keep only the last 5)
+        try {
+          const allKeys = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith('gameResult_')) {
+              allKeys.push(key);
+            }
+          }
+          
+          // Sort by timestamp (assuming gameIds have timestamps) and remove oldest
+          if (allKeys.length > 5) {
+            allKeys.sort();
+            const keysToRemove = allKeys.slice(0, allKeys.length - 5);
+            keysToRemove.forEach(oldKey => {
+              console.log(`Cleaning up old localStorage entry: ${oldKey}`);
+              localStorage.removeItem(oldKey);
+            });
+          }
+        } catch (e) {
+          console.error('Error cleaning up old localStorage entries:', e);
+        }
+        
+        // For game results, minimize the data to save space
+        if (key.startsWith('gameResult_')) {
+          const data = JSON.parse(JSON.stringify(value));
+          
+          // Keep only essential fields
+          const minimalData = {
+            result: data.result,
+            reason: data.reason,
+            playerName: data.playerName,
+            opponentName: data.opponentName,
+            playerRating: data.playerRating || 1500,
+            opponentRating: data.opponentRating || 1500,
+            playerRatingChange: data.playerRatingChange || 0,
+            opponentRatingChange: data.opponentRatingChange || 0
+          };
+          
+          // Try to save the minimal data
+          localStorage.setItem(key, JSON.stringify(minimalData));
+          console.log(`Saved minimal data to localStorage for ${key}`);
+          return;
+        }
+        
+        // For non-game results, save normally
+        localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
+      } catch (error) {
+        console.error(`Failed to save to localStorage (${key}):`, error);
+        
+        // If quota exceeded, try to clear some space
+        if (error instanceof DOMException && error.name === 'QuotaExceededError') {
+          console.warn('localStorage quota exceeded, clearing all game results');
+          try {
+            // Clear all game results
+            for (let i = localStorage.length - 1; i >= 0; i--) {
+              const key = localStorage.key(i);
+              if (key && key.startsWith('gameResult_')) {
+                localStorage.removeItem(key);
+              }
+            }
+          } catch (e) {
+            console.error('Error clearing localStorage:', e);
+          }
+        }
+      }
+    },
+    
+    getItem: (key: string) => {
+      try {
+        return localStorage.getItem(key);
+      } catch (error) {
+        console.error(`Failed to read from localStorage (${key}):`, error);
+        return null;
+      }
+    },
+    
+    removeItem: (key: string) => {
+      try {
+        localStorage.removeItem(key);
+      } catch (error) {
+        console.error(`Failed to remove from localStorage (${key}):`, error);
+      }
+    }
+  };
+
+  // Helper function to create GameResult objects with proper typing
+  const createGameResult = (
+    result: GameResultType,
+    reason: GameEndReason,
+    playerName: string,
+    opponentName: string,
+    playerRating: number | undefined,
+    opponentRating: number | undefined,
+    playerRatingChange: number,
+    opponentRatingChange: number,
+    playerPhotoURL?: string | null,
+    opponentPhotoURL?: string | null
+  ): GameResult => {
+    return {
+      result,
+      reason,
+      playerName,
+      opponentName,
+      playerRating: playerRating || 0, // Provide default value
+      opponentRating: opponentRating || 0, // Provide default value
+      playerRatingChange,
+      opponentRatingChange,
+      playerPhotoURL: playerPhotoURL || null,
+      opponentPhotoURL: opponentPhotoURL || null
+    }
+  };
   
   // Router for navigation
   const router = useRouter();
@@ -93,8 +258,61 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     soundEnabledRef.current = soundEnabled;
   }, [soundEnabled]);
   
-  const [moveHistory, setMoveHistory] = useState<MoveHistoryState | null>(null);
+  // Use the chess history hook
+  const {
+    moveHistory,
+    boardState,
+    lastMove,
+    isViewingHistory,
+    updateMoveHistory,
+    updateBoardState,
+    setLastMove,
+    appendMove,
+    goBack,
+    goForward,
+    jumpToMove,
+    exitHistoryMode
+  } = useChessHistory();
+  
   const [sanMoveList, setSanMoveList] = useState<string[]>([]);
+  
+  // Add a ref to track the previous position to prevent unnecessary updates
+  const previousPositionRef = useRef<number>(-1);
+  
+  // Expose methods via ref
+  useImperativeHandle(ref, () => ({
+    jumpToMove: (moveIndex: number) => {
+      console.log(`[ChessBoardWrapper] jumpToMove called with index: ${moveIndex}`);
+      jumpToMove(moveIndex);
+    }
+  }), [jumpToMove]);
+  
+  // Respond to currentMoveIndex changes from parent
+  useEffect(() => {
+    // Only update if currentMoveIndex has actually changed
+    if (
+      currentMoveIndex !== undefined &&
+      moveHistory.currentMoveIndex !== currentMoveIndex &&
+      previousPositionRef.current !== currentMoveIndex
+    ) {
+      previousPositionRef.current = currentMoveIndex;
+      jumpToMove(currentMoveIndex);
+    }
+    // Only depend on currentMoveIndex and jumpToMove
+  }, [currentMoveIndex, jumpToMove, moveHistory.currentMoveIndex]);
+  
+  // Notify parent when move index changes internally
+  useEffect(() => {
+    if (
+      onMoveIndexChange &&
+      moveHistory.currentMoveIndex !== currentMoveIndex &&
+      previousPositionRef.current !== moveHistory.currentMoveIndex
+    ) {
+      previousPositionRef.current = moveHistory.currentMoveIndex;
+      onMoveIndexChange(moveHistory.currentMoveIndex);
+    }
+    // Only depend on moveHistory.currentMoveIndex and onMoveIndexChange
+  }, [moveHistory.currentMoveIndex, onMoveIndexChange, currentMoveIndex]);
   
   // Captured pieces state
   const [capturedByWhite, setCapturedByWhite] = useState<CapturedPiece[]>([]);
@@ -132,19 +350,6 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     // console.log('Black player data updated:', blackPlayer);
   }, [blackPlayer]);
   
-  // Board state
-  const [boardState, setBoardState] = useState<BoardState>({
-    squares: Array(8).fill(null).map((_, rowIndex) => 
-      Array(8).fill(null).map((_, colIndex) => ({
-        position: `${String.fromCharCode(97 + colIndex)}${8 - rowIndex}`,
-        piece: null
-      }))
-    )
-  });
-  
-  // Last move for highlighting
-  const [lastMove, setLastMove] = useState<{ from: string, to: string } | null>(null);
-  
   // Loading state for player data
   const [loadingPlayers, setLoadingPlayers] = useState<boolean>(true);
   const [playerDataError, setPlayerDataError] = useState<string | null>(null);
@@ -162,15 +367,19 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   
   // Add debugging log when component first renders
   useEffect(() => {
-    // Remove noisy log
-    // console.log('ChessBoardWrapper initial gameState with hasWhiteMoved=false:', gameState);
+    // Log initial state with isGameReady status
+    console.log(`[ChessBoardWrapper] Component mounted - gameId: ${gameId}, isGameReady: ${isGameReady}`);
   }, []);
   
+  // Fix the player data fetch useEffect to prevent infinite re-renders
+  // Around line 200
   // Fetch real player data for the game
   useEffect(() => {
+    // Track if the component is still mounted
+    let isMounted = true;
+    
     if (!gameRoomId) {
-      // Remove noisy log
-      // console.log('No gameRoomId provided, skipping player data fetch');
+      console.log('No gameRoomId provided, skipping player data fetch');
       return;
     }
     
@@ -178,19 +387,31 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     const fetchPlayersWithRetries = async (retries = 3, delay = 2000) => {
       let lastError = null;
       
-      // Set initial loading state
-      setLoadingPlayers(true);
-      setPlayerDataError(null);
+      // Set initial loading state only if component is still mounted
+      if (isMounted) {
+        setLoadingPlayers(true);
+        setPlayerDataError(null);
+      }
+      
+      // Check if this is a bet game for logging
+      const isBetGame = localStorage.getItem('isBetGame') === 'true';
+      const betType = localStorage.getItem('betType');
+      console.log(`[ChessBoardWrapper] Fetching player data for game ${gameRoomId} (isBetGame=${isBetGame}, betType=${betType})`);
       
       for (let attempt = 0; attempt < retries; attempt++) {
         try {
-          // Only keep warning for invalid/incomplete data
-          // console.log(`Fetching player data for game ID: ${gameRoomId} (Attempt ${attempt + 1}/${retries})`);
+          console.log(`[ChessBoardWrapper] Fetching player data attempt ${attempt + 1}/${retries} for game ID: ${gameRoomId}`);
           const data = await fetchGamePlayers(gameRoomId);
+          
+          // If component unmounted during the fetch, abort
+          if (!isMounted) {
+            console.log('[ChessBoardWrapper] Component unmounted during fetch, aborting player data update');
+            return;
+          }
           
           // Validate that we have real player data
           if (!data || !data.whitePlayer || !data.blackPlayer) {
-            console.warn('Invalid player data format received:', data);
+            console.warn('[ChessBoardWrapper] Invalid player data format received:', data);
             throw new Error('Invalid player data format received');
           }
           
@@ -198,75 +419,101 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
           const hasValidBlackPlayer = data.blackPlayer.username && data.blackPlayer.username !== 'Loading...';
           
           if (!hasValidWhitePlayer || !hasValidBlackPlayer) {
-            console.warn('Incomplete player data received, retrying...', { 
+            console.warn('[ChessBoardWrapper] Incomplete player data received, retrying...', { 
               whiteUsername: data.whitePlayer.username, 
               blackUsername: data.blackPlayer.username 
             });
             throw new Error('Incomplete player data received');
           }
           
-          // Only keep log for successful fetch if needed for debugging
-          // console.log('Player data fetched successfully:', {
-          //   white: `${data.whitePlayer.username} (${data.whitePlayer.rating})`,
-          //   black: `${data.blackPlayer.username} (${data.blackPlayer.rating})`
-          // });
-          
-          // Update player states with real data
-          setWhitePlayer({
-            username: data.whitePlayer.username,
-            rating: typeof data.whitePlayer.rating === 'number' ? data.whitePlayer.rating : 1500,
-            capturedPieces: capturedByWhite,
-            isGuest: false,
-            photoURL: data.whitePlayer.photoURL,
-            userId: data.whitePlayer.userId // Always set userId from API
+          console.log('[ChessBoardWrapper] Player data fetched successfully:', {
+            white: `${data.whitePlayer.username} (${data.whitePlayer.rating})`,
+            black: `${data.blackPlayer.username} (${data.blackPlayer.rating})`
           });
           
-          setBlackPlayer({
-            username: data.blackPlayer.username,
-            rating: typeof data.blackPlayer.rating === 'number' ? data.blackPlayer.rating : 1500,
-            capturedPieces: capturedByBlack,
-            isGuest: false,
-            photoURL: data.blackPlayer.photoURL,
-            userId: data.blackPlayer.userId // Always set userId from API
-          });
-          
-          setLoadingPlayers(false);
+          // Only update state if component is still mounted
+          if (isMounted) {
+            // Update player states with real data
+            setWhitePlayer({
+              username: data.whitePlayer.username,
+              rating: typeof data.whitePlayer.rating === 'number' ? data.whitePlayer.rating : 1500,
+              capturedPieces: capturedByWhite,
+              isGuest: false,
+              photoURL: data.whitePlayer.photoURL,
+              userId: data.whitePlayer.userId // Always set userId from API
+            });
+            
+            setBlackPlayer({
+              username: data.blackPlayer.username,
+              rating: typeof data.blackPlayer.rating === 'number' ? data.blackPlayer.rating : 1500,
+              capturedPieces: capturedByBlack,
+              isGuest: false,
+              photoURL: data.blackPlayer.photoURL,
+              userId: data.blackPlayer.userId // Always set userId from API
+            });
+            
+            setLoadingPlayers(false);
+          }
           return; // Success, exit the retry loop
         } catch (error: any) {
           lastError = error;
           const errorMessage = error?.message || 'Unknown error';
-          console.error(`Error fetching player data (Attempt ${attempt + 1}/${retries}): ${errorMessage}`, error);
+          console.error(`[ChessBoardWrapper] Error fetching player data (Attempt ${attempt + 1}/${retries}): ${errorMessage}`, error);
           
-          // If we have more retries, wait before trying again
-          if (attempt < retries - 1) {
-            console.log(`Waiting ${delay}ms before retry ${attempt + 2}...`);
+          // If we have more retries and component is still mounted, wait before trying again
+          if (attempt < retries - 1 && isMounted) {
+            console.log(`[ChessBoardWrapper] Waiting ${delay}ms before retry ${attempt + 2}...`);
             await new Promise(resolve => setTimeout(resolve, delay));
           }
         }
       }
       
       // If we get here, all retries failed
-      console.error(`All ${retries} attempts to fetch player data failed. Last error:`, lastError);
-      setPlayerDataError(`Failed to load player data after ${retries} attempts`);
-      setLoadingPlayers(false);
+      console.error(`[ChessBoardWrapper] All ${retries} attempts to fetch player data failed. Last error:`, lastError);
       
+      // Only update state if component is still mounted
+      if (isMounted) {
+        setPlayerDataError(`Failed to load player data after ${retries} attempts`);
+        setLoadingPlayers(false);
+        
+        // Set generic placeholder data as a last resort
+        console.log('[ChessBoardWrapper] Setting placeholder player data after all retries failed');
+        
+        setWhitePlayer({
+          username: 'White Player',
+          rating: 1500,
+          capturedPieces: capturedByWhite,
+          isGuest: false,
+          photoURL: null,
+          userId: undefined
+        });
+        
+        setBlackPlayer({
+          username: 'Black Player',
+          rating: 1500,
+          capturedPieces: capturedByBlack,
+          isGuest: false,
+          photoURL: null,
+          userId: undefined
+        });
+      }
       // Set generic placeholder data as a last resort
       console.log('Setting placeholder player data after all retries failed');
       
       setWhitePlayer({
-        username: 'White Player',
+        username: isGuest && user && user.displayName ? user.displayName : 'White Player',
         rating: 1500,
         capturedPieces: capturedByWhite,
-        isGuest: false,
+        isGuest: isGuest,
         photoURL: null,
         userId: undefined
       });
       
       setBlackPlayer({
-        username: 'Black Player',
+        username: isGuest && user && user.displayName ? user.displayName : 'Black Player',
         rating: 1500,
         capturedPieces: capturedByBlack,
-        isGuest: false,
+        isGuest: isGuest,
         photoURL: null,
         userId: undefined
       });
@@ -276,14 +523,20 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     fetchPlayersWithRetries();
     
     // Set up a periodic refresh to ensure player data stays up-to-date
+    // Use a longer interval (60 seconds) to reduce unnecessary API calls
     const refreshInterval = setInterval(() => {
-      console.log('Periodic refresh of player data');
-      fetchPlayersWithRetries(2, 1000); // Fewer retries for periodic refresh
-    }, 30000); // Refresh every 30 seconds
+      if (isMounted) {
+        console.log('[ChessBoardWrapper] Periodic refresh of player data');
+        fetchPlayersWithRetries(2, 1000); // Fewer retries for periodic refresh
+      }
+    }, 60000); // Refresh every 60 seconds
     
     // Clean up interval on unmount
-    return () => clearInterval(refreshInterval);
-  }, [gameRoomId, capturedByWhite, capturedByBlack]);
+    return () => {
+      isMounted = false;
+      clearInterval(refreshInterval);
+    };
+  }, [gameRoomId]); // Only depend on gameRoomId, not capturedByWhite/Black which change frequently
   
   // Debug gameState.hasWhiteMoved changes
   useEffect(() => {
@@ -616,7 +869,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       
       try {
         const chess = getChessEngine();
-        
+      
         // If we have a FEN, use it for full synchronization (most reliable)
         if (fen) {
           console.log(`[SYNC] Using server-provided FEN for synchronization: ${fen}`);
@@ -630,7 +883,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         // Or try to reconstruct the move
         else {
           console.log(`[SYNC] Reconstructing move from: ${from}, to: ${to}, promotion: ${promotion || 'none'}`);
-          
+        
           // If this is a promotion move, include the promotion piece
           if (promotion) {
             chess.move({
@@ -916,6 +1169,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         setGameState(prevState => ({
           ...prevState,
           isGameOver: true,
+          gameOverReason: 'abort' // Set explicit abort reason
         }));
 
         // Stop both clocks when game is aborted
@@ -970,13 +1224,13 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
               setBlackPlayer(updatedBlackPlayer);
               
               // Create game result data with the real player data we just fetched
-              const abortResultData = {
-                result: 'draw' as GameResultType,
-                reason: 'abort' as GameEndReason,
+              const abortResultData: ExtendedGameResult = {
+                result: 'draw',
+                reason: 'abort',
                 playerName: playerColor === 'white' ? updatedWhitePlayer.username : updatedBlackPlayer.username,
                 opponentName: playerColor === 'white' ? updatedBlackPlayer.username : updatedWhitePlayer.username,
-                playerRating: playerColor === 'white' ? updatedWhitePlayer.rating : updatedBlackPlayer.rating,
-                opponentRating: playerColor === 'white' ? updatedBlackPlayer.rating : updatedWhitePlayer.rating,
+                playerRating: playerColor === 'white' ? Number(updatedWhitePlayer.rating || 1500) : Number(updatedBlackPlayer.rating || 1500),
+                opponentRating: playerColor === 'white' ? Number(updatedBlackPlayer.rating || 1500) : Number(updatedWhitePlayer.rating || 1500),
                 playerPhotoURL: playerColor === 'white' ? updatedWhitePlayer.photoURL : updatedBlackPlayer.photoURL,
                 opponentPhotoURL: playerColor === 'white' ? updatedBlackPlayer.photoURL : updatedWhitePlayer.photoURL,
                 playerRatingChange: 0, // No rating change on abort
@@ -988,6 +1242,24 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
               // Set the game result data and show the result screen
               setGameResultData(abortResultData);
               setShowResultScreen(true);
+              
+              // For aborted games, always treat as a draw (not a win or loss)
+              // Check if this is a bet game before calling onGameEnd
+              const isBetGameFromStorage = localStorage.getItem('isBetGame') === 'true';
+              const hasBetType = !!localStorage.getItem('betType');
+              
+              // Only call onGameEnd for confirmed bet games
+              if (onGameEnd && isBetGameFromStorage === true && hasBetType) {
+                console.log('Calling onGameEnd for aborted bet game with draw result');
+                onGameEnd(false, true); // Not a winner, is a draw
+              } else {
+                // Clear any lingering bet data for regular games
+                console.log('Clearing bet data for aborted regular game');
+                localStorage.removeItem('isBetGame');
+                localStorage.removeItem('betType');
+                localStorage.removeItem('betId');
+                localStorage.removeItem('opponentId');
+              }
             })
             .catch(error => {
               console.error('Failed to fetch player data for abort:', error);
@@ -1016,15 +1288,15 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
               setBlackPlayer(fallbackBlackPlayer);
               
               // Create game result data with fallback values
-              const abortResultData = {
-                result: 'draw' as GameResultType,
-                reason: 'abort' as GameEndReason,
+              const abortResultData: ExtendedGameResult = {
+                result: 'draw',
+                reason: 'abort',
                 playerName: playerColor === 'white' ? fallbackWhitePlayer.username : fallbackBlackPlayer.username,
                 opponentName: playerColor === 'white' ? fallbackBlackPlayer.username : fallbackWhitePlayer.username,
-                playerRating: playerColor === 'white' ? fallbackWhitePlayer.rating : fallbackBlackPlayer.rating,
-                opponentRating: playerColor === 'white' ? fallbackBlackPlayer.rating : fallbackWhitePlayer.rating,
-                playerPhotoURL: playerColor === 'white' ? fallbackWhitePlayer.photoURL : fallbackBlackPlayer.photoURL,
-                opponentPhotoURL: playerColor === 'white' ? fallbackBlackPlayer.photoURL : fallbackWhitePlayer.photoURL,
+                playerRating: playerColor === 'white' ? Number(fallbackWhitePlayer.rating || 1500) : Number(fallbackBlackPlayer.rating || 1500),
+                opponentRating: playerColor === 'white' ? Number(fallbackBlackPlayer.rating || 1500) : Number(fallbackWhitePlayer.rating || 1500),
+                playerPhotoURL: playerColor === 'white' ? fallbackWhitePlayer.photoURL ?? null : fallbackBlackPlayer.photoURL ?? null,
+                opponentPhotoURL: playerColor === 'white' ? fallbackBlackPlayer.photoURL ?? null : fallbackWhitePlayer.photoURL ?? null,
                 playerRatingChange: 0, // No rating change on abort
                 opponentRatingChange: 0  // No rating change on abort
               };
@@ -1034,21 +1306,39 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
               // Set the game result data and show the result screen
               setGameResultData(abortResultData);
               setShowResultScreen(true);
+              
+              // For aborted games, always treat as a draw (not a win or loss)
+              // Check if this is a bet game before calling onGameEnd
+              const isBetGameFromStorage = localStorage.getItem('isBetGame') === 'true';
+              const hasBetType = !!localStorage.getItem('betType');
+              
+              // Only call onGameEnd for confirmed bet games
+              if (onGameEnd && isBetGameFromStorage === true && hasBetType) {
+                console.log('Calling onGameEnd for aborted bet game with draw result');
+                onGameEnd(false, true); // Not a winner, is a draw
+              } else {
+                // Clear any lingering bet data for regular games
+                console.log('Clearing bet data for aborted regular game');
+                localStorage.removeItem('isBetGame');
+                localStorage.removeItem('betType');
+                localStorage.removeItem('betId');
+                localStorage.removeItem('opponentId');
+              }
             });
         } else {
           // We already have real player data, use it directly
           console.log('Using existing real player data for abort');
           
           // Create game result data with existing player data
-          const abortResultData = {
-            result: 'draw' as GameResultType,
-            reason: 'abort' as GameEndReason,
+          const abortResultData: ExtendedGameResult = {
+            result: 'draw',
+            reason: 'abort',
             playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
             opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-            playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-            opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
-            playerPhotoURL: playerColor === 'white' ? whitePlayer.photoURL : blackPlayer.photoURL,
-            opponentPhotoURL: playerColor === 'white' ? blackPlayer.photoURL : whitePlayer.photoURL,
+            playerRating: playerColor === 'white' ? Number(whitePlayer.rating || 1500) : Number(blackPlayer.rating || 1500),
+            opponentRating: playerColor === 'white' ? Number(blackPlayer.rating || 1500) : Number(whitePlayer.rating || 1500),
+            playerPhotoURL: playerColor === 'white' ? whitePlayer.photoURL ?? null : blackPlayer.photoURL ?? null,
+            opponentPhotoURL: playerColor === 'white' ? blackPlayer.photoURL ?? null : whitePlayer.photoURL ?? null,
             playerRatingChange: 0, // No rating change on abort
             opponentRatingChange: 0  // No rating change on abort
           };
@@ -1058,6 +1348,24 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
           // Set the game result data and show the result screen
           setGameResultData(abortResultData);
           setShowResultScreen(true);
+          
+          // For aborted games, always treat as a draw (not a win or loss)
+          // Check if this is a bet game before calling onGameEnd
+          const isBetGameFromStorage = localStorage.getItem('isBetGame') === 'true';
+          const hasBetType = !!localStorage.getItem('betType');
+          
+          // Only call onGameEnd for confirmed bet games
+          if (onGameEnd && isBetGameFromStorage === true && hasBetType) {
+            console.log('Calling onGameEnd for aborted bet game with draw result');
+            onGameEnd(false, true); // Not a winner, is a draw
+          } else {
+            // Clear any lingering bet data for regular games
+            console.log('Clearing bet data for aborted regular game');
+            localStorage.removeItem('isBetGame');
+            localStorage.removeItem('betType');
+            localStorage.removeItem('betId');
+            localStorage.removeItem('opponentId');
+          }
         }
 
         console.log(`Game ${gameRoomId} has been aborted. Reason: ${reason}`);
@@ -1141,8 +1449,8 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
           opponentName: opponentName,
           playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
           opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
-          playerPhotoURL: playerColor === 'white' ? whitePlayer.photoURL : blackPlayer.photoURL,
-          opponentPhotoURL: playerColor === 'white' ? blackPlayer.photoURL : whitePlayer.photoURL,
+          playerPhotoURL: playerColor === 'white' ? whitePlayer.photoURL ?? null : blackPlayer.photoURL ?? null,
+          opponentPhotoURL: playerColor === 'white' ? blackPlayer.photoURL ?? null : whitePlayer.photoURL ?? null,
           playerRatingChange: resultType === 'win' ? 10 : -10, 
           opponentRatingChange: resultType === 'win' ? -10 : 10
         };
@@ -1222,8 +1530,8 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
           opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
           playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
           opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
-          playerPhotoURL: playerColor === 'white' ? whitePlayer.photoURL : blackPlayer.photoURL,
-          opponentPhotoURL: playerColor === 'white' ? blackPlayer.photoURL : whitePlayer.photoURL,
+          playerPhotoURL: playerColor === 'white' ? whitePlayer.photoURL ?? null : blackPlayer.photoURL ?? null,
+          opponentPhotoURL: playerColor === 'white' ? blackPlayer.photoURL ?? null : whitePlayer.photoURL ?? null,
           // Use rating changes from server data if available
           playerRatingChange: playerColor === 'white' ? (data.whitePlayer?.ratingChange || 0) : (data.blackPlayer?.ratingChange || 0),
           opponentRatingChange: playerColor === 'white' ? (data.blackPlayer?.ratingChange || 0) : (data.whitePlayer?.ratingChange || 0)
@@ -1532,7 +1840,27 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   // Dedicated effect for handling the move queue
   // This is completely separated from sound settings or other game state updates
   useEffect(() => {
-    if (!socket || !moveQueue.length || !gameRoomId) return;
+    if (!socket || !moveQueue.length || !gameRoomId) {
+      if (moveQueue.length > 0 && !socket) {
+        console.warn('[ChessBoardWrapper] Move queue not processed: No socket connection');
+      } else if (moveQueue.length > 0 && !gameRoomId) {
+        console.warn('[ChessBoardWrapper] Move queue not processed: No game room ID');
+      }
+      return;
+    }
+    
+    console.log(`[ChessBoardWrapper] Processing move queue (${moveQueue.length} moves) for game ${gameRoomId}, isGameReady: ${isGameReady}`);
+
+    // Block move sending if game is not ready
+    if (!isGameReady) {
+      console.warn('[ChessBoardWrapper] Move blocked: game is not ready yet. GameID:', gameRoomId);
+      console.warn('[ChessBoardWrapper] Move details:', {
+        from: moveQueue[0].from,
+        to: moveQueue[0].to,
+        player: moveQueue[0].player
+      });
+      return;
+    }
     
     const move = moveQueue[0];
     const currentSocket = socket; // Capture current socket to avoid closure issues
@@ -1566,7 +1894,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         // Get the current move history
         const history = chess.history({ verbose: true });
         const lastMoveVerbose = history.length > 0 ? history[history.length - 1] : null;
-        
+          
         // Check if this is a pawn promotion move
         if (move.promotion) {
           console.log(`[PROMOTION] Sending promotion move with piece: ${move.promotion}`);
@@ -1574,7 +1902,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         
         // Create a unique move ID for tracking
         const moveId = `${move.from}-${move.to}-${Date.now()}`;
-        
+          
         // Emit the move to the server
         socket.emit('move_made', {
             gameId: gameRoomId,
@@ -1602,7 +1930,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     // Send the move to the server
     sendMoveToServer();
     // Don't remove the move from the queue immediately - wait for server confirmation
-  }, [socket, moveQueue, gameRoomId, sanMoveList]);
+  }, [socket, moveQueue, gameRoomId, sanMoveList, isGameReady]);
   
   // Add a function to synchronize the board from FEN or move history
   const synchronizeBoardFromFen = useCallback((fen: string, moveHistory?: string[]) => {
@@ -1767,8 +2095,18 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       gameOverReason?: string,
       timestamp: number 
     }) => {
-      if (data.gameId !== gameRoomId) return;
-      
+      // Skip updates if the game IDs don't match
+      if (data.gameId !== gameRoomId) {
+        console.log(`[handleBoardUpdated] Ignoring update for different game: ${data.gameId} vs ${gameRoomId}`);
+        return;
+      }
+
+      // Only update board state if not viewing history
+      if (!isViewingHistory) {
+        // Process the move history from the server
+        console.log(`[handleBoardUpdated] Processing move history update for game ${data.gameId}`);
+        
+        try {
       // Check if the game is already over
       if (gameState.isGameOver) {
         console.log('Game is already over, ignoring board_updated event');
@@ -1777,10 +2115,15 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       
       console.log(`Received board_updated event for game ${data.gameId} with ${data.moveHistory.length} moves, whiteTurn=${data.whiteTurn}`);
       
-      try {
         // Always update the chess engine state with the server's FEN if provided
         if (data.fen) {
           setChessPosition(data.fen, gameRoomId);
+        }
+        
+        // Mark the game as ready to accept moves if we receive valid game data
+        if (!isGameReady && data.gameId === gameRoomId) {
+          setIsGameReady(true);
+          console.log('[ChessBoardWrapper] Game is now ready for moves (from board_updated):', gameRoomId);
         }
       
         // CRITICAL: Always update the active player first if whiteTurn is provided
@@ -1790,13 +2133,13 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
           if (activePlayer !== newActivePlayer) {
             console.log(`[TURN] Updating active player from ${activePlayer} to ${newActivePlayer} (whiteTurn=${data.whiteTurn})`);
             setActivePlayer(newActivePlayer);
-            
+          
             // Also update the game state to reflect the current turn
             setGameState(prevState => ({
               ...prevState,
               isWhiteTurn: data.whiteTurn,
-            hasWhiteMoved: data.moveHistory.length > 0
-          }));
+              hasWhiteMoved: data.moveHistory && data.moveHistory.length > 0 ? true : prevState.hasWhiteMoved
+            }));
           } else {
             console.log(`[TURN] Active player already set to ${activePlayer}, no update needed`);
           }
@@ -1809,12 +2152,12 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         
         if (!moveHistoryChanged) {
           console.log('Move history unchanged, skipping further update');
-        return;
-      }
-      
-      // Synchronize the board using move history as the primary source of truth
-      const syncResult = synchronizeBoardFromMoveHistory(data.moveHistory);
-      if (syncResult) {
+          return;
+        }
+        
+                  // Synchronize the board using move history as the primary source of truth
+        const syncResult = synchronizeBoardFromMoveHistory(data.moveHistory);
+        if (syncResult) {
           // Update the board state from the new position
           const newBoardState = getCurrentBoardState();
           
@@ -1825,15 +2168,13 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
             console.log('Board state unchanged, skipping update');
             return;
           }
-          
-          // Update move history
-              setSanMoveList(data.moveHistory);
+              
+          // Always update the move history
+          setSanMoveList(data.moveHistory);
           if (onSanMoveListChange) onSanMoveListChange(data.moveHistory);
           
-          // Batch state updates to prevent excessive renders
-          const updates: any = {
-            boardState: newBoardState
-          };
+          // Prepare updates
+          const updates: any = {};
           
           // Update last move if provided
           if (data.lastMove) {
@@ -1845,34 +2186,47 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
             }
           }
           
-          // Apply all updates in a single batch to prevent cascading updates
-          setBoardState(newBoardState);
-          if (updates.lastMove) setLastMove(updates.lastMove);
+          // Check if we're in review mode (viewing a historical move)
+          const isReviewMode = moveHistory && moveHistory.currentMoveIndex !== moveHistory.moves.length - 1 && moveHistory.moves.length > 0;
+          
+          // Only update the visible board state if we're not in review mode
+          if (!isReviewMode) {
+            console.log('Not in review mode, updating visible board state');
+              updateBoardState(newBoardState);
+            if (updates.lastMove) setLastMove(updates.lastMove);
+          } else {
+            console.log('In review mode, preserving historical view (not updating visible board state)');
+            // Even in review mode, we should update the underlying move history
+            // This ensures that when the user exits review mode, they'll see the latest state
+          }
           
           console.log('Successfully processed board update');
-      } else {
+        } else {
           // If move history sync fails, fallback to FEN
-        if (data.fen) {
+          if (data.fen) {
             synchronizeBoardFromFen(data.fen, data.moveHistory);
             if (socket && gameRoomId) {
-            socket.emit('request_board_sync', {
-              gameId: gameRoomId,
-              reason: 'critical_sync_failure',
-              clientState: getChessEngine().fen()
-            });
-          }
+              socket.emit('request_board_sync', {
+                gameId: gameRoomId,
+                reason: 'critical_sync_failure',
+                clientState: getChessEngine().fen()
+              });
+            }
           }
         }
       } catch (error) {
         console.error('Error processing board update:', error);
         // Request a full board sync if we fail to process the update
-          if (socket && gameRoomId) {
-            socket.emit('request_board_sync', {
-              gameId: gameRoomId,
+        if (socket && gameRoomId) {
+          socket.emit('request_board_sync', {
+            gameId: gameRoomId,
             reason: 'board_update_processing_failed',
-              clientState: getChessEngine().fen()
-            });
-          }
+            clientState: getChessEngine().fen()
+          });
+        }
+        }
+      } else {
+        console.log('[handleBoardUpdated] Ignoring board update while viewing history');
       }
     };
     
@@ -1894,6 +2248,12 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       console.log(`Received board_sync event for game ${data.gameId} with FEN: ${data.fen}, whiteTurn=${data.whiteTurn}`);
       
       try {
+        // Mark the game as ready to accept moves if we receive valid game data
+        if (!isGameReady && data.gameId === gameRoomId) {
+          setIsGameReady(true);
+          console.log('[ChessBoardWrapper] Game is now ready for moves (from board_sync):', gameRoomId);
+        }
+        
         // CRITICAL: Always update the active player first if whiteTurn is provided
         // This ensures clocks and turn indicators stay in sync, regardless of other updates
         if (data.whiteTurn !== undefined) {
@@ -1905,8 +2265,8 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
             // Also update the game state to reflect the current turn
             setGameState(prevState => ({
               ...prevState,
-              isWhiteTurn: data.whiteTurn,
-              hasWhiteMoved: data.moveHistory !== undefined && data.moveHistory.length > 0
+              isWhiteTurn: data.whiteTurn === undefined ? prevState.isWhiteTurn : data.whiteTurn,
+              hasWhiteMoved: (data.moveHistory !== undefined && data.moveHistory.length > 0) ? true : prevState.hasWhiteMoved
             }));
           } else {
             console.log(`[TURN] Active player already set to ${activePlayer}, no update needed`);
@@ -1919,8 +2279,8 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         setChessPosition(data.fen, gameRoomId);
         
         // If move history is available, use it to update the move list
-      if (data.moveHistory && data.moveHistory.length > 0) {
-        console.log(`Using move history from board_sync event (${data.moveHistory.length} moves)`);
+        if (data.moveHistory && data.moveHistory.length > 0) {
+          console.log(`Using move history from board_sync event (${data.moveHistory.length} moves)`);
           
           // Check if the move history has actually changed
           const moveHistoryChanged = JSON.stringify(data.moveHistory) !== JSON.stringify(sanMoveList);
@@ -1928,6 +2288,8 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
           if (moveHistoryChanged) {
             setSanMoveList(data.moveHistory);
             if (onSanMoveListChange) onSanMoveListChange(data.moveHistory);
+            
+            // Process the move history update
           }
         }
         
@@ -1942,8 +2304,19 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
           return;
         }
         
-        // Apply board state update
-        setBoardState(newBoardState);
+        // Check if we're in review mode (viewing a historical move)
+        const isReviewMode = moveHistory && moveHistory.currentMoveIndex !== moveHistory.moves.length - 1 && moveHistory.moves.length > 0;
+        
+        // Only update the visible board state if we're not in review mode
+        if (!isReviewMode) {
+          console.log('Not in review mode, updating visible board state');
+          updateBoardState(newBoardState);
+        } else {
+          console.log('In review mode, preserving historical view (not updating visible board state)');
+          // Even in review mode, we should update the underlying move history
+          // This ensures that when the user exits review mode, they'll see the latest state
+        }
+        
         console.log('Successfully processed board sync');
       } catch (error) {
         console.error('Failed to synchronize board state:', error);
@@ -1956,6 +2329,9 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     const handleGameEnd = (data: any) => {
       console.log('Received game_end event:', data);
       console.log('Player color:', playerColor);
+      
+      // Log the reason for game end
+      console.log(`Game end reason: ${data.reason}`);
       
       // Additional logging for timeout events
       if (data.reason === 'timeout') {
@@ -1988,6 +2364,48 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         
         // Stop the clocks
         setActivePlayer(null);
+      }
+      
+      // For aborted games, always treat as a draw with no rating change
+      if (data.reason === 'abort') {
+        console.log('Game was aborted. Setting result as draw with no rating change.');
+        
+        const resultData = {
+          result: 'draw' as GameResultType,
+          reason: 'abort' as GameEndReason,
+          playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
+          opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
+          playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
+          opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
+          playerPhotoURL: playerColor === 'white' ? whitePlayer.photoURL ?? null : blackPlayer.photoURL ?? null,
+          opponentPhotoURL: playerColor === 'white' ? blackPlayer.photoURL ?? null : whitePlayer.photoURL ?? null,
+          playerRatingChange: 0, // No rating change on abort
+          opponentRatingChange: 0 // No rating change on abort
+        };
+        
+        console.log('Abort result data:', resultData);
+        
+        // Save the game result to localStorage for the result page to use
+        safeLocalStorage.setItem(`gameResult_${gameRoomId}`, resultData);
+        console.log('Saved aborted game result to localStorage');
+        
+        // IMPORTANT: For aborted games, we should NEVER redirect to bet result pages
+        // Explicitly check and clear any bet game data
+        safeLocalStorage.removeItem('isBetGame');
+        safeLocalStorage.removeItem('betType');
+        safeLocalStorage.removeItem('betId');
+        safeLocalStorage.removeItem('opponentId');
+        
+        // Navigate to regular result page
+        const gameEndedEvent = new CustomEvent('game_ended', {
+          detail: resultData
+        });
+        
+        // Dispatch the event to trigger the game result screen
+        window.dispatchEvent(gameEndedEvent);
+        
+        console.log('Dispatched game_ended event for aborted game');
+        return;
       }
       
       // Determine the result from the player's perspective
@@ -2047,7 +2465,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         
         try {
           // Get the stored timeout player from localStorage
-          const timedOutPlayer = localStorage.getItem(`timeout_player_${gameRoomId}`);
+          const timedOutPlayer = safeLocalStorage.getItem(`timeout_player_${gameRoomId}`);
           console.log(`Retrieved timedOutPlayer from localStorage: ${timedOutPlayer}`);
           
           // Skip showing another result screen since we already showed it in handleTimeOut
@@ -2117,20 +2535,82 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
         playerPhotoURL: playerColor === 'white' ? whitePlayer.photoURL : blackPlayer.photoURL,
         opponentPhotoURL: playerColor === 'white' ? blackPlayer.photoURL : whitePlayer.photoURL,
-        playerRatingChange: data.whitePlayer?.ratingChange !== undefined ? 
-          (playerColor === 'white' ? data.whitePlayer.ratingChange : data.blackPlayer.ratingChange) : 0,
-        opponentRatingChange: data.whitePlayer?.ratingChange !== undefined ? 
-          (playerColor === 'white' ? data.blackPlayer.ratingChange : data.whitePlayer.ratingChange) : 0
+        // Check for rating changes in multiple possible locations in the payload
+        playerRatingChange: playerColor === 'white' 
+          ? (data.whitePlayer?.ratingChange !== undefined 
+             ? data.whitePlayer.ratingChange 
+             : (data.whiteRatingChange?.ratingChange !== undefined 
+                ? data.whiteRatingChange.ratingChange 
+                : 0))
+          : (data.blackPlayer?.ratingChange !== undefined 
+             ? data.blackPlayer.ratingChange 
+             : (data.blackRatingChange?.ratingChange !== undefined 
+                ? data.blackRatingChange.ratingChange 
+                : 0)),
+        opponentRatingChange: playerColor === 'white' 
+          ? (data.blackPlayer?.ratingChange !== undefined 
+             ? data.blackPlayer.ratingChange 
+             : (data.blackRatingChange?.ratingChange !== undefined 
+                ? data.blackRatingChange.ratingChange 
+                : 0))
+          : (data.whitePlayer?.ratingChange !== undefined 
+             ? data.whitePlayer.ratingChange 
+             : (data.whiteRatingChange?.ratingChange !== undefined 
+                ? data.whiteRatingChange.ratingChange 
+                : 0))
       };
+      
+      // Log the rating changes for debugging
+      console.log('Rating changes extracted from payload:', {
+        whiteRatingChange: data.whitePlayer?.ratingChange || data.whiteRatingChange?.ratingChange,
+        blackRatingChange: data.blackPlayer?.ratingChange || data.blackRatingChange?.ratingChange,
+        playerRatingChange: resultData.playerRatingChange,
+        opponentRatingChange: resultData.opponentRatingChange
+      });
       
       console.log('Final result data:', resultData);
       
       // Save the game result to localStorage for the result page to use
-      try {
-        localStorage.setItem(`gameResult_${gameRoomId}`, JSON.stringify(resultData));
-        console.log('Saved game result to localStorage:', resultData);
-      } catch (error) {
-        console.error('Failed to save game result to localStorage:', error);
+      safeLocalStorage.setItem(`gameResult_${gameRoomId}`, resultData);
+      console.log('Saved game result to localStorage');
+      
+      // Perform strict validation to check if this is a bet game
+      // Check multiple sources to ensure consistency
+      const isBetGameFromUrl = new URLSearchParams(window.location.search).get('isBetGame') === 'true';
+      const isBetGameFromStorage = localStorage.getItem('isBetGame') === 'true';
+      const betTypeFromUrl = new URLSearchParams(window.location.search).get('betType');
+      const betTypeFromStorage = localStorage.getItem('betType');
+      
+      // Log all bet-related values for debugging
+      console.log('Bet game validation check:', {
+        isBetGameFromUrl,
+        isBetGameFromStorage,
+        betTypeFromUrl,
+        betTypeFromStorage,
+        // Add any other relevant values
+        gameId: gameRoomId,
+        resultType: playerResult,
+        reason: data.reason
+      });
+      
+      // Call our onGameEnd callback if provided and this is a bet game with valid bet type
+      if (onGameEnd) {
+        const isWinner = playerResult === 'win';
+        const isDraw = playerResult === 'draw';
+        
+        // Only call onGameEnd for confirmed bet games
+        if (isBetGameFromUrl === true && isBetGameFromStorage === true && betTypeFromUrl && betTypeFromStorage) {
+          console.log(`Calling onGameEnd for confirmed bet game with isWinner=${isWinner}, isDraw=${isDraw}`);
+          onGameEnd(isWinner, isDraw);
+        } else {
+          console.log(`Not calling onGameEnd for regular game - strict validation failed`);
+          
+          // For regular games, ensure we clear any bet data
+      safeLocalStorage.removeItem('isBetGame');
+      safeLocalStorage.removeItem('betType');
+      safeLocalStorage.removeItem('betId');
+      safeLocalStorage.removeItem('opponentId');
+        }
       }
       
       // Create game result data for the window event
@@ -2142,11 +2622,6 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       window.dispatchEvent(gameEndedEvent);
       
       console.log('Dispatched game_ended event with result data:', resultData);
-      
-      console.log(`Game over: ${playerResult} by ${data.reason}. Showing result screen.`);
-      
-      // Play game end sound
-      playSound('GAME_END', soundEnabled);
     };
     
     // Also listen for game_ended event (backward compatibility)
@@ -2173,6 +2648,8 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       onSanMoveListChange(sanMoveList);
     }
   }, [sanMoveList, onSanMoveListChange]);
+
+  const stableBoardRef = useRef<BoardState | null>(null);
   
   // Handle move history updates from the ChessBoard component
   const handleMoveHistoryChange = useCallback((history: MoveHistoryState) => {
@@ -2183,119 +2660,59 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     // 2. We need to send ALL moves to the MoveTracker for display, not just the active ones
     // 3. This ensures the move tracker shows the complete history even after rewinds & new moves
     
-    setMoveHistory(history);
+    console.log(`Move history updated. Current index: ${history.currentMoveIndex}, Total moves: ${history.moves.length}`);
     
-    // Debug the move tracker update
-    console.log(`📊 Move Tracker Update Debug: {totalMovesInHistory: ${history.moves.length}, currentMoveIndex: ${history.currentMoveIndex}, movesBeingSentToTracker: ${history.moves.length}}`);
+    // Save the current move history
+    updateMoveHistory(history);
     
-    // Check for threefold repetition after move history updates
-    try {
-      const chess = getChessEngine();
-      const status = {
-        fen: chess.fen(),
-        isCheck: chess.isCheck(),
-        isCheckmate: chess.isCheckmate(),
-        isDraw: chess.isDraw(),
-        isThreefoldRepetition: isThreefoldRepetition()
-      };
+    // Determine if we're in review mode (viewing a historical move)
+    const isReviewMode = history.currentMoveIndex !== history.moves.length - 1 && history.moves.length > 0;
+    
+    // Update the board state to match the currently viewed move
+    if (history.currentMoveIndex >= 0 && history.currentMoveIndex < history.moves.length) {
+      const currentMove = history.moves[history.currentMoveIndex];
       
-      // Update current position FEN for debugging
-      console.log(`Current position FEN: ${status.fen}`);
+      // Force a re-render by creating a new object reference
+      updateBoardState({...currentMove.boardState});
+      setLastMove({ from: currentMove.from, to: currentMove.to });
       
-      // If threefold repetition is detected, handle it
-    if (status.isThreefoldRepetition) {
-        console.log('Threefold repetition detected in handleMoveHistoryChange');
+      // Store the current board state in a stable reference for comparison
+      // This helps us detect when we need to override incoming socket updates
+      stableBoardRef.current = {...currentMove.boardState};
+      console.log("Updated stable board reference with current state:", getFen());
       
-      // Update game state
-      setGameState(prev => ({
-        ...prev,
-        isGameOver: true,
-          gameOverReason: 'threefold_repetition'
-      }));
-      
-        // Stop the clocks
-      setActivePlayer(null);
-      
-      // Notify the server about the threefold repetition
-      if (socket) {
-        console.log('Emitting threefold_repetition event to server');
-        socket.emit('threefold_repetition', {
-          gameId: gameRoomId,
-          fen: status.fen
-        });
-        
-        // Also emit a game_ended event for consistency with other end conditions
-        socket.emit('game_ended', {
-          gameId: gameRoomId,
-          reason: 'threefold_repetition',
-          result: 'draw'
-        });
+      if (isReviewMode) {
+        console.log(`Showing historical move ${history.currentMoveIndex + 1}/${history.moves.length}`);
+      } else {
+        console.log(`Showing latest move ${history.currentMoveIndex + 1}/${history.moves.length}`);
       }
+    } else if (history.currentMoveIndex === -1 && history.initialBoardState) {
+      // If we're at the initial position (before any moves)
+      // Force a re-render by creating a new object reference
+      updateBoardState({...history.initialBoardState});
+      setLastMove(null);
       
-      // Dispatch a local game_ended event
-      try {
-        const gameEndedEvent = new CustomEvent('game_ended', {
-          detail: {
-            reason: 'threefold_repetition',
-            result: 'draw',
-            source: 'local_threefold_repetition',
-            timestamp: Date.now()
-          }
-        });
-        window.dispatchEvent(gameEndedEvent);
-      } catch (error) {
-        console.error('Error dispatching threefold_repetition event:', error);
-      }
+      // Store the initial board state in a stable reference
+      stableBoardRef.current = {...history.initialBoardState};
+      console.log("Updated stable board reference with initial state");
       
-      return;
-        }
-      } catch (error) {
-        console.error(`Error checking for threefold repetition: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        
-        // If there's an error, request a board sync to recover
-        if (socket && gameRoomId) {
-          console.log('Requesting board sync due to threefold repetition check error');
-          socket.emit('request_board_sync', {
-            gameId: gameRoomId,
-            reason: 'threefold_repetition_check_error',
-            clientState: getChessEngine().fen()
-          });
-      }
+      console.log("Showing initial board position");
     }
-    
-    // IMPORTANT: Don't add moves to the queue here - they're already being sent by ChessBoard.tsx
-    // The move queue should only contain moves initiated by the local player
-  }, [soundEnabled, playerColor, whitePlayer.username, whitePlayer.rating, blackPlayer.username, blackPlayer.rating]);
+  }, [getFen]);
   
   // Handle back button click
   const handleBackClick = useCallback(() => {
-    // These buttons interact with the board through its exposed methods
-    // We're simulating a click on the hidden button in ChessBoard
-    const backButton = document.querySelector('.hidden button:first-child') as HTMLButtonElement;
-    if (backButton) {
-      backButton.click();
-    }
-    
-    // Play button click sound with button label - use the ref value
-    playSound('BUTTON_CLICK', soundEnabledRef.current, 1.0, 'Back');
-  }, [playSound]); // Remove soundEnabled from deps
+    goBack();
+  }, [goBack]);
   
   // Handle forward button click
   const handleForwardClick = useCallback(() => {
-    // These buttons interact with the board through its exposed methods
-    // We're simulating a click on the hidden button in ChessBoard
-    const forwardButton = document.querySelector('.hidden button:last-child') as HTMLButtonElement;
-    if (forwardButton) {
-      forwardButton.click();
-    }
-    
-    // Play button click sound with button label - use the ref value
-    playSound('BUTTON_CLICK', soundEnabledRef.current, 1.0, 'Forward');
-  }, [playSound]); // Remove soundEnabled from deps
+    goForward();
+  }, [goForward]);
   
   // Determine if we can go back/forward in the move history
-  const canGoBack = moveHistory ? moveHistory.currentMoveIndex >= 0 : false;
-  const canGoForward = moveHistory ? moveHistory.currentMoveIndex < moveHistory.moves.length - 1 : false;
+  const canGoBack = moveHistory?.currentMoveIndex >= 0;
+  const canGoForward = moveHistory?.currentMoveIndex < (moveHistory?.moves?.length || 0) - 1;
   
   // Debug values
   useEffect(() => {
@@ -2329,12 +2746,8 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       const color = player === 'white' ? 'w' : 'b';
       
       // Store which player timed out in localStorage
-      try {
-        localStorage.setItem(`timeout_player_${gameRoomId}`, player);
+      safeLocalStorage.setItem(`timeout_player_${gameRoomId}`, player);
         console.log(`Stored timeout player ${player} in localStorage for game ${gameRoomId}`);
-      } catch (error) {
-        console.error('Failed to store timeout player in localStorage:', error);
-      }
       
       console.log(`Emitting report_timeout event for ${player} (${color}) in game ${gameRoomId}`);
       
@@ -2347,21 +2760,21 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         console.log(`This player (${playerColor}) timed out - showing loss screen`);
         
         // Create game result data for timeout - this player lost
-        const timeoutResultData = {
+    const timeoutResultData = {
           result: 'loss' as GameResultType,
-          reason: 'timeout' as GameEndReason,
-          playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
-          opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-          playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-          opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
+      reason: 'timeout' as GameEndReason,
+      playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
+      opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
+      playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
+      opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
           playerRatingChange: -10, // Loss for timing out
           opponentRatingChange: 10  // Win for opponent
-        };
-        
-        // Set result data and show result screen
-        setGameResultData(timeoutResultData);
-        setShowResultScreen(true);
-        
+    };
+    
+    // Set result data and show result screen
+    setGameResultData(timeoutResultData);
+    setShowResultScreen(true);
+    
         // Emit the timeout event to the server with a flag indicating this player timed out
         socket.emit('report_timeout', {
           gameId: gameRoomId,
@@ -2377,18 +2790,18 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         // Create game result data for timeout - this player won
         const timeoutResultData = {
           result: 'win' as GameResultType,
-          reason: 'timeout' as GameEndReason,
-          playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
-          opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-          playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-          opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
+      reason: 'timeout' as GameEndReason,
+      playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
+      opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
+      playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
+      opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
           playerRatingChange: 10, // Win because opponent timed out
           opponentRatingChange: -10  // Loss for opponent
         };
-        
+    
         // Set result data and show result screen
         setGameResultData(timeoutResultData);
-        setShowResultScreen(true);
+    setShowResultScreen(true);
         
         // Emit the timeout event to the server with a flag indicating this player is reporting the opponent's timeout
         socket.emit('report_timeout', {
@@ -2544,17 +2957,39 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   // When gameRoomId changes, join the socket room
   useEffect(() => {
     if (socket && gameRoomId) {
-      console.log(`Joining game room: ${gameRoomId}`);
+      // Check if this is a bet game
+      const isBetGame = localStorage.getItem('isBetGame') === 'true';
+      const betType = localStorage.getItem('betType');
+      
+      console.log(`[ChessBoardWrapper] Joining game room: ${gameRoomId}`, {
+        isBetGame,
+        betType,
+        playerColor,
+        timeControl
+      });
       
       // First emit enter_game to get the initial game state
-      socket.emit('enter_game', { gameId: gameRoomId });
+      socket.emit('enter_game', { 
+        gameId: gameRoomId,
+        isBetGame: isBetGame || false,
+        betType: betType || null
+      });
       
       // Then use the explicit join_game_room handler
-      socket.emit('join_game_room', { gameId: gameRoomId });
+      socket.emit('join_game_room', { 
+        gameId: gameRoomId,
+        isBetGame: isBetGame || false
+      });
 
       // Listen for confirmation of joining the room
       const handleJoinedRoom = (data: { gameId: string, playerId: string }) => {
-        console.log(`Successfully joined game room ${data.gameId} as player ${data.playerId}`);
+        console.log(`[ChessBoardWrapper] Successfully joined game room ${data.gameId} as player ${data.playerId}`);
+        
+        // If we haven't marked the game as ready yet, do so now
+        if (!isGameReady && data.gameId === gameRoomId) {
+          setIsGameReady(true);
+          console.log('[ChessBoardWrapper] Game is now ready for moves (from joined_room):', gameRoomId);
+        }
       };
       
       socket.on('joined_game_room', handleJoinedRoom);
@@ -2564,7 +2999,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         socket.off('joined_game_room', handleJoinedRoom);
       };
     }
-  }, [socket, gameRoomId]);
+  }, [socket, gameRoomId, playerColor, timeControl, isGameReady]);
 
   // When gameState.isGameOver changes, clear chess engine state if game is over
   useEffect(() => {
@@ -2702,10 +3137,10 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         reason: reason as GameEndReason,
         playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
         opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-        playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-        opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
-        playerPhotoURL: playerColor === 'white' ? whitePlayer.photoURL : blackPlayer.photoURL,
-        opponentPhotoURL: playerColor === 'white' ? blackPlayer.photoURL : whitePlayer.photoURL,
+        playerRating: playerColor === 'white' ? whitePlayer.rating || 1500 : blackPlayer.rating || 1500,
+        opponentRating: playerColor === 'white' ? blackPlayer.rating || 1500 : whitePlayer.rating || 1500,
+        playerPhotoURL: playerColor === 'white' ? whitePlayer.photoURL ?? null : blackPlayer.photoURL ?? null,
+        opponentPhotoURL: playerColor === 'white' ? blackPlayer.photoURL ?? null : whitePlayer.photoURL ?? null,
         playerRatingChange: finalResult === 'win' ? 10 : (finalResult === 'loss' ? -10 : 0),
         opponentRatingChange: finalResult === 'win' ? -10 : (finalResult === 'loss' ? 10 : 0)
       };
@@ -2888,7 +3323,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
   };
 
   const { currentBetResult } = useBet();
-  const { user } = useAuth();
+  const { user, isGuest } = useAuth();
 
   useEffect(() => {
     console.log('[ChessBoardWrapper] currentBetResult changed:', currentBetResult);
@@ -2966,12 +3401,12 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       const resultData = {
         result: finalResult,
         reason: reason as GameEndReason,
-        playerName: playerColor === 'white' ? whitePlayer.username : blackPlayer.username,
-        opponentName: playerColor === 'white' ? blackPlayer.username : whitePlayer.username,
-        playerRating: playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating,
-        opponentRating: playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating,
-        playerPhotoURL: playerColor === 'white' ? whitePlayer.photoURL : blackPlayer.photoURL,
-        opponentPhotoURL: playerColor === 'white' ? blackPlayer.photoURL : whitePlayer.photoURL,
+        playerName: (playerColor === 'white' ? whitePlayer.username : blackPlayer.username) || 'Player',
+        opponentName: (playerColor === 'white' ? blackPlayer.username : whitePlayer.username) || 'Opponent',
+        playerRating: typeof (playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating) === 'number' ? (playerColor === 'white' ? whitePlayer.rating : blackPlayer.rating) : 1500,
+        opponentRating: typeof (playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating) === 'number' ? (playerColor === 'white' ? blackPlayer.rating : whitePlayer.rating) : 1500,
+        playerPhotoURL: (playerColor === 'white' ? whitePlayer.photoURL : blackPlayer.photoURL) ?? null,
+        opponentPhotoURL: (playerColor === 'white' ? blackPlayer.photoURL : whitePlayer.photoURL) ?? null,
         playerRatingChange: finalResult === 'win' ? 10 : (finalResult === 'loss' ? -10 : 0),
         opponentRatingChange: finalResult === 'win' ? -10 : (finalResult === 'loss' ? 10 : 0)
       };
@@ -3001,8 +3436,12 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       currentBetResult,
       finalGameResultData,
       gameRoomId,
-      isBetGame
+      isBetGame,
+      displayableResultData
     });
+
+    // Timeout state for bet result
+    let betResultTimeout: NodeJS.Timeout | null = null;
 
     if (!isGameActuallyOver) {
       setDisplayableResultData(null);
@@ -3011,8 +3450,10 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
 
     // If this is a bet game (detected by localBetResultForThisGame for this game)
     const isThisBetGame = !!(localBetResultForThisGame && localBetResultForThisGame.gameId === gameRoomId);
+    const isBetGameByFlag = isBetGame || isThisBetGame;
 
-    if (isThisBetGame) {
+    if (isBetGameByFlag) {
+      // For bet games, NEVER show the normal result screen
       if (betResultReady && localBetResultForThisGame && localBetResultForThisGame.gameId === gameRoomId) {
         // Merge bet result and standard game result
         const isWinnerOfBet = localBetResultForThisGame.isWinner;
@@ -3026,19 +3467,31 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
           isBetGame: true,
           isBetWinner: isWinnerOfBet,
           betType,
-          betOpponentName,
-          opponentIdForBetContext,
-          playerName: finalGameResultData?.playerName,
-          opponentName: finalGameResultData?.opponentName,
+          betOpponentName: betOpponentName || '',
+          opponentIdForBetContext: opponentIdForBetContext || '',
+          playerName: finalGameResultData?.playerName || 'Player',
+          opponentName: finalGameResultData?.opponentName || 'Opponent',
           playerRating: Number.isFinite(finalGameResultData?.playerRating) ? finalGameResultData.playerRating : 1500,
           opponentRating: Number.isFinite(finalGameResultData?.opponentRating) ? finalGameResultData.opponentRating : 1500,
+          playerPhotoURL: finalGameResultData?.playerPhotoURL ?? null,
+          opponentPhotoURL: finalGameResultData?.opponentPhotoURL ?? null,
         };
         setDisplayableResultData(betGameResultData);
         console.log('[BET DEBUG] Showing BET result screen:', betGameResultData);
       } else {
-        // Bet result not ready, show spinner
+        // Bet result not ready, show spinner and set a timeout for error
         setDisplayableResultData(null);
         console.log('[BET DEBUG] Waiting for bet result...');
+        if (!window.__betResultTimeoutSet) {
+          window.__betResultTimeoutSet = true;
+          betResultTimeout = setTimeout(() => {
+            setDisplayableResultData({
+              error: true,
+              errorMessage: 'Bet result not received. Please check your connection or try refreshing the page.'
+            });
+            window.__betResultTimeoutSet = false;
+          }, 10000); // 10 seconds
+        }
       }
     } else {
       // Not a bet game, show standard result
@@ -3048,12 +3501,20 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
           isBetGame: false,
           playerRating: Number.isFinite(finalGameResultData?.playerRating) ? finalGameResultData.playerRating : 1500,
           opponentRating: Number.isFinite(finalGameResultData?.opponentRating) ? finalGameResultData.opponentRating : 1500,
+          playerPhotoURL: finalGameResultData?.playerPhotoURL ?? null,
+          opponentPhotoURL: finalGameResultData?.opponentPhotoURL ?? null,
         });
         console.log('[BET DEBUG] Showing STANDARD result screen:', finalGameResultData);
       } else {
         setDisplayableResultData(null);
       }
     }
+
+    // Cleanup timeout on effect cleanup
+    return () => {
+      if (betResultTimeout) clearTimeout(betResultTimeout);
+      window.__betResultTimeoutSet = false;
+    };
   }, [
     isGameActuallyOver,
     betResultReady,
@@ -3069,7 +3530,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     clearChessState();
     const chess = getChessEngine(gameRoomId);
     console.log('Initialized chess engine for new game:', gameRoomId, 'FEN:', chess.fen());
-    setBoardState(getCurrentBoardState());
+    updateBoardState(getCurrentBoardState());
     setSanMoveList(chess.history());
   }, [gameRoomId]);
 
@@ -3106,26 +3567,199 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
     };
   }, []);
 
+  // Add a useEffect to update hasWhiteMoved whenever moveHistory changes (around line 350)
+  // Update hasWhiteMoved based on moveHistory
+  useEffect(() => {
+    if (moveHistory && moveHistory.moves && moveHistory.moves.length > 0) {
+      // If there are moves in the history, white must have moved
+      setGameState(prevState => ({
+        ...prevState,
+        hasWhiteMoved: true
+      }));
+      console.log('Setting hasWhiteMoved to true based on moveHistory:', moveHistory.moves.length);
+    }
+  }, [moveHistory]);
+
+  // Add debug logs to the game_state handler
+  useEffect(() => {
+    if (!socket || !gameRoomId) return;
+
+    const handleGameState = (data: any) => {
+      console.log(`[ChessBoardWrapper] Received game_state for ${gameRoomId}:`, data);
+      
+      // Debug players data specifically for bet games
+      if (data.players) {
+        console.log(`[ChessBoardWrapper] White player: ${data.players.white.username} (${data.players.white.rating})`, 
+                    data.players.white);
+        console.log(`[ChessBoardWrapper] Black player: ${data.players.black.username} (${data.players.black.rating})`, 
+                    data.players.black);
+        
+        // Add extra logs for bet games
+        if (data.isBetGame) {
+          console.log(`[ChessBoardWrapper] This is a bet game (${data.betType})`);
+        }
+      }
+      
+      // Mark the game as ready to accept moves
+      if (data && data.gameId === gameRoomId) {
+        setIsGameReady(true);
+        console.log('[ChessBoardWrapper] Game is now ready for moves:', gameRoomId);
+      }
+      
+      // Rest of your handler logic
+      setGameState(data);
+    };
+
+    socket.on('game_state', handleGameState);
+
+    return () => {
+      socket.off('game_state', handleGameState);
+    };
+  }, [socket, gameRoomId]);
+
+  // Add debug logs to the board_updated handler
+  useEffect(() => {
+    if (!socket || !gameRoomId) return;
+
+    const handleBoardUpdated = (data: any) => {
+      if (data.gameId !== gameRoomId) return;
+      
+      console.log(`[ChessBoardWrapper] Received board_updated for ${gameRoomId}:`, {
+        fen: data.fen,
+        moveCount: data.moveHistory?.length,
+        whiteTurn: data.whiteTurn
+      });
+      
+      // Rest of your handler logic
+      // ...
+    };
+
+    socket.on('board_updated', handleBoardUpdated);
+
+    return () => {
+      socket.off('board_updated', handleBoardUpdated);
+    };
+  }, [socket, gameRoomId]);
+
+  // Add debug logs to the move_made handler
+  useEffect(() => {
+    if (!socket || !gameRoomId) return;
+
+    const handleMoveMade = (data: any) => {
+      if (data.gameId !== gameRoomId) return;
+      
+      console.log(`[ChessBoardWrapper] Received move_made for ${gameRoomId}:`, {
+        from: data.from,
+        to: data.to,
+        san: data.san,
+        fen: data.fen
+      });
+      
+      // Rest of your handler logic
+      // ...
+    };
+
+    socket.on('move_made', handleMoveMade);
+
+    return () => {
+      socket.off('move_made', handleMoveMade);
+    };
+  }, [socket, gameRoomId]);
+
+  // Helper function to determine which bet result component to show
+  const renderBetResultComponent = () => {
+    if (!displayableResultData) return null;
+
+    // Process data to ensure all required fields have proper values
+    const processedData = processResultData(displayableResultData);
+    
+    // Get common props with proper types
+    const commonProps = {
+      ...getBetResultComponentProps(processedData)
+      // onRematch: handleRematch // Removed as requested
+    };
+
+    // Determine which component to render based on bet type
+    switch (processedData.betType) {
+      case 'profile_control':
+        return <ProfileControlResult {...commonProps} />;
+      case 'profile_lock':
+        return <ProfileLockResult {...commonProps} />;
+      case 'rating_stake':
+        return <RatingStakeResult 
+          {...commonProps} 
+          stakeAmount={Math.abs(processedData.playerRatingChange)} 
+        />;
+      default:
+        // Fallback for standard games
+        return <GameResultScreen {...processedData} />;
+    }
+  };
+
+  // In the render function
+  if (showResultScreen) {
+    if (isBetGame && displayableResultData) {
+      return renderBetResultComponent();
+    } else if (displayableResultData) {
+      // Process regular game data to ensure proper types
+      const processedData = processResultData(displayableResultData);
+      return <GameResultScreen {...processedData} />;
+    } else {
+      // Show loading spinner while waiting for result data
+      return (
+        <div className="fixed inset-0 bg-gray-900 flex items-center justify-center z-50">
+          <div className="text-white text-center">
+            <div className="w-10 h-10 border-t-2 border-white rounded-full animate-spin mx-auto mb-4"></div>
+            <p>Loading result...</p>
+          </div>
+        </div>
+      );
+    }
+  }
+
+  // Move handleRematch above renderBetResultComponent
+  const handleRematch = () => {
+    alert('Rematch feature coming soon!');
+  };
+  // Add a direct reference to the current board state for move navigation
+  // const stableBoardRef = useRef<BoardState | null>(null);
+
+  
+
+
   return (
     <div className="flex flex-col w-full h-full rounded-t-xl rounded-b-none sm:rounded-t-xl sm:rounded-b-none overflow-hidden flex-shrink-0 pb-[62px]" style={{ backgroundColor: '#4A7C59' }}>
       {/* Bet Result Loading Spinner */}
-      {isGameActuallyOver && isBetGame && !(localBetResultForThisGame && localBetResultForThisGame.gameId === gameRoomId) && (
+      {isGameActuallyOver && (isBetGame || (localBetResultForThisGame && localBetResultForThisGame.gameId === gameRoomId)) && !(localBetResultForThisGame && localBetResultForThisGame.gameId === gameRoomId) && !displayableResultData?.error && (
         <div className="flex flex-col items-center justify-center py-8">
           <div className="w-8 h-8 border-4 border-[#4A7C59] border-t-transparent rounded-full animate-spin mb-2"></div>
           <p className="text-[#F9F3DD] text-sm">Waiting for bet result...</p>
         </div>
       )}
+      {/* Bet Result Error */}
+      {displayableResultData?.error && (
+        <div className="flex flex-col items-center justify-center py-8">
+          <div className="w-8 h-8 border-4 border-red-600 border-t-transparent rounded-full animate-spin mb-2"></div>
+          <p className="text-red-400 text-sm">{displayableResultData.errorMessage}</p>
+        </div>
+      )}
       {/* Game Result Screen */}
-      {displayableResultData && (
+      {displayableResultData && !displayableResultData.error && (
         (() => {
           console.log('[BET DEBUG] Rendering GameResultScreen with props:', displayableResultData);
+          if (isBetGame) {
+            return renderBetResultComponent();
+          } else {
+          // Use guest displayName for playerName/opponentName if guest
+          const playerName = isGuest && user && user.displayName ? user.displayName : displayableResultData.playerName;
+          const opponentName = isGuest && user && user.displayName && displayableResultData.opponentName === 'Black Player' ? user.displayName : displayableResultData.opponentName;
           return (
             <GameResultScreen
               result={displayableResultData.result}
               reason={displayableResultData.reason}
               gameId={gameRoomId}
-              playerName={displayableResultData.playerName}
-              opponentName={displayableResultData.opponentName}
+              playerName={playerName}
+              opponentName={opponentName}
               playerRating={displayableResultData.playerRating}
               opponentRating={displayableResultData.opponentRating}
               playerRatingChange={displayableResultData.playerRatingChange}
@@ -3140,6 +3774,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
               opponentIdForBetContext={displayableResultData.opponentIdForBetContext}
             />
           );
+          }
         })()
       )}
       
@@ -3159,7 +3794,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
           <div className="flex justify-between items-center mb-4 sm:mb-2 mx-[21px]">
             <PlayerInfo 
               position="top"
-              username={whitePlayer.username}
+              username={isGuest && user && user.displayName ? user.displayName : whitePlayer.username}
               rating={whitePlayer.rating}
               clubAffiliation={whitePlayer.clubAffiliation}
               isGuest={whitePlayer.isGuest || false}
@@ -3186,13 +3821,14 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         onMoveHistoryChange={handleMoveHistoryChange}
             playerColor={playerColor}
             gameId={gameRoomId}
+            boardState={isViewingHistory ? boardState : getCurrentBoardState()}
       />
       
           {/* Player 2 Info (Bottom) - Black */}
           <div className="flex justify-between items-center mt-4 sm:mt-2 mx-[21px]">
         <PlayerInfo 
           position="bottom"
-          username={blackPlayer.username}
+          username={isGuest && user && user.displayName ? user.displayName : blackPlayer.username}
           rating={blackPlayer.rating}
           clubAffiliation={blackPlayer.clubAffiliation}
           isGuest={blackPlayer.isGuest || false}
@@ -3219,7 +3855,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
           <div className="flex justify-between items-center mb-4 sm:mb-2 mx-[21px]">
             <PlayerInfo 
               position="top"
-              username={blackPlayer.username}
+              username={isGuest && user && user.displayName ? user.displayName : blackPlayer.username}
               rating={blackPlayer.rating}
               clubAffiliation={blackPlayer.clubAffiliation}
               isGuest={blackPlayer.isGuest || false}
@@ -3246,13 +3882,14 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
             onMoveHistoryChange={handleMoveHistoryChange}
             playerColor={playerColor}
             gameId={gameRoomId}
+            boardState={isViewingHistory ? boardState : getCurrentBoardState()}
           />
           
           {/* Player 1 Info (Bottom) - White */}
           <div className="flex justify-between items-center mt-4 sm:mt-2 mx-[21px]">
             <PlayerInfo 
               position="bottom"
-              username={whitePlayer.username}
+              username={isGuest && user && user.displayName ? user.displayName : whitePlayer.username}
               rating={whitePlayer.rating}
               clubAffiliation={whitePlayer.clubAffiliation}
               isGuest={whitePlayer.isGuest || false}
@@ -3278,6 +3915,7 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       {/* Debug logging moved to useEffect */}
       
       {/* Move Controls */}
+      <div className="move-controls-container relative">
       <MoveControls
         onBack={handleBackClick}
         onForward={handleForwardClick}
@@ -3287,14 +3925,44 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
         gameState={gameState}
         onResign={handleResignGame}
         onAbortGame={handleAbortGame}
-        moveHistory={moveHistory ? {
-          length: moveHistory.moves.length,
-          currentMoveIndex: moveHistory.currentMoveIndex
-        } : undefined}
+          moveHistory={{
+            length: moveHistory?.moves?.length || 0,
+            currentMoveIndex: moveHistory?.currentMoveIndex || -1
+          }}
         whitePlayer={whitePlayer}
         blackPlayer={blackPlayer}
         playerColor={playerColor}
       />
+        
+        {/* Live button to exit history mode */}
+        {isViewingHistory && (
+          <button 
+            onClick={() => {
+              // Prevent multiple clicks
+              if ((window as any).isExitingHistoryMode) {
+                console.log("[ChessBoardWrapper] Already exiting history mode, ignoring click");
+                return;
+              }
+              
+              // Set a flag to prevent multiple clicks
+              (window as any).isExitingHistoryMode = true;
+              
+              // Get current live board state from chess engine
+              const currentLiveBoardState = getCurrentBoardState();
+              exitHistoryMode(currentLiveBoardState);
+              
+              // Clear the flag after a short delay
+              setTimeout(() => {
+                (window as any).isExitingHistoryMode = false;
+              }, 500);
+            }}
+            className="absolute right-2 top-0 bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-3 rounded text-sm"
+            aria-label="Return to live game"
+          >
+            Live
+          </button>
+        )}
+      </div>
       
       {/* Disconnection Notification */}
       {opponentDisconnected && (
@@ -3306,4 +3974,6 @@ export default function ChessBoardWrapper({ playerColor, timeControl = '5+0', ga
       )}
     </div>
   );
-} 
+});
+
+export default ChessBoardWrapper; 

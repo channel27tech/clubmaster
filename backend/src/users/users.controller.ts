@@ -82,12 +82,23 @@ export class UsersController {
     if (!user) {
       throw new NotFoundException(`User profile with ID ${id} not found`);
     }
-    
+    // Determine if profile is under control
+    let displayName = user.displayName;
+    let photoURL = user.photoURL;
+    const now = new Date();
+    if (
+      user.profileControlledBy &&
+      user.profileControlExpiry &&
+      new Date(user.profileControlExpiry) > now
+    ) {
+      if (user.controlledNickname) displayName = user.controlledNickname;
+      if (user.controlledAvatarType) photoURL = user.controlledAvatarType; // If you need to map avatarType to a URL, do it here
+    }
     return {
       id: user.id,
-      displayName: user.displayName,
+      displayName,
       email: user.email,
-      photoURL: user.photoURL,
+      photoURL,
       rating: user.rating,
       stats: {
         gamesPlayed: user.gamesPlayed,

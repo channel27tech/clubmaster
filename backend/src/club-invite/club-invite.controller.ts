@@ -1,6 +1,6 @@
 import { Controller, Post, Body, Req, UseGuards } from '@nestjs/common';
 import { ClubInviteService } from './club-invite.service';
-import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
+import { FirebaseAuthGuard } from '../firebase/firebase-auth.guard';
 
 @Controller('club-invite')
 export class ClubInviteController {

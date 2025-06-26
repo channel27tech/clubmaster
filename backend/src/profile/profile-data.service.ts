@@ -52,6 +52,12 @@ export class ProfileDataService {
           'last_name',
           'location',
           'custom_photo_base64',
+          'profileControlledBy',
+          'profileControlExpiry',
+          'profileLocked',
+          'profileLockExpiry',
+          'controlledNickname',
+          'controlledAvatarType',
         ],
       });
 
@@ -82,6 +88,12 @@ export class ProfileDataService {
         location: user.location,
         custom_photo_base64: user.custom_photo_base64,
         effective_photo_url: effective_photo_url, // Combined field for UI to use
+        profileControlledBy: user.profileControlledBy,
+        profileControlExpiry: user.profileControlExpiry,
+        profileLocked: user.profileLocked,
+        profileLockExpiry: user.profileLockExpiry,
+        controlledNickname: user.controlledNickname,
+        controlledAvatarType: user.controlledAvatarType,
       };
     } catch (error) {
       if (error instanceof NotFoundException) {

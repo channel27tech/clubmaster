@@ -14,6 +14,7 @@ interface UseChessMultiplayerProps {
   onMoveHistoryUpdate: (moveHistory: MoveHistoryState) => void;
   onLastMoveUpdate: (move: { from: string, to: string } | null) => void;
   onPlayerTurnChange: (color: 'white' | 'black') => void;
+  isInReviewMode?: boolean;
 }
 
 interface UseChessMultiplayerResult {
@@ -33,7 +34,8 @@ export const useChessMultiplayer = ({
   onBoardStateUpdate,
   onMoveHistoryUpdate,
   onLastMoveUpdate,
-  onPlayerTurnChange
+  onPlayerTurnChange,
+  isInReviewMode
 }: UseChessMultiplayerProps): UseChessMultiplayerResult => {
   const { socket } = useSocket();
   
@@ -67,14 +69,14 @@ export const useChessMultiplayer = ({
     // Create a custom event to add the move to the queue
     const moveEvent = new CustomEvent('add_move_to_queue', {
       detail: {
-        from,
-        to,
-        player: piece.color,
-        notation,
-        isCapture,
-        promotion,
-        fen: currentFen,
-        gameId: gameId || socket.id
+      from,
+      to,
+      player: piece.color,
+      notation,
+      isCapture,
+      promotion,
+      fen: currentFen,
+      gameId: gameId || socket.id
       }
     });
     
@@ -155,10 +157,17 @@ export const useChessMultiplayer = ({
         // Determine the next player's turn based on who just moved
         const nextPlayerTurn = data.player === 'white' ? 'black' : 'white';
         
-        // Update all the state through callbacks
+        // Always update the move history to include the new move
         onMoveHistoryUpdate(newHistory);
-        onBoardStateUpdate(newBoardState);
-        onLastMoveUpdate({ from: data.from, to: data.to });
+        
+        // Only update the visible board state if we're not in review mode
+        if (!isInReviewMode) {
+          console.log('Not in review mode, updating visible board state');
+          onBoardStateUpdate(newBoardState);
+          onLastMoveUpdate({ from: data.from, to: data.to });
+        } else {
+          console.log('In review mode, preserving historical view (not updating visible board state)');
+        }
         
         // CRITICAL: Always update the player turn after a move
         console.log(`[TURN] Setting active player to ${nextPlayerTurn} after move from ${data.player}`);
@@ -173,9 +182,9 @@ export const useChessMultiplayer = ({
       console.warn('[WARN] No FEN provided in move_made event');
       requestSync('no_fen_provided');
     }
-  }, [moveHistory, onBoardStateUpdate, onMoveHistoryUpdate, onLastMoveUpdate, onPlayerTurnChange, requestSync]);
+  }, [moveHistory, onBoardStateUpdate, onMoveHistoryUpdate, onLastMoveUpdate, onPlayerTurnChange, requestSync, isInReviewMode]);
 
-  // Handle board sync from server
+    // Handle board sync from server
   const handleBoardSync = useCallback((data: { 
     fen: string, 
     gameId: string,
@@ -192,11 +201,18 @@ export const useChessMultiplayer = ({
       const isBoardStateChanged = JSON.stringify(newBoardState) !== JSON.stringify(boardState);
       
       if (isBoardStateChanged) {
-        // Update the board state only if it has changed
-        onBoardStateUpdate(newBoardState);
-        console.log('Board synchronized successfully with FEN:', data.fen);
+        // Only update the visible board state if we're not in review mode
+        if (!isInReviewMode) {
+          // Update the board state only if it has changed
+          console.log('Not in review mode, updating visible board state');
+          onBoardStateUpdate(newBoardState);
+          console.log('Board synchronized successfully with FEN:', data.fen);
+        } else {
+          console.log('In review mode, preserving historical view (not updating visible board state)');
+        }
         
-        // Create a new move history based on this state
+        // Always update the underlying move history
+        // This ensures that when the user exits review mode, they'll see the latest state
         const newHistory = {
           ...moveHistory,
           moves: moveHistory.moves,
@@ -219,7 +235,7 @@ export const useChessMultiplayer = ({
     } catch (error) {
       console.error('Failed to synchronize board state:', error);
     }
-  }, [gameId, moveHistory, boardState, onBoardStateUpdate, onMoveHistoryUpdate, onPlayerTurnChange]);
+  }, [gameId, moveHistory, boardState, onBoardStateUpdate, onMoveHistoryUpdate, onPlayerTurnChange, isInReviewMode]);
 
   // Handle board updates from server
   const handleBoardUpdate = useCallback((data: {
@@ -234,7 +250,7 @@ export const useChessMultiplayer = ({
     moveCount: number;
     isGameOver: boolean;
     timestamp: number;
-  }) => {
+    }) => {
     if (data.gameId !== gameId) return;
     
     console.log(`Received board_updated event for game ${data.gameId}, whiteTurn=${data.whiteTurn}`);
@@ -245,10 +261,10 @@ export const useChessMultiplayer = ({
       const activePlayer = data.whiteTurn ? 'white' : 'black';
       console.log(`[TURN] Setting active player to ${activePlayer} from board update`);
       onPlayerTurnChange(activePlayer);
-      
+            
       // Synchronize the board using the provided FEN
       const newBoardState = synchronizeBoardFromFen(data.fen);
-      
+            
       // Check if the board state has actually changed to prevent unnecessary updates
       const isBoardStateChanged = JSON.stringify(newBoardState) !== JSON.stringify(boardState);
       
@@ -258,12 +274,18 @@ export const useChessMultiplayer = ({
           from: data.lastMove.substring(0, 2),
           to: data.lastMove.substring(2, 4)
         } : null;
-        
-        // Update all the state through callbacks
-        onBoardStateUpdate(newBoardState);
-        if (lastMove) onLastMoveUpdate(lastMove);
-        
-        console.log('Successfully processed board update');
+              
+        // Only update the visible board state if we're not in review mode
+        if (!isInReviewMode) {
+          console.log('Not in review mode, updating visible board state');
+          // Update all the state through callbacks
+          onBoardStateUpdate(newBoardState);
+          if (lastMove) onLastMoveUpdate(lastMove);
+          
+          console.log('Successfully processed board update');
+        } else {
+          console.log('In review mode, preserving historical view (not updating visible board state)');
+        }
       } else {
         console.log('Board state unchanged, skipping board state update');
       }
@@ -271,12 +293,12 @@ export const useChessMultiplayer = ({
       console.error('Error processing board update:', error);
       requestSync('board_update_failed');
     }
-  }, [gameId, boardState, onBoardStateUpdate, onLastMoveUpdate, onPlayerTurnChange, requestSync]);
+  }, [gameId, boardState, onBoardStateUpdate, onLastMoveUpdate, onPlayerTurnChange, requestSync, isInReviewMode]);
   
   // Register socket event handlers
   useEffect(() => {
     if (!socket) return;
-    
+
     // Register socket event handlers
     socket.on('move_made', handleMoveFromServer);
     socket.on('board_sync', handleBoardSync);
@@ -287,7 +309,7 @@ export const useChessMultiplayer = ({
       console.log('[INIT] Requesting initial board sync for game:', gameId);
       requestSync('initial_connection');
     }
-    
+
     // Clean up event listeners on unmount
     return () => {
       socket.off('move_made', handleMoveFromServer);

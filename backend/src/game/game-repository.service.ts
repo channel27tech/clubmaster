@@ -141,7 +141,7 @@ export class GameRepositoryService {
     }
     this.logger.log(`[GameRepositoryService] Attempting to save game record to DB with customId: ${gameData.customId} and dbId: ${gameData.id}`);
     try {
-      const game = this.gamesRepository.create(gameData);
+    const game = this.gamesRepository.create(gameData);
       const savedGame = await this.gamesRepository.save(game);
       if (!savedGame) {
         this.logger.error(`[GameRepositoryService] ERROR saving game record to DB: save returned null/undefined`);
@@ -162,8 +162,76 @@ export class GameRepositoryService {
       return null;
     }
     
-    await this.gamesRepository.update(id, gameData);
-    return this.findOne(id);
+    this.logger.log(`Updating game ${id} with data: ${JSON.stringify(gameData)}`);
+    
+    try {
+      // Find the game first to make sure it exists and to log before/after values
+      const beforeGame = await this.findOne(id);
+      if (!beforeGame) {
+        this.logger.warn(`Game not found for update: ${id}`);
+        return null;
+      }
+      
+      // Log important changes for debugging
+      if (gameData.whitePlayerRatingAfter !== undefined || gameData.blackPlayerRatingAfter !== undefined) {
+        this.logger.log(`Rating update for game ${id}:`);
+        this.logger.log(`Before - White: ${beforeGame.whitePlayerRating}, Black: ${beforeGame.blackPlayerRating}`);
+        this.logger.log(`After  - White: ${gameData.whitePlayerRatingAfter || beforeGame.whitePlayerRatingAfter || beforeGame.whitePlayerRating}, Black: ${gameData.blackPlayerRatingAfter || beforeGame.blackPlayerRatingAfter || beforeGame.blackPlayerRating}`);
+      }
+      
+      // Perform the update
+      const result = await this.gamesRepository.update(id, gameData);
+      this.logger.log(`Update result for game ${id}: ${result.affected} row(s) affected`);
+      
+      if (result.affected === 0) {
+        this.logger.error(`Game update failed: No rows affected for game ID ${id}`);
+        
+        // Try direct update as a fallback
+        this.logger.log(`Attempting direct update via query builder as fallback`);
+        const directResult = await this.gamesRepository.createQueryBuilder()
+          .update(Game)
+          .set(gameData)
+          .where("id = :id", { id })
+          .execute();
+          
+        this.logger.log(`Direct update result: ${directResult.affected} row(s) affected`);
+        
+        if (directResult.affected === 0) {
+          this.logger.error(`Direct update also failed for game ${id}`);
+          return null;
+        }
+      }
+      
+      // Get the updated game
+      const afterGame = await this.findOne(id);
+      if (!afterGame) {
+        this.logger.warn(`Game not found after update: ${id}`);
+        return null;
+      }
+      
+      // Verify rating updates if applicable
+      if (gameData.whitePlayerRatingAfter !== undefined || gameData.blackPlayerRatingAfter !== undefined) {
+        this.logger.log(`Verified rating update for game ${id}:`);
+        this.logger.log(`White: ${beforeGame.whitePlayerRating} → ${afterGame.whitePlayerRatingAfter}`);
+        this.logger.log(`Black: ${beforeGame.blackPlayerRating} → ${afterGame.blackPlayerRatingAfter}`);
+        
+        // Check if ratings were actually updated
+        if (gameData.whitePlayerRatingAfter !== undefined && 
+            afterGame.whitePlayerRatingAfter !== gameData.whitePlayerRatingAfter) {
+          this.logger.error(`White player rating not updated correctly. Expected: ${gameData.whitePlayerRatingAfter}, Actual: ${afterGame.whitePlayerRatingAfter}`);
+        }
+        
+        if (gameData.blackPlayerRatingAfter !== undefined && 
+            afterGame.blackPlayerRatingAfter !== gameData.blackPlayerRatingAfter) {
+          this.logger.error(`Black player rating not updated correctly. Expected: ${gameData.blackPlayerRatingAfter}, Actual: ${afterGame.blackPlayerRatingAfter}`);
+        }
+      }
+      
+      return afterGame;
+    } catch (error) {
+      this.logger.error(`Error updating game ${id}: ${error.message}`, error.stack);
+      return null;
+    }
   }
 
   async endGame(
@@ -313,12 +381,57 @@ export class GameRepositoryService {
   // Find a game by customId (used for client-facing gameId)
   async findOneByCustomId(customId: string): Promise<Game | null> {
     try {
-      return await this.gamesRepository.findOne({
+      this.logger.log(`[findOneByCustomId] Looking up game with customId: ${customId}`);
+      
+      // First try direct match
+      let game = await this.gamesRepository.findOne({
         where: { customId },
         relations: ['whitePlayer', 'blackPlayer'],
       });
+      
+      if (game) {
+        this.logger.log(`[findOneByCustomId] Found game with exact customId match: ${game.id}`);
+        return game;
+      }
+      
+      // If direct match failed, try by UUID (some bet games might have UUID as customId)
+      if (this.isValidUuid(customId)) {
+        this.logger.log(`[findOneByCustomId] customId is a valid UUID, trying direct ID lookup`);
+        game = await this.gamesRepository.findOne({
+          where: { id: customId },
+          relations: ['whitePlayer', 'blackPlayer'],
+        });
+        
+        if (game) {
+          this.logger.log(`[findOneByCustomId] Found game by UUID: ${game.id}`);
+          return game;
+        }
+      }
+      
+      // If UUID lookup failed, try partial match (especially for bet games)
+      this.logger.log(`[findOneByCustomId] No exact match, trying partial match with pattern: %${customId}%`);
+      
+      // Try to find any game where customId contains the given ID
+      const gamesWithPartialMatch = await this.gamesRepository.createQueryBuilder('game')
+        .where('game.customId LIKE :pattern', { pattern: `%${customId}%` })
+        .leftJoinAndSelect('game.whitePlayer', 'whitePlayer')
+        .leftJoinAndSelect('game.blackPlayer', 'blackPlayer')
+        .getMany();
+      
+      if (gamesWithPartialMatch.length > 0) {
+        if (gamesWithPartialMatch.length > 1) {
+          this.logger.warn(`[findOneByCustomId] Found ${gamesWithPartialMatch.length} games with partial match for '${customId}'. Using the first one: ${gamesWithPartialMatch[0].id}`);
+        } else {
+          this.logger.log(`[findOneByCustomId] Found game with partial customId match: ${gamesWithPartialMatch[0].id}`);
+        }
+        return gamesWithPartialMatch[0];
+      }
+      
+      // If nothing found even with partial match
+      this.logger.warn(`[findOneByCustomId] No game found with customId ${customId} (exact or partial match)`);
+      return null;
     } catch (error) {
-      this.logger.error(`Error finding game with customId ${customId}: ${error.message}`);
+      this.logger.error(`[findOneByCustomId] Error finding game with customId ${customId}: ${error.message}`);
       return null;
     }
   }

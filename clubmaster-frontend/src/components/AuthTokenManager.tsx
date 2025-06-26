@@ -1,3 +1,6 @@
+'use client';
+
+
 import { useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import Cookies from 'js-cookie';
@@ -13,7 +16,7 @@ import Cookies from 'js-cookie';
  * Place this component near the root of your app (in _app.tsx or layout.tsx)
  */
 const AuthTokenManager: React.FC = () => {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, isGuest } = useAuth();
 
   useEffect(() => {
     const persistToken = async () => {
@@ -21,17 +24,32 @@ const AuthTokenManager: React.FC = () => {
         if (user) {
           console.log('Persisting auth token for user:', user.uid);
           
-          // Get fresh token
-          const token = await user.getIdToken(true);
-          
-          // Store in cookie (secure, http-only would be better but requires server-side code)
-          Cookies.set('authToken', token, { 
-            expires: 7, // 7 days
-            path: '/',
-            sameSite: 'strict'
-          });
-          
-          console.log('Auth token successfully stored in cookie');
+          // Handle guest users differently
+          if (isGuest) {
+            // For guest users, we create a special guest token
+            const guestToken = `guest_${user.uid}`;
+            
+            // Store in cookie
+            Cookies.set('authToken', guestToken, { 
+              expires: 1, // 1 day for guest users
+              path: '/',
+              sameSite: 'strict'
+            });
+            
+            console.log('Guest token stored in cookie');
+          } else {
+            // For regular users, get fresh token
+            const token = await user.getIdToken(true);
+            
+            // Store in cookie (secure, http-only would be better but requires server-side code)
+            Cookies.set('authToken', token, { 
+              expires: 7, // 7 days
+              path: '/',
+              sameSite: 'strict'
+            });
+            
+            console.log('Auth token successfully stored in cookie');
+          }
         } else if (!isLoading) {
           // If user is logged out and not in loading state, clear the cookie
           console.log('No user logged in, removing auth token cookie');
@@ -52,7 +70,7 @@ const AuthTokenManager: React.FC = () => {
     return () => {
       clearInterval(tokenRefreshInterval);
     };
-  }, [user, isLoading]);
+  }, [user, isLoading, isGuest]);
 
   // This is a utility component that doesn't render anything
   return null;

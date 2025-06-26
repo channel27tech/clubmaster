@@ -75,16 +75,24 @@ export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ child
     // Connect to WebSocket for real-time notifications
     const connectSocket = async () => {
       try {
-        // Get Firebase token
-        const token = await user.getIdToken();
+        // Get token: use guest token for anonymous users
+        let token: string;
+        if (user.isAnonymous) {
+          token = `guest_${user.uid}`;
+        } else {
+          token = await user.getIdToken();
+        }
         
         // Create socket connection
-        notificationsSocket = io(API_URL, {
+        notificationsSocket = io(`${API_URL}/notifications`, {
           path: '/socket.io', // Using default Socket.IO path
           reconnection: true,
           reconnectionAttempts: 5,
           reconnectionDelay: 1000,
           transports: ['websocket'],
+          query: {
+            userId: user.uid // Add the userId as a query parameter
+          },
           auth: {
             token // Send token in the initial connection
           }
@@ -94,7 +102,7 @@ export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ child
         notificationsSocket.on('connect', () => {
           console.log('Connected to notifications socket');
           
-          // Authenticate with the socket server using Firebase token
+          // Authenticate with the socket server using token
           notificationsSocket?.emit('authenticate', { token });
           console.log('Notifications socket connection established:', notificationsSocket);
         });
@@ -108,15 +116,15 @@ export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ child
         });
 
         // Listen for new notifications
-        notificationsSocket.on('notification', (notification: any) => {
+        notificationsSocket.on('new_notification', (notification: any) => {
           console.log('Received new notification:', notification);
           // Transform the notification to match our interface
           const newNotification: Notification = {
             id: notification.id,
             type: notification.type,
-            message: notification.data?.message || '',
+            message: notification.message || notification.data?.message || '',
             data: notification.data || {},
-            timestamp: new Date(notification.createdAt || Date.now()),
+            timestamp: new Date(notification.timestamp || Date.now()),
             senderUserId: notification.senderUserId,
             read: false
           };
@@ -149,7 +157,12 @@ export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ child
     const reconnectInterval = setInterval(async () => {
       if (socket && user) {
         try {
-          const token = await user.getIdToken(true); // Force refresh token
+          let token: string;
+          if (user.isAnonymous) {
+            token = `guest_${user.uid}`;
+          } else {
+            token = await user.getIdToken(true); // Force refresh token
+          }
           socket.emit('authenticate', { token });
         } catch (error) {
           console.error('Failed to refresh authentication token:', error);

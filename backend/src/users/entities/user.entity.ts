@@ -61,6 +61,13 @@ export class User {
 
   @Column({ nullable: true })
   profileLockExpiry?: Date;
+
+  @Column({ nullable: true })
+  controlledNickname?: string;
+
+  @Column({ nullable: true })
+  controlledAvatarType?: string;
+
   @Column({ nullable: true, type: 'text' })
   custom_photo_base64: string;
 

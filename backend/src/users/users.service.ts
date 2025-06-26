@@ -21,16 +21,39 @@ export class UsersService {
     return this.usersRepository.find();
   }
 
-  async findOne(id: string): Promise<User | null> {
-    this.logger.log(`Looking up user with ID: ${id}`);
+  /**
+   * Find a user by any ID (database UUID or Firebase UID)
+   * This method provides a unified way to look up users regardless of ID type
+   * 
+   * @param id Either a database UUID or Firebase UID
+   * @returns The user if found, null otherwise
+   */
+  async findUserByAnyId(id: string): Promise<User | null> {
+    this.logger.log(`Looking up user with any ID type: ${id}`);
     
     try {
-      // First try the standard lookup
-      const user = await this.usersRepository.findOne({ where: { id } });
+      // First try to find by database ID (most efficient)
+      if (this.isValidUuid(id)) {
+        this.logger.log(`Looking up user with database UUID: ${id}`);
+        const user = await this.usersRepository.findOne({ 
+          where: { id }
+        });
       
-      if (user) {
-        this.logger.log(`Found user by direct ID match: ${id}`);
-        return user;
+        if (user) {
+          this.logger.log(`Found user by database UUID: ${id}, rating: ${user.rating}`);
+          return user;
+        }
+      }
+      
+      // If not found or not a valid UUID, try Firebase UID
+      this.logger.log(`User not found by database ID or not a valid UUID. Trying Firebase UID: ${id}`);
+      const userByFirebaseUid = await this.usersRepository.findOne({ 
+        where: { firebaseUid: id }
+      });
+      
+      if (userByFirebaseUid) {
+        this.logger.log(`Found user by Firebase UID: ${id}, database ID: ${userByFirebaseUid.id}, rating: ${userByFirebaseUid.rating}`);
+        return userByFirebaseUid;
       }
       
       // If not found and the ID is non-standard (like a test ID), find first real user
@@ -52,15 +75,23 @@ export class UsersService {
         tempUser.displayName = id.includes('white') ? 'White Real Player' : 'Black Real Player';
         tempUser.email = `${tempUser.displayName.toLowerCase().replace(' ', '.')}@example.com`;
         tempUser.rating = id.includes('white') ? 1800 : 1750;
+        tempUser.gamesPlayed = 0;
+        tempUser.gamesWon = 0;
+        tempUser.gamesLost = 0;
+        tempUser.gamesDraw = 0;
         return tempUser;
       }
       
-      this.logger.warn(`User with ID ${id} not found`);
+      this.logger.warn(`User not found with either database ID or Firebase UID: ${id}`);
       return null;
     } catch (error) {
       this.logger.error(`Error finding user with ID ${id}: ${error.message}`);
       return null;
     }
+  }
+
+  async findOne(id: string): Promise<User | null> {
+    return this.findUserByAnyId(id);
   }
 
   async findByEmail(email: string): Promise<User | null> {
@@ -98,41 +129,180 @@ export class UsersService {
   }
 
   async updateRating(id: string, newRating: number): Promise<User> {
-    await this.usersRepository.update(id, { rating: newRating });
-    const updatedUser = await this.findOne(id);
+    this.logger.log(`Updating rating for user ID: ${id} to ${newRating}`);
     
-    if (!updatedUser) {
-      throw new NotFoundException(`User with ID ${id} not found`);
+    try {
+      // Use a transaction to ensure atomicity
+      return await this.dataSource.transaction(async (manager) => {
+        // Get the User repository from the transaction manager
+        const userRepo = manager.getRepository(User);
+        
+        // Find the user by any ID type (database UUID or Firebase UID)
+        const user = await this.findUserByAnyId(id);
+        
+        // If not found, throw error
+        if (!user) {
+          this.logger.error(`User not found with ID: ${id}`);
+          throw new NotFoundException(`User with ID ${id} not found during rating update`);
+        }
+        
+        this.logger.log(`Found user ${user.displayName || user.username || user.id} with current rating ${user.rating}, updating to ${newRating}`);
+        
+        // Update the rating within the transaction using the database ID
+        const updateResult = await userRepo.update(user.id, { rating: newRating });
+        
+        if (updateResult.affected === 0) {
+          this.logger.error(`Rating update failed: No rows affected for user ID ${user.id}`);
+          throw new Error(`Failed to update rating for user ${user.id}`);
+        }
+        
+        this.logger.log(`Rating update query affected ${updateResult.affected} rows`);
+        
+        // Fetch the updated user within the same transaction
+        const updatedUser = await userRepo.findOne({ where: { id: user.id } });
+      
+        if (!updatedUser) {
+          throw new NotFoundException(`User with ID ${user.id} not found after update`);
+        }
+        
+        // Verify the rating was actually updated
+        if (updatedUser.rating !== newRating) {
+          this.logger.error(`Rating update verification failed: Expected ${newRating}, got ${updatedUser.rating}`);
+          
+          // Try a direct update as a fallback
+          this.logger.log(`Attempting direct update as fallback`);
+          await this.dataSource.createQueryBuilder()
+            .update(User)
+            .set({ rating: newRating })
+            .where("id = :id", { id: user.id })
+            .execute();
+            
+          // Re-fetch to verify
+          const verifiedUser = await userRepo.findOne({ where: { id: user.id } });
+          if (verifiedUser && verifiedUser.rating === newRating) {
+            this.logger.log(`Direct update successful: Rating updated to ${verifiedUser.rating}`);
+            return verifiedUser;
+          } else {
+            this.logger.error(`Direct update failed or verification failed`);
+            throw new Error(`Failed to update rating for user ${user.id} after multiple attempts`);
+          }
+        }
+        
+        this.logger.log(`Successfully updated rating for user ${updatedUser.displayName || updatedUser.username || updatedUser.id} from ${user.rating} to ${updatedUser.rating}`);
+      
+        return updatedUser;
+      });
+    } catch (error) {
+      this.logger.error(`Error in updateRating: ${error.message}`, error.stack);
+      throw error;
     }
-    
-    return updatedUser;
+  }
+  
+  // Helper method to validate UUID format
+  private isValidUuid(id: string): boolean {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    return uuidRegex.test(id);
   }
 
   async incrementGameStats(id: string, result: 'win' | 'loss' | 'draw'): Promise<User> {
-    const user = await this.findOne(id);
+    this.logger.log(`Incrementing game stats for user ID: ${id} with result: ${result}`);
     
-    if (!user) {
-      this.logger.warn(`Attempted to update stats for non-existent user: ${id}`);
-      throw new NotFoundException(`User with ID ${id} not found`);
+    try {
+      // Use a transaction to ensure atomicity
+      return await this.dataSource.transaction(async (manager) => {
+        // Get the User repository from the transaction manager
+        const userRepo = manager.getRepository(User);
+        
+        // Find the user by any ID type (database UUID or Firebase UID)
+        const user = await this.findUserByAnyId(id);
+        
+        // If not found, throw error
+        if (!user) {
+          this.logger.warn(`Attempted to update stats for non-existent user. Not found with ID: ${id}`);
+          throw new NotFoundException(`User with ID ${id} not found`);
+        }
+        
+        this.logger.log(`Found user ${user.displayName || user.username || user.id} with current stats: wins=${user.gamesWon}, losses=${user.gamesLost}, draws=${user.gamesDraw}, total=${user.gamesPlayed}`);
+        
+        // Create update data object
+        const updateData: Partial<User> = {
+          gamesPlayed: user.gamesPlayed + 1
+        };
+      
+        // Increment appropriate counter
+        switch (result) {
+          case 'win':
+            updateData.gamesWon = user.gamesWon + 1;
+            break;
+          case 'loss':
+            updateData.gamesLost = user.gamesLost + 1;
+            break;
+          case 'draw':
+            updateData.gamesDraw = user.gamesDraw + 1;
+            break;
+        }
+      
+        // Update the user within the transaction using the database ID
+        const updateResult = await userRepo.update(user.id, updateData);
+        
+        if (updateResult.affected === 0) {
+          this.logger.error(`Game stats update failed: No rows affected for user ID ${user.id}`);
+          throw new Error(`Failed to update game stats for user ${user.id}`);
+        }
+        
+        this.logger.log(`Game stats update query affected ${updateResult.affected} rows`);
+        
+        // Fetch the updated user within the same transaction
+        const updatedUser = await userRepo.findOne({ where: { id: user.id } });
+        
+        if (!updatedUser) {
+          throw new NotFoundException(`User with ID ${user.id} not found after update`);
+        }
+        
+        // Verify the stats were actually updated
+        let statsUpdated = false;
+        switch (result) {
+          case 'win':
+            statsUpdated = updatedUser.gamesWon === user.gamesWon + 1;
+            break;
+          case 'loss':
+            statsUpdated = updatedUser.gamesLost === user.gamesLost + 1;
+            break;
+          case 'draw':
+            statsUpdated = updatedUser.gamesDraw === user.gamesDraw + 1;
+            break;
+        }
+        
+        if (!statsUpdated || updatedUser.gamesPlayed !== user.gamesPlayed + 1) {
+          this.logger.error(`Game stats update verification failed`);
+          
+          // Try a direct update as a fallback
+          this.logger.log(`Attempting direct update as fallback`);
+          await this.dataSource.createQueryBuilder()
+            .update(User)
+            .set(updateData)
+            .where("id = :id", { id: user.id })
+            .execute();
+            
+          // Re-fetch to verify
+          const verifiedUser = await userRepo.findOne({ where: { id: user.id } });
+          if (verifiedUser) {
+            this.logger.log(`Direct update completed. New stats: wins=${verifiedUser.gamesWon}, losses=${verifiedUser.gamesLost}, draws=${verifiedUser.gamesDraw}, total=${verifiedUser.gamesPlayed}`);
+            return verifiedUser;
+          } else {
+            this.logger.error(`Direct update failed or verification failed`);
+            throw new Error(`Failed to update game stats for user ${user.id} after multiple attempts`);
+          }
+        }
+        
+        this.logger.log(`Successfully updated game stats for user ${updatedUser.displayName || updatedUser.username || updatedUser.id}. New stats: wins=${updatedUser.gamesWon}, losses=${updatedUser.gamesLost}, draws=${updatedUser.gamesDraw}, total=${updatedUser.gamesPlayed}`);
+        
+        return updatedUser;
+      });
+    } catch (error) {
+      this.logger.error(`Error in incrementGameStats: ${error.message}`, error.stack);
+      throw error;
     }
-    
-    // Increment appropriate counter
-    switch (result) {
-      case 'win':
-        user.gamesWon += 1;
-        break;
-      case 'loss':
-        user.gamesLost += 1;
-        break;
-      case 'draw':
-        user.gamesDraw += 1;
-        break;
-    }
-    
-    // Always increment total games played
-    user.gamesPlayed += 1;
-    
-    return this.usersRepository.save(user);
   }
 
   async findAllExcludingClubMembers(exclude: boolean, currentUserId: string): Promise<User[]> {
@@ -368,6 +538,60 @@ export class UsersService {
       return updatedUser;
     } catch (error) {
       this.logger.error(`Error setting profile lock: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Clear the profile control status for a user
+   * @param userId The ID of the user whose profile control to clear
+   */
+  async clearProfileControl(userId: string): Promise<User> {
+    try {
+      const updateData = {
+        profileControlledBy: undefined,
+        profileControlExpiry: undefined,
+        controlledNickname: undefined,
+        controlledAvatarType: undefined
+      };
+      
+      await this.usersRepository.update(userId, updateData);
+      const updatedUser = await this.findOne(userId);
+      
+      if (!updatedUser) {
+        throw new NotFoundException(`User with ID ${userId} not found`);
+      }
+      
+      this.logger.log(`Profile control cleared for user ${userId}`);
+      return updatedUser;
+    } catch (error) {
+      this.logger.error(`Error clearing profile control: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Clear the profile lock status for a user
+   * @param userId The ID of the user whose profile lock to clear
+   */
+  async clearProfileLock(userId: string): Promise<User> {
+    try {
+      const updateData = {
+        profileLocked: false,
+        profileLockExpiry: undefined
+      };
+      
+      await this.usersRepository.update(userId, updateData);
+      const updatedUser = await this.findOne(userId);
+      
+      if (!updatedUser) {
+        throw new NotFoundException(`User with ID ${userId} not found`);
+      }
+      
+      this.logger.log(`Profile lock cleared for user ${userId}`);
+      return updatedUser;
+    } catch (error) {
+      this.logger.error(`Error clearing profile lock: ${error.message}`);
       throw error;
     }
   }

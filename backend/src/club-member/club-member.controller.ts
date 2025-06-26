@@ -1,11 +1,12 @@
 import { Controller, Post, Body, Req, UsePipes, ValidationPipe, Get, Query, UseGuards, UnauthorizedException, NotFoundException, Param, Request, ForbiddenException, Patch } from '@nestjs/common';
 import { ClubMemberService } from './club-member.service';
 import { JoinClubDto } from './dto/join-club.dto';
-import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
+import { FirebaseAuthGuard } from '../firebase/firebase-auth.guard';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../users/entities/user.entity';
 import { Club } from '../club/club.entity';
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 
 // Extend the Express Request interface to include our firebaseUser property
 interface FirebaseRequest extends Request {

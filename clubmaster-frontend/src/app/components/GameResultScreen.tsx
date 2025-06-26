@@ -367,10 +367,10 @@ const GameResultScreen: React.FC<GameResultScreenProps> = ({
       
       default:
         // Generic fallbacks based on result
-        if (result === 'win') return 'YOU WON';
-        if (result === 'loss') return 'YOU LOST';
-        if (result === 'draw') return 'DRAW';
-        return 'GAME COMPLETE';
+    if (result === 'win') return 'YOU WON';
+    if (result === 'loss') return 'YOU LOST';
+    if (result === 'draw') return 'DRAW';
+    return 'GAME COMPLETE';
     }
   };
 
@@ -421,6 +421,12 @@ const GameResultScreen: React.FC<GameResultScreenProps> = ({
     secondaryText: getSecondaryText(),
     scoreDisplay: getScoreDisplay()
   });
+
+  // Add a helper function for truncating usernames
+  const truncateName = (name: string, maxLength = 8) => {
+    if (!name) return '';
+    return name.length > maxLength ? name.slice(0, maxLength) + '...' : name;
+  };
 
   return (
     <div className="fixed inset-0 flex items-center justify-center z-50">
@@ -482,7 +488,7 @@ const GameResultScreen: React.FC<GameResultScreenProps> = ({
                     </div>
                   )}
                   <p className="text-[#F9F3DD] text-sm font-semibold">
-                    {playerName || 'Player'}
+                    {truncateName(playerName) || 'Player'}
                   </p>
                 </div>
 
@@ -516,7 +522,7 @@ const GameResultScreen: React.FC<GameResultScreenProps> = ({
                     </div>
                   )}
                   <p className="text-[#F9F3DD] text-sm font-semibold">
-                    {opponentName || 'Opponent'}
+                    {truncateName(opponentName) || 'Opponent'}
                   </p>
                 </div>
               </div>

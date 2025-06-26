@@ -57,8 +57,16 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   // Function to sync Firebase user with backend
   const syncUserWithBackend = async (firebaseUser: User) => {
     try {
-      // Get Firebase ID token
-      const token = await firebaseUser.getIdToken();
+      // Get Firebase ID token or create guest token
+      let token;
+      
+      if (firebaseUser.isAnonymous) {
+        // For guest users, create a special token format
+        token = `guest_${firebaseUser.uid}`;
+      } else {
+        // For regular users, get the Firebase ID token
+        token = await firebaseUser.getIdToken();
+      }
       
       // Prepare user data payload
       const payload = {
@@ -71,6 +79,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       
       // Check if backend is available
       try {
+        // For guest users, skip backend sync/profile fetch to avoid 401
+        if (firebaseUser.isAnonymous) {
+          return;
+        }
         // Send to backend with a timeout of 5 seconds
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -133,9 +145,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           // Sync user data with backend
           await syncUserWithBackend(firebaseUser);
 
-          // Get and set the ID token
+          // Get and set the ID token or guest token
+          if (firebaseUser.isAnonymous) {
+            setIdToken(`guest_${firebaseUser.uid}`);
+          } else {
           const token = await firebaseUser.getIdToken();
           setIdToken(token);
+          }
         }
         
         setUser(firebaseUser);
@@ -306,6 +322,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const continueAsGuest = async (): Promise<UserCredential> => {
     setError(null);
     try {
+      // If already signed in as guest, reuse the user
+      if (auth.currentUser && auth.currentUser.isAnonymous) {
+        setUser(auth.currentUser);
+        setIdToken(`guest_${auth.currentUser.uid}`);
+        // Return a mock UserCredential object for compatibility
+        return { user: auth.currentUser } as UserCredential;
+      }
       const result = await signInAnonymously(auth);
       
       // Generate a random guest name
@@ -330,9 +353,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       // Explicitly sync with backend
       await syncUserWithBackend(result.user);
 
-      // Get and set the ID token after guest login
-      const token = await result.user.getIdToken();
-      setIdToken(token);
+      // Set a guest token
+      const guestToken = `guest_${result.user.uid}`;
+      setIdToken(guestToken);
 
       return result;
     } catch (error: any) {
@@ -352,6 +375,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       // Clear the ID token on logout
       setIdToken(null);
+      
+      // Redirect to login dashboard
+      if (typeof window !== 'undefined') {
+        window.location.href = '/login';
+      }
     } catch (error: any) {
       setError("Failed to log out. Please try again.");
       throw error;
@@ -375,9 +403,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   
   useEffect(() => {
     if (user) {
-      user.getIdToken().then(async (token) => {
+      // Handle guest users differently
+      if (isGuest) {
+        // For guest users, create a special token format
+        const guestToken = `guest_${user.uid}`;
+        
         try {
-          await axios.post(
+          axios.post(
             `${API_URL}/users/sync`,
             {
               displayName: user.displayName,
@@ -387,17 +419,39 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
               isAnonymous: user.isAnonymous,
             },
             {
-              headers: { Authorization: `Bearer ${token}` },
+              headers: { Authorization: `Bearer ${guestToken}` },
             }
           );
-          // No setIsAuthenticated needed
+        } catch (err) {
+          // If sync fails, just log the error but don't log out
+          // We'll continue with the login flow anyway
+        }
+      } else {
+        // For regular users, get the Firebase ID token
+        user.getIdToken().then(async (token) => {
+          try {
+            await axios.post(
+              `${API_URL}/users/sync`,
+              {
+                displayName: user.displayName,
+                email: user.email,
+                photoURL: user.photoURL,
+                phoneNumber: user.phoneNumber,
+                isAnonymous: user.isAnonymous,
+              },
+              {
+                headers: { Authorization: `Bearer ${token}` },
+              }
+            );
+            // No setIsAuthenticated needed
         } catch (err) {
           // If sync fails, just log the error but don't log out
           // We'll continue with the login flow anyway
         }
       });
+      }
     }
-  }, [user]);
+  }, [user, isGuest]);
   
   return (
     <AuthContext.Provider value={value}>

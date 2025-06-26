@@ -1,16 +1,16 @@
 import { Module, Global, OnModuleInit, Logger } from '@nestjs/common';
 import * as admin from 'firebase-admin';
-
+ 
 @Global()
 @Module({
   providers: [],
   exports: [],
 })
-
+ 
 // This is the module that is used to initialize the Firebase Admin SDK
 export class FirebaseModule implements OnModuleInit {
   private readonly logger = new Logger(FirebaseModule.name);
-
+ 
   onModuleInit() {
     // Initialize Firebase Admin SDK if not already initialized
     if (!admin.apps.length) {
@@ -28,4 +28,4 @@ export class FirebaseModule implements OnModuleInit {
       }
     }
   }
-} 
+}

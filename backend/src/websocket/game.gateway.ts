@@ -214,66 +214,207 @@ export class GameGateway
   }
 
   /**
-   * Handle a client connecting to an existing game
+   * Handle a client entering a game
    */
   @SubscribeMessage('enter_game')
-  handleEnterGame(client: Socket, payload: { gameId: string }): { event: string; data: any } {
-    this.logger.log(`Client ${client.id} is entering game ${payload.gameId}`);
-    
-    // Join the game room for all real-time updates
-    client.join(payload.gameId);
-    
-    // Get the game state
-    const game = this.gameManagerService.getGame(payload.gameId);
-    
-    // Track player activity if user auth is available
-    if (client.handshake?.auth?.uid) {
-      this.userActivityService.registerInGame(client.handshake.auth.uid, payload.gameId);
-    }
-    
-    if (!game) {
-      this.logger.warn(`Game ${payload.gameId} not found in gameManagerService - Games registry might be broken.`);
-      
-      // Log currently active games for debugging
-      const activeGames = this.gameManagerService.getAllActiveGames();
-      this.logger.log(`Currently registered games: ${activeGames.length}`);
-      activeGames.forEach(g => {
-        this.logger.log(`Game ID: ${g.gameId}, White: ${g.whitePlayer.socketId}, Black: ${g.blackPlayer.socketId}`);
-      });
-      
-      return {
-        event: 'enterGameResponse',
-        data: { success: false, message: 'Game not found' },
-      };
-    }
-    
-    this.logger.log(`Game ${payload.gameId} found - White: ${game.whitePlayer.socketId}, Black: ${game.blackPlayer.socketId}`);
-    
-    // Initialize or get the chess instance for this game
-    let chessInstance = this.chessInstances.get(payload.gameId);
-    if (!chessInstance) {
-      this.logger.log(`Creating new chess instance for game ${payload.gameId} during enter_game`);
-      chessInstance = new Chess(); // Start with a fresh instance with correct move counts
-      
-      // If the game already has moves, rebuild the state from the move history
-      if (game.chessInstance && game.chessInstance.history().length > 0) {
-        const moveHistory = game.chessInstance.history();
-        this.logger.log(`Rebuilding chess instance from ${moveHistory.length} moves in game history`);
+  handleEnterGame(client: Socket, payload: { gameId: string, isBetGame?: boolean, betType?: string }): { event: string; data: any } {
+    // Log all data for debugging
+    this.logger.log(
+      `Client ${client.id} is entering game ${payload.gameId}` +
+      `${payload.isBetGame ? ' (bet game, type: ' + payload.betType + ')' : ''}`
+    );
+
+    try {
+      // Validate the game ID
+      if (!payload.gameId) {
+        this.logger.warn(`Client ${client.id} attempted to enter a game without providing a gameId`);
+        return {
+          event: 'enterGameResponse',
+          data: { success: false, message: 'No gameId provided' },
+        };
+      }
+
+      // Get the game from the game manager
+      const game = this.gameManagerService.getGame(payload.gameId);
+
+      if (!game) {
+        this.logger.warn(`Client ${client.id} attempted to enter non-existent game ${payload.gameId}`);
         
-        // Apply each move from the move history
-        let allMovesApplied = true;
-        for (let i = 0; i < moveHistory.length; i++) {
+        // Log active games for debugging
+        const activeGames = this.gameManagerService.getAllActiveGames();
+        this.logger.log(`Active game IDs: [${activeGames.map(g => g.gameId).join(', ')}]`);
+        
+        return {
+          event: 'enterGameResponse',
+          data: { success: false, message: 'Game not found' },
+        };
+      }
+
+      // Add the client to the game room
+      client.join(payload.gameId);
+      this.logger.log(`Client ${client.id} joined game room ${payload.gameId}`);
+
+      // Emit full game state to the joining client for sync
+      client.emit('gameStateUpdate', {
+        fen: game.chessInstance.fen(),
+        turn: game.whiteTurn ? 'w' : 'b',
+        whiteTime: game.whiteTimeRemaining,
+        blackTime: game.blackTimeRemaining,
+        pgn: game.pgn,
+        isFirstMove: game.isFirstMove,
+        started: game.started,
+        ended: game.ended,
+        whitePlayer: game.whitePlayer,
+        blackPlayer: game.blackPlayer,
+        gameId: game.gameId,
+        gameMode: game.gameMode,
+        timeControl: game.timeControl,
+        rated: game.rated,
+      });
+
+      // If this is a bet game, log detailed player information for debugging
+      if (payload.isBetGame) {
+        this.logger.log(`Bet game ${payload.gameId} details - White: ${game.whitePlayer.userId} (${game.whitePlayer.username}), ` +
+          `Black: ${game.blackPlayer.userId} (${game.blackPlayer.username}), ` +
+          `Type: ${payload.betType}`);
+      }
+
+      // Try to identify which player this client is (white or black)
+      let isWhitePlayer = false;
+      let isBlackPlayer = false;
+      let playerSocketChanged = false;
+      
+      // Check if this client is associated with a player by socket ID
+      if (client.id === game.whitePlayer.socketId) {
+        isWhitePlayer = true;
+        this.logger.log(`Client ${client.id} identified as white player by socket ID`);
+      } else if (client.id === game.blackPlayer.socketId) {
+        isBlackPlayer = true;
+        this.logger.log(`Client ${client.id} identified as black player by socket ID`);
+      }
+
+      // If not identified by socket ID, try to identify by user ID from authentication
+      if (!isWhitePlayer && !isBlackPlayer && client.handshake?.auth?.uid) {
+        const userId = client.handshake.auth.uid;
+        
+        if (game.whitePlayer.userId === userId) {
+          isWhitePlayer = true;
+          // Update the socket ID since it's changed
+          game.whitePlayer.socketId = client.id;
+          playerSocketChanged = true;
+          this.logger.log(`Client ${client.id} identified as white player by user ID ${userId} (socket updated)`);
+        } else if (game.blackPlayer.userId === userId) {
+          isBlackPlayer = true;
+          // Update the socket ID since it's changed
+          game.blackPlayer.socketId = client.id;
+          playerSocketChanged = true;
+          this.logger.log(`Client ${client.id} identified as black player by user ID ${userId} (socket updated)`);
+        }
+      }
+      
+      // Special handling for bet games - ensure player is connected to the game
+      if (payload.isBetGame && !isWhitePlayer && !isBlackPlayer && client.handshake?.auth?.uid) {
+        const userId = client.handshake.auth.uid;
+        
+        this.logger.log(`Bet game player not identified by socket. UserID=${userId}, ` + 
+                       `White=${game.whitePlayer.userId}, Black=${game.blackPlayer.userId}`);
+        
+        // Try to verify if player is part of this game but socket ID didn't match
+        if (userId === game.whitePlayer.userId || userId === game.blackPlayer.userId) {
+          // Update the player's socket ID since they reconnected with a new socket
+          if (userId === game.whitePlayer.userId) {
+            game.whitePlayer.socketId = client.id;
+            isWhitePlayer = true;
+            playerSocketChanged = true;
+            this.logger.log(`Updated white player socket ID to ${client.id} for bet game ${payload.gameId}`);
+          } else {
+            game.blackPlayer.socketId = client.id;
+            isBlackPlayer = true; 
+            playerSocketChanged = true;
+            this.logger.log(`Updated black player socket ID to ${client.id} for bet game ${payload.gameId}`);
+          }
+        }
+      }
+
+      // Log warning if we couldn't identify the player
+      if (!isWhitePlayer && !isBlackPlayer) {
+        this.logger.warn(`Client ${client.id} entered game ${payload.gameId} but is not identified as either player. ` +
+                        `WhitePlayer: ${game.whitePlayer.socketId} (${game.whitePlayer.userId}), ` + 
+                        `BlackPlayer: ${game.blackPlayer.socketId} (${game.blackPlayer.userId})`);
+      } else if (playerSocketChanged) {
+        // If the socket ID changed, ensure the player is reconnected properly
+        this.logger.log(`Player socket ID updated for game ${payload.gameId}`);
+        
+        // Add player to socket room again to ensure they receive messages
+        client.join(payload.gameId);
+        
+        // Maybe also notify the opponent that the player has reconnected
+        if (isWhitePlayer) {
+          this.server.to(game.blackPlayer.socketId).emit('player_reconnected', {
+            gameId: payload.gameId,
+            player: 'white',
+            username: game.whitePlayer.username
+          });
+        } else {
+          this.server.to(game.whitePlayer.socketId).emit('player_reconnected', {
+            gameId: payload.gameId,
+            player: 'black',
+            username: game.blackPlayer.username
+          });
+        }
+      }
+
+      // Get or create a chess instance for this game
+      let chessInstance = this.chessInstances.get(payload.gameId);
+      if (!chessInstance) {
+        // No chess instance for this game yet, create a new one
+        this.logger.log(`Creating new chess instance for game ${payload.gameId}`);
+        chessInstance = new Chess();
+
+        // If the game has a PGN, load it
+        if (game.pgn && typeof game.pgn === 'string' && game.pgn.length > 0) {
           try {
-            const result = chessInstance.move(moveHistory[i]);
-            if (!result) {
-              this.logger.error(`Failed to apply move ${i+1} during rebuild: ${moveHistory[i]}`);
+            chessInstance.loadPgn(game.pgn);
+            this.logger.log(`Loaded PGN for game ${payload.gameId}: ${game.pgn}`);
+          } catch (error) {
+            this.logger.error(`Error loading PGN for game ${payload.gameId}: ${error.message}`);
+            // Continue with a fresh instance
+            chessInstance = new Chess();
+          }
+        }
+
+        // Store the chess instance
+        this.chessInstances.set(payload.gameId, chessInstance);
+        game.chessInstance = chessInstance;
+      } else {
+        // We have a chess instance, check if it needs rebuilding from move history
+        this.logger.log(`Using existing chess instance for game ${payload.gameId}`);
+        // Check for move history
+        const moveHistory = chessInstance.history();
+        let allMovesApplied = true;
+        
+        if (moveHistory && moveHistory.length > 0) {
+          // Rebuild the board from move history to ensure consistency
+          // This is important for proper position validation
+          this.logger.log(`Rebuilding board from move history (${moveHistory.length} moves)`);
+          
+          // Create a fresh chess instance
+          chessInstance = new Chess();
+          
+          // Apply all moves from history
+          for (let i = 0; i < moveHistory.length; i++) {
+            try {
+              const moveResult = chessInstance.move(moveHistory[i]);
+              if (!moveResult) {
+                this.logger.warn(`Failed to apply move ${i + 1}: ${moveHistory[i]}`);
+                allMovesApplied = false;
+                break;
+              }
+            } catch (error) {
+              this.logger.error(`Error applying move ${i + 1}: ${error.message}`);
               allMovesApplied = false;
               break;
             }
-          } catch (moveError) {
-            this.logger.error(`Error applying move ${i+1} during rebuild: ${moveHistory[i]}. Error: ${moveError instanceof Error ? moveError.message : 'Unknown error'}`);
-            allMovesApplied = false;
-            break;
           }
         }
         
@@ -289,64 +430,73 @@ export class GameGateway
           // Update the game's chess instance with our rebuilt instance
           game.chessInstance = chessInstance;
         }
-      } else if (game.chessInstance) {
-        // If the game has a chess instance but no moves, just use it
-        chessInstance = game.chessInstance;
       }
       
       // Store the chess instance for future use
       this.chessInstances.set(payload.gameId, chessInstance);
-    }
-    
-    // Send initial game state that explicitly includes hasWhiteMoved status
-    client.emit('game_state', {
-      gameId: payload.gameId,
-      hasWhiteMoved: !game.isFirstMove, // Inverse of isFirstMove
-      isWhiteTurn: game.whiteTurn,
-      hasStarted: game.started,
-      isGameOver: game.ended,
-      players: {
-        white: {
-          username: game.whitePlayer.username,
-          rating: game.whitePlayer.rating,
-          isGuest: game.whitePlayer.isGuest,
-        },
-        black: {
-          username: game.blackPlayer.username,
-          rating: game.blackPlayer.rating,
-          isGuest: game.blackPlayer.isGuest,
-        },
-      },
-    });
-    
-    // Send timeControl to client
-    client.emit('time_control', {
-      gameId: payload.gameId,
-      timeControl: game.timeControl,
-    });
-    
-    // Send board_updated event with move history as primary source of truth
-    if (chessInstance && chessInstance.history().length > 0) {
-      const moveHistory = chessInstance.history();
-      const verboseMoveHistory = chessInstance.history({ verbose: true });
       
-      client.emit('board_updated', {
+      // Send initial game state that explicitly includes hasWhiteMoved status
+      client.emit('game_state', {
         gameId: payload.gameId,
-        moveHistory: moveHistory, // Primary source of truth
-        verboseMoveHistory: verboseMoveHistory, // Detailed move information
-        lastMove: moveHistory.length > 0 ? moveHistory[moveHistory.length - 1] : null,
-        fen: chessInstance.fen(), // Current FEN (for validation)
-        pgn: chessInstance.pgn(), // PGN representation
-        whiteTurn: game.whiteTurn, // Whose turn it is
-        moveCount: moveHistory.length, // Total number of moves
-        timestamp: Date.now() // Timestamp for synchronization
+        hasWhiteMoved: !game.isFirstMove, // Inverse of isFirstMove
+        isWhiteTurn: game.whiteTurn,
+        hasStarted: game.started,
+        isGameOver: game.ended,
+        players: {
+          white: {
+            username: game.whitePlayer.username,
+            rating: game.whitePlayer.rating,
+            isGuest: game.whitePlayer.isGuest,
+            photoURL: game.whitePlayer.photoURL || null,
+            userId: game.whitePlayer.userId,
+          },
+          black: {
+            username: game.blackPlayer.username,
+            rating: game.blackPlayer.rating,
+            isGuest: game.blackPlayer.isGuest,
+            photoURL: game.blackPlayer.photoURL || null,
+            userId: game.blackPlayer.userId,
+          },
+        },
+        isBetGame: payload.isBetGame || false,
+        betType: payload.betType || null,
       });
+      
+      // Send timeControl to client
+      client.emit('time_control', {
+        gameId: payload.gameId,
+        timeControl: game.timeControl,
+      });
+      
+      // Send board_updated event with move history as primary source of truth
+      if (chessInstance && chessInstance.history().length > 0) {
+        const moveHistory = chessInstance.history();
+        const verboseMoveHistory = chessInstance.history({ verbose: true });
+        
+        client.emit('board_updated', {
+          gameId: payload.gameId,
+          moveHistory: moveHistory, // Primary source of truth
+          verboseMoveHistory: verboseMoveHistory, // Detailed move information
+          lastMove: moveHistory.length > 0 ? moveHistory[moveHistory.length - 1] : null,
+          fen: chessInstance.fen(), // Current FEN (for validation)
+          pgn: chessInstance.pgn(), // PGN representation
+          whiteTurn: game.whiteTurn, // Whose turn it is
+          moveCount: moveHistory.length, // Total number of moves
+          timestamp: Date.now() // Timestamp for synchronization
+        });
+      }
+      
+      return {
+        event: 'enterGameResponse',
+        data: { success: true, message: 'Joined game room' },
+      };
+    } catch (error) {
+      this.logger.error(`Error in handleEnterGame for client ${client.id}: ${error.message}`, error.stack);
+      return {
+        event: 'enterGameResponse',
+        data: { success: false, message: `Server error: ${error.message}` },
+      };
     }
-    
-    return {
-      event: 'enterGameResponse',
-      data: { success: true, message: 'Joined game room' },
-    };
   }
 
   /**
@@ -1178,7 +1328,7 @@ export class GameGateway
       game.lastMoveTime = new Date();
       
       // Apply the move
-      let moveResult;
+        let moveResult;
       try {
         if (payload.san) {
           moveResult = game.chessInstance.move(payload.san);
@@ -1189,17 +1339,17 @@ export class GameGateway
             promotion: payload.promotion ? payload.promotion.toLowerCase() as any : undefined
           });
         }
-        
-        if (!moveResult) {
+          
+          if (!moveResult) {
           this.logger.error(`Invalid move attempted in game ${payload.gameId}`);
-          return {
-            event: 'moveMadeResponse',
-            data: {
-              success: false,
+            return {
+              event: 'moveMadeResponse',
+              data: {
+                success: false,
               message: 'Invalid move',
-            },
-          };
-        }
+              },
+            };
+          }
       } catch (moveError) {
         this.logger.error(`Error applying move in game ${payload.gameId}: ${moveError.message}`);
         return {
@@ -1254,15 +1404,15 @@ export class GameGateway
         await this.gameManagerService.checkGameEnd(payload.gameId, this.server);
       }
       
-      return {
-        event: 'moveMadeResponse',
-        data: {
-          success: true,
+        return {
+          event: 'moveMadeResponse',
+          data: {
+            success: true,
           move: moveResult
         },
       };
       
-    } catch (error) {
+        } catch (error) {
       this.logger.error(`Error in handleMoveMade: ${error.message}`);
       return {
         event: 'moveMadeResponse',
@@ -1779,16 +1929,27 @@ export class GameGateway
               rating: game.whitePlayer.rating || 1500,
               ratingChange: whiteRatingChange,
               // Use optional chaining to safely access photoURL if it exists
-              photoURL: game.whitePlayer.photoURL || null
+              photoURL: game.whitePlayer.photoURL || null,
+              userId: game.whitePlayer.userId
             },
             blackPlayer: {
               username: game.blackPlayer.username,
               rating: game.blackPlayer.rating || 1500,
               ratingChange: blackRatingChange,
               // Use optional chaining to safely access photoURL if it exists
-              photoURL: game.blackPlayer.photoURL || null
+              photoURL: game.blackPlayer.photoURL || null,
+              userId: game.blackPlayer.userId
             },
-            finalFEN: chessInstance.fen()
+            finalFEN: chessInstance.fen(),
+            // Include these fields to match the GameResultData interface
+            whiteRatingChange: { 
+              ratingChange: whiteRatingChange,
+              newRating: (game.whitePlayer.rating || 1500) + whiteRatingChange
+            },
+            blackRatingChange: {
+              ratingChange: blackRatingChange, 
+              newRating: (game.blackPlayer.rating || 1500) + blackRatingChange
+            }
           };
           
           // Log the payload we're about to emit

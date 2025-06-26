@@ -21,6 +21,13 @@ export interface UserProfile {
   custom_photo_base64?: string | null;
   joinDate?: string | Date | null;
   friends?: Array<{ id: string; displayName: string; photoURL?: string }>;
+  // Bet profile control fields
+  profileControlledBy?: string | null;
+  profileControlExpiry?: string | Date | null;
+  profileLocked?: boolean;
+  profileLockExpiry?: string | Date | null;
+  controlledNickname?: string | null;
+  controlledAvatarType?: string | null;
 }
 
 /**

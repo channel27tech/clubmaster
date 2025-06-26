@@ -1,9 +1,12 @@
-import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef, NotFoundException } from '@nestjs/common';
 import { v4 as uuidv4 } from 'uuid';
 import { Server, Socket } from 'socket.io';
 import { BetChallenge, BetStatus, BetType, BetChallengeResponse, BetResult } from './bet.model';
 import { UsersService } from '../users/users.service';
 import { GameManagerService } from '../game/game-manager.service';
+import { User } from '../users/entities/user.entity';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 
 // Define the missing interface
 export interface CreateBetChallengeOptions {
@@ -19,7 +22,7 @@ export interface CreateBetChallengeOptions {
 @Injectable()
 //
 export class BetService {
-  private readonly logger = new Logger(BetService.name);
+  private readonly logger = new Logger('BET');
   private activeBetChallenges: Map<string, BetChallenge> = new Map();
   private betsByGameId: Map<string, string> = new Map(); // Maps gameId to betId
   private readonly CHALLENGE_EXPIRY_MS = 60000; // 1 minute before challenge expires
@@ -30,6 +33,8 @@ export class BetService {
     private readonly usersService: UsersService,
     @Inject(forwardRef(() => GameManagerService))
     private readonly gameManagerService: GameManagerService,
+    @InjectDataSource()
+    private readonly dataSource: DataSource,
   ) {}
 
   /**
@@ -200,44 +205,36 @@ export class BetService {
     winnerId: string | null,
     isDraw: boolean
   ): Promise<BetResult | null> {
-
-    // Get the bet ID from the game ID
     const betId = this.betsByGameId.get(gameId);
     if (!betId) {
-      this.logger.warn(`No bet found for game ${gameId}`);
+      this.logger.log(`No bet found for game ${gameId}`);
       return null;
     }
 
-    // Get the bet challenge
     const challenge = this.activeBetChallenges.get(betId);
     if (!challenge) {
-      this.logger.warn(`Bet challenge ${betId} not found for game result`);
+      this.logger.log(`Bet challenge ${betId} not found for game result`);
       return null;
     }
 
-    // Ensure challenge.challengerId and challenge.opponentId are populated DB User IDs
     if (!challenge.challengerId || (challenge.opponentId === undefined && !isDraw)) {
-      this.logger.error(`[BetService] Bet challenge ${betId} is missing critical player IDs (challengerId: ${challenge.challengerId}, opponentId: ${challenge.opponentId})`);
+      this.logger.error(`Bet challenge ${betId} is missing critical player IDs (challengerId: ${challenge.challengerId}, opponentId: ${challenge.opponentId})`);
       return null;
     }
 
-    // Check if the bet challenge is accepted
     if (challenge.status !== BetStatus.ACCEPTED) {
       this.logger.warn(`Cannot record result for bet ${betId} with status ${challenge.status}`);
       return null;
     }
 
-    // Update bet status
     challenge.status = BetStatus.COMPLETED;
     challenge.winnerId = winnerId === null ? undefined : winnerId;
-    
-    // Determine loser if there is a winner
+
     let loserId: string | undefined = undefined;
     if (winnerId && !isDraw) {
       loserId = winnerId === challenge.challengerId ? challenge.opponentId : challenge.challengerId;
     }
 
-    // Create bet result object
     const now = new Date();
     const betResult: BetResult = {
       betId,
@@ -245,34 +242,28 @@ export class BetService {
       winnerId: winnerId === null ? undefined : winnerId,
       loserId,
       isDraw,
-      betType: challenge.betType, // Include betType in the core result
+      betType: challenge.betType,
     };
 
-    // Apply appropriate effects based on bet type
     if (!isDraw && winnerId) {
       switch (challenge.betType) {
         case BetType.RATING_STAKE:
           if (challenge.stakeAmount && loserId) {
             betResult.ratingChange = challenge.stakeAmount;
-            // Apply rating changes via Users service
             await this.applyRatingStake(winnerId, loserId, challenge.stakeAmount);
           }
           break;
-          
         case BetType.PROFILE_CONTROL:
           if (loserId) {
             const controlExpiry = new Date(now.getTime() + this.PROFILE_CONTROL_DURATION_MS);
             betResult.profileControlExpiry = controlExpiry;
-            // Apply profile control via Users service
             await this.applyProfileControl(winnerId, loserId, controlExpiry);
           }
           break;
-          
         case BetType.PROFILE_LOCK:
           if (loserId) {
             const lockExpiry = new Date(now.getTime() + this.PROFILE_CONTROL_DURATION_MS);
             betResult.profileLockExpiry = lockExpiry;
-            // Apply profile lock via Users service
             await this.applyProfileLock(winnerId, loserId, lockExpiry);
           }
           break;
@@ -281,50 +272,60 @@ export class BetService {
 
     challenge.resultApplied = true;
     this.logger.log(`Recorded result for bet ${betId} - Winner DB ID: ${winnerId}, Loser DB ID: ${loserId}, Draw: ${isDraw}`);
-    
-    // Notify both players of the bet result
+
     const server = this.gameManagerService.getServer();
     if (server) {
-      // Fetch user display names for personalization
-      const challengerUser = await this.usersService.findOne(challenge.challengerId);
-      const opponentUser = challenge.opponentId ? await this.usersService.findOne(challenge.opponentId) : null;
-      const challengerName = challengerUser?.displayName || challengerUser?.username || 'Challenger';
-      const opponentName = opponentUser?.displayName || opponentUser?.username || 'Opponent';
+      try {
+        const challengerUser = await this.usersService.findOne(challenge.challengerId) as User | null;
+        if (!challengerUser) {
+          this.logger.error(`Challenger user ${challenge.challengerId} not found`);
+          return betResult;
+        }
 
-      // Prepare payload for the Challenger
-      const payloadForChallenger = {
-        ...betResult,
-        isWinner: betResult.winnerId === challenge.challengerId,
-        opponentName: opponentName, // For challenger, opponent is opponentUser
-        perspective: 'challenger',
-        // Pass IDs that might be useful for UI, like opponent's DB ID
-        opponentDbId: challenge.opponentId,
-      };
-      
-      // Emit to challenger's user room (using DB User ID)
-      this.logger.log(`[BetService] Emitting bet_result to Challenger's room: ${challenge.challengerId}`, {
-        payload: payloadForChallenger
-      });
-      server.to(challenge.challengerId).emit('bet_result', payloadForChallenger);
+        let opponentUser: User | null = null;
+        if (challenge.opponentId) {
+          opponentUser = await this.usersService.findOne(challenge.opponentId) as User | null;
+          if (!opponentUser) {
+            opponentUser = await this.usersService.findByFirebaseUid(challenge.opponentId) as User | null;
+          }
+        }
 
-      // Prepare payload for the Opponent (if opponentId exists)
-      if (challenge.opponentId) {
-        const payloadForOpponent = {
+        if (challenge.opponentId && !opponentUser) {
+          this.logger.error(`Opponent user not found by either UUID or Firebase UID: ${challenge.opponentId}`);
+          return betResult;
+        }
+
+        const challengerName = challengerUser.displayName || challengerUser.username || 'Challenger';
+        const opponentName = opponentUser?.displayName || opponentUser?.username || 'Opponent';
+
+        const payloadForChallenger = {
           ...betResult,
-          isWinner: betResult.winnerId === challenge.opponentId,
-          opponentName: challengerName, // For opponent, opponent is challengerUser
-          perspective: 'opponent',
-          // Pass IDs that might be useful for UI
-          opponentDbId: challenge.challengerId,
+          isWinner: betResult.winnerId === challengerUser.id,
+          opponentName,
+          perspective: 'challenger',
+          opponentDbId: opponentUser?.id,
         };
-        
-        // Emit to opponent's user room (using DB User ID)
-        this.logger.log(`[BetService] Emitting bet_result to Opponent's room: ${challenge.opponentId}`, {
-          payload: payloadForOpponent
-        });
-        server.to(challenge.opponentId).emit('bet_result', payloadForOpponent);
-      } else {
-        this.logger.warn(`[BetService] No opponentId found for bet ${betId}. Cannot emit bet_result to opponent.`);
+
+        this.logger.log(`Emitting bet_result to Challenger's room: ${challengerUser.id}`);
+        server.to(challengerUser.id).emit('bet_result', payloadForChallenger);
+
+        if (opponentUser) {
+          const payloadForOpponent = {
+            ...betResult,
+            isWinner: betResult.winnerId === opponentUser.id,
+            opponentName: challengerName,
+            perspective: 'opponent',
+            opponentDbId: challengerUser.id,
+          };
+
+          this.logger.log(`Emitting bet_result to Opponent's room: ${opponentUser.id}`);
+          server.to(opponentUser.id).emit('bet_result', payloadForOpponent);
+        } else {
+          this.logger.warn(`No opponent user found for bet ${betId}. Cannot emit bet_result to opponent.`);
+        }
+      } catch (error) {
+        this.logger.error(`Error emitting bet results: ${error.message}`);
+        return betResult;
       }
     }
 
@@ -396,6 +397,8 @@ export class BetService {
     try {
       // Set profile control flag on loser's account
       await this.usersService.setProfileControl(loserId, winnerId, expiryDate);
+      // Always clear profile control for the winner (controller)
+      await this.usersService.clearProfileControl(winnerId);
       this.logger.log(`Applied profile control: ${winnerId} controls ${loserId}'s profile until ${expiryDate}`);
     } catch (error) {
       this.logger.error(`Error applying profile control: ${error.message}`);
@@ -417,5 +420,199 @@ export class BetService {
     } catch (error) {
       this.logger.error(`Error applying profile lock: ${error.message}`);
     }
+  }
+
+  // --- RESTORE PUBLIC API FOR CONTROLLER ---
+
+  async applyProfileControlChanges(
+    targetUserId: string,
+    nickname?: string,
+    avatarType?: string
+  ): Promise<User> {
+    const targetUser = await this.usersService.findOne(targetUserId);
+    if (!targetUser) throw new NotFoundException(`User with ID ${targetUserId} not found`);
+    const updateData: Partial<User> = {};
+    if (nickname) updateData.controlledNickname = nickname;
+    if (avatarType) updateData.controlledAvatarType = avatarType;
+    return this.usersService.update(targetUserId, updateData);
+  }
+
+  async getProfileControlDetails(userId: string): Promise<any> {
+    const user = await this.usersService.findOne(userId);
+    if (!user) throw new NotFoundException(`User with ID ${userId} not found`);
+    let isControlled = false;
+    let controlledBy: string | undefined = undefined;
+    let expiresAt: Date | undefined = undefined;
+    if (user.profileControlledBy && user.profileControlExpiry) {
+      const expiryDate = new Date(user.profileControlExpiry);
+      if (new Date() < expiryDate) {
+        isControlled = true;
+        controlledBy = user.profileControlledBy;
+        expiresAt = expiryDate;
+      } else {
+        await this.usersService.clearProfileControl(userId);
+      }
+    }
+    return {
+      isControlled,
+      controlledBy,
+      expiresAt,
+      controlledNickname: user.controlledNickname,
+      controlledAvatarType: user.controlledAvatarType
+    };
+  }
+
+  /**
+   * Checks if the controller (by UUID) has control over the target user's profile
+   * @param controllerId UUID of the controlling user (not Firebase UID)
+   * @param targetUserId UUID of the target user
+   */
+  async checkProfileControl(controllerId: string, targetUserId: string): Promise<boolean> {
+    this.logger.log(`[DEBUG] checkProfileControl: controllerId=${controllerId}, targetUserId=${targetUserId}`);
+    const user = await this.usersService.findOne(targetUserId);
+    this.logger.log(`[DEBUG] Target user: ${user ? JSON.stringify({profileControlledBy: user.profileControlledBy, profileControlExpiry: user.profileControlExpiry}) : 'not found'}`);
+    if (!user) return false;
+    if (!user.profileControlledBy || !user.profileControlExpiry) return false;
+    const expiryDate = new Date(user.profileControlExpiry);
+    // Both controllerId and profileControlledBy are UUIDs
+    if (user.profileControlledBy === controllerId && new Date() < expiryDate) {
+      this.logger.log('[DEBUG] checkProfileControl: Permission granted');
+      return true;
+    }
+    this.logger.log('[DEBUG] checkProfileControl: Permission denied');
+    return false;
+  }
+
+  async checkProfileLockStatus(userId: string): Promise<{ isLocked: boolean; expiresAt: Date | undefined }> {
+    const user = await this.usersService.findOne(userId);
+    if (!user) throw new NotFoundException(`User with ID ${userId} not found`);
+    let isLocked = false;
+    let expiresAt: Date | undefined = undefined;
+    if (user.profileLocked && user.profileLockExpiry) {
+      const expiryDate = new Date(user.profileLockExpiry);
+      if (new Date() < expiryDate) {
+        isLocked = true;
+        expiresAt = expiryDate;
+      } else {
+        await this.usersService.clearProfileLock(userId);
+      }
+    }
+    return { isLocked, expiresAt };
+  }
+
+  /**
+   * Atomically accept a bet challenge, create a game, and link them using a DB transaction
+   */
+  async acceptBetChallengeWithTransaction({
+    challenge,
+    responderId,
+    responderSocket,
+    usersService,
+    gameManagerService,
+    gameRepositoryService,
+    dataSource,
+  }: {
+    challenge: BetChallenge,
+    responderId: string,
+    responderSocket: any,
+    usersService: any,
+    gameManagerService: any,
+    gameRepositoryService: any,
+    dataSource: any,
+  }): Promise<{ game: any; dbGame: any }> {
+    return await dataSource.transaction(async (manager) => {
+      challenge.status = BetStatus.ACCEPTED;
+      const responder = await usersService.findOne(responderId);
+      if (!responder) throw new Error(`Responder not found: ${responderId}`);
+      const challenger = await usersService.findOne(challenge.challengerId);
+      if (!challenger) throw new Error(`Challenger not found: ${challenge.challengerId}`);
+
+      let whitePlayerId, blackPlayerId;
+      if (challenge.preferredSide === 'white') {
+        whitePlayerId = challenge.challengerId;
+        blackPlayerId = responderId;
+      } else if (challenge.preferredSide === 'black') {
+        whitePlayerId = responderId;
+        blackPlayerId = challenge.challengerId;
+      } else {
+        const isChallengerWhite = Math.random() < 0.5;
+        whitePlayerId = isChallengerWhite ? challenge.challengerId : responderId;
+        blackPlayerId = isChallengerWhite ? responderId : challenge.challengerId;
+      }
+
+      const whitePlayer = {
+        socketId: whitePlayerId === challenge.challengerId ? challenge.challengerSocketId : responderSocket.id,
+        userId: whitePlayerId,
+        username: whitePlayerId === challenge.challengerId ? challenger.displayName || challenger.username || 'Challenger' : responder.displayName || responder.username || 'Opponent',
+        rating: whitePlayerId === challenge.challengerId ? challenger.rating || 1500 : responder.rating || 1500,
+        isGuest: false,
+        connected: true,
+        photoURL: whitePlayerId === challenge.challengerId ? challenger.photoURL : responder.photoURL
+      };
+      const blackPlayer = {
+        socketId: blackPlayerId === challenge.challengerId ? challenge.challengerSocketId : responderSocket.id,
+        userId: blackPlayerId,
+        username: blackPlayerId === challenge.challengerId ? challenger.displayName || challenger.username || 'Challenger' : responder.displayName || responder.username || 'Opponent',
+        rating: blackPlayerId === challenge.challengerId ? challenger.rating || 1500 : responder.rating || 1500,
+        isGuest: false,
+        connected: true,
+        photoURL: blackPlayerId === challenge.challengerId ? challenger.photoURL : responder.photoURL
+      };
+
+      // 1. Insert the game into the database with a unique ID
+      let dbGame;
+      let gameId: string;
+      let attempts = 0;
+      const maxAttempts = 3;
+      const { v4: uuidv4 } = await import('uuid');
+      while (attempts < maxAttempts) {
+        gameId = uuidv4();
+        try {
+          dbGame = await manager.getRepository('Game').save({
+            id: gameId,
+            customId: gameId,
+            whitePlayerId: whitePlayer.userId,
+            blackPlayerId: blackPlayer.userId,
+            status: 'ongoing',
+            rated: true,
+            whitePlayerRating: whitePlayer.rating,
+            blackPlayerRating: blackPlayer.rating,
+            timeControl: challenge.timeControl,
+            pgn: '',
+            moves: [],
+            totalMoves: 0,
+            endReason: `bet:${challenge.betType}:${challenge.id}`,
+            betChallengeId: challenge.id,
+          });
+          break; // Success
+        } catch (err) {
+          if (err.code === '23505' || (err.message && err.message.includes('duplicate key value'))) {
+            attempts++;
+            continue; // Try again with a new UUID
+          } else {
+            throw err;
+          }
+        }
+      }
+      if (!dbGame || !dbGame.id) {
+        throw new Error('Failed to create game in database after multiple attempts');
+      }
+
+      // 2. Now create the in-memory game with the same ID
+      const game = gameManagerService.createGame(
+        dbGame.id,
+        whitePlayer,
+        blackPlayer,
+        challenge.gameMode,
+        challenge.timeControl,
+        true
+      );
+      gameManagerService.startGame(dbGame.id);
+
+      challenge.gameId = dbGame.id;
+      this.betsByGameId.set(dbGame.id, challenge.id);
+
+      return { game, dbGame };
+    });
   }
 }
