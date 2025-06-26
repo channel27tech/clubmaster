@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import { useParams } from "next/navigation";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Header from "@/app/components/Header";
 import MoveTracker from "@/app/components/MoveTracker";
 import ChessBoardWrapper from "@/app/components/ChessBoardWrapper";
+import BetGameWrapper from "@/app/components/BetGameWrapper";
 import { useSocket } from "@/context/SocketContext";
+import { useBetGame } from "@/context/BetGameContext";
 
 // Helper function to validate and format time control
 const validateTimeControl = (timeControlStr: string | null): string => {
@@ -37,17 +39,40 @@ const validateTimeControl = (timeControlStr: string | null): string => {
 };
 
 export default function GamePage() {
+  const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
   const gameId = Array.isArray(params.gameId) ? params.gameId[0] : params.gameId as string;
+  const { socket } = useSocket();
   const [playerColor, setPlayerColor] = useState<'white' | 'black' | null>(null);
   const [timeControl, setTimeControl] = useState<string>('5+0');
-  const { socket } = useSocket();
   const [displayedSanMoves, setDisplayedSanMoves] = useState<string[]>([]);
+  const { setGameResult } = useBetGame();
+
+  // Check if this is a bet game
+  const isBetGame = searchParams.get('isBetGame') === 'true';
+  const betType = searchParams.get('betType');
+  
+  // Track socket connection attempts
+  const connectionAttemptRef = useRef(0);
 
   const handleSanMoveListUpdate = useCallback((moves: string[]) => {
     console.log(`[GamePage] handleSanMoveListUpdate called. Moves length: ${moves.length}`);
     setDisplayedSanMoves(moves);
   }, []);
+
+  const handleGameEnd = useCallback((isWinner: boolean, isDraw: boolean) => {
+    console.log(`[GamePage] Game ended: Winner: ${isWinner}, Draw: ${isDraw}`);
+    
+    // Check if this is a bet game before updating the bet game context
+    if (isBetGame && betType) {
+      console.log('[GamePage] Updating bet game result:', { isWinner, isDraw });
+      setGameResult(isWinner);
+    } else {
+      console.log('[GamePage] Regular game ended, not updating bet game result');
+      // For regular games, we'll let the ChessBoardWrapper handle the redirection
+    }
+  }, [setGameResult, isBetGame, betType]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -78,23 +103,72 @@ export default function GamePage() {
         };
         window.localStorage.setItem('chess_engine_state', JSON.stringify(chessState));
       }
+    }
+  }, [gameId]);
+
+  useEffect(() => {
+    // Log game information for debugging
+    console.log('[GamePage] Game information:', {
+      gameId,
+      isBetGame,
+      betType,
+      playerColor: localStorage.getItem('playerColor'),
+      timeControl: localStorage.getItem('timeControl')
+    });
+    
+    // Debug helper to log all socket events
+    if (socket) {
+      const originalEmit = socket.emit;
+      socket.emit = function(...args) {
+        console.log(`[Socket Debug] Emitting event: ${args[0]}`, args[1] || {});
+        return originalEmit.apply(this, args);
+      };
+    }
+    
       // Emit enter_game when the component mounts to get initial game state
       if (socket && gameId) {
         setTimeout(() => {
           if (socket.connected) {
+          // Include isBetGame flag in the payload for better tracking
             socket.emit('enter_game', { 
               gameId, 
               requestInitialState: true, 
-              timestamp: Date.now() 
-            });
+            timestamp: Date.now(),
+            isBetGame: isBetGame ? true : false,
+            betType: betType || null
+          });
+          
+          // Explicitly join game room
+          socket.emit('join_game_room', { 
+            gameId,
+            isBetGame: isBetGame ? true : false
+          });
+          
+          // Log connection attempt
+          connectionAttemptRef.current += 1;
+          console.log(`[GamePage] Sent enter_game and join_game_room for ${gameId}. Attempt: ${connectionAttemptRef.current}`);
           } else {
+          console.warn('[GamePage] Socket not connected, will retry in 1 second');
             setTimeout(() => {
               if (socket.connected) {
+              // Include isBetGame flag in the payload for better tracking
                 socket.emit('enter_game', { 
                   gameId, 
                   requestInitialState: true, 
-                  timestamp: Date.now() 
-                });
+                timestamp: Date.now(),
+                isBetGame: isBetGame ? true : false,
+                betType: betType || null
+              });
+              
+              // Explicitly join game room
+              socket.emit('join_game_room', { 
+                gameId,
+                isBetGame: isBetGame ? true : false
+              });
+              
+              // Log connection attempt
+              connectionAttemptRef.current += 1;
+              console.log(`[GamePage] Sent enter_game and join_game_room for ${gameId}. Attempt: ${connectionAttemptRef.current}`);
               } else {
                 console.error('[GamePage] Socket still not connected on fallback, cannot emit enter_game.');
               }
@@ -105,23 +179,33 @@ export default function GamePage() {
         if (!socket) console.error('[GamePage] Socket is null in useEffect for enter_game.');
         if (!gameId) console.error('[GamePage] gameId is not available in useEffect for enter_game.');
       }
+    
+    return () => {
+      // Restore original emit function
+      if (socket) {
+        const originalEmit = socket.emit;
+        socket.emit = originalEmit;
+      }
     }
-  }, [gameId, socket]);
+  }, [gameId, socket, isBetGame, betType]);
 
   return (
-    <div className="flex flex-col min-h-screen bg-[#4A7C59]">
-      <Header />
-      <MoveTracker moves={displayedSanMoves} />
-      <div className="flex-grow flex flex-col items-center justify-center">
-        <div className="w-full max-w-md mx-auto">
-          <ChessBoardWrapper 
-            playerColor={playerColor} 
-            timeControl={timeControl}
-            gameId={gameId}
-            onSanMoveListChange={handleSanMoveListUpdate}
-          />
+    <BetGameWrapper gameId={gameId} onGameEnd={handleGameEnd}>
+      <div className="flex flex-col min-h-screen bg-[#4A7C59]">
+        <Header />
+        <MoveTracker moves={displayedSanMoves} />
+        <div className="flex-grow flex flex-col items-center justify-center">
+          <div className="w-full max-w-md mx-auto">
+            <ChessBoardWrapper 
+              playerColor={playerColor} 
+              timeControl={timeControl}
+              gameId={gameId}
+              onSanMoveListChange={handleSanMoveListUpdate}
+              onGameEnd={handleGameEnd}
+            />
+          </div>
         </div>
       </div>
-    </div>
+    </BetGameWrapper>
   );
 } 

@@ -37,7 +37,6 @@ export interface GameResultResponse {
  */
 export async function fetchGamePlayers(gameId: string): Promise<GamePlayersResponse> {
   // Use the full game ID as received - the backend will handle the extraction if needed
-  // DO NOT transform or truncate the gameId here!
   console.log('Using full gameId for API call:', gameId);
 
   // Use the same port as the socket service (3001) instead of trying multiple ports
@@ -53,10 +52,15 @@ export async function fetchGamePlayers(gameId: string): Promise<GamePlayersRespo
     
     const token = await user.getIdToken();
     
-    console.log(`Connecting to backend API at ${apiUrl}...`);
+    console.log(`[fetchGamePlayers] Connecting to backend API at ${apiUrl} for game ${gameId}...`);
     
     // Ensure gameId is properly encoded for URL
     const encodedGameId = encodeURIComponent(gameId);
+    
+    // Add a debug log to help diagnose if this is a bet game
+    const isBetGame = localStorage.getItem('isBetGame') === 'true';
+    const betType = localStorage.getItem('betType');
+    console.log(`[fetchGamePlayers] Game context: isBetGame=${isBetGame}, betType=${betType}`);
     
     const response = await fetch(`${apiUrl}/games/${encodedGameId}/players`, {
       method: 'GET',
@@ -68,22 +72,53 @@ export async function fetchGamePlayers(gameId: string): Promise<GamePlayersRespo
     });
 
     if (!response.ok) {
-      console.error(`API responded with status: ${response.status} ${response.statusText}`);
+      console.error(`[fetchGamePlayers] API responded with status: ${response.status} ${response.statusText}`);
+      
+      // For bet games, we'll create temporary data as a fallback
+      if (isBetGame) {
+        console.log('[fetchGamePlayers] Using fallback temporary player data for bet game');
+        
+        const opponentId = localStorage.getItem('opponentId');
+        const opponentName = localStorage.getItem('opponentName');
+        const myId = user.uid;
+        const myName = user.displayName || 'You';
+        
+        // Generate temporary player data
+        return {
+          whitePlayer: {
+            username: myName,
+            rating: 1500,
+            photoURL: user.photoURL,
+            userId: myId,
+            isGuest: false,
+            capturedPieces: []
+          },
+          blackPlayer: {
+            username: opponentName || 'Opponent',
+            rating: 1500,
+            photoURL: null,
+            userId: opponentId || 'unknown',
+            isGuest: false,
+            capturedPieces: []
+          }
+        };
+      }
+      
       throw new Error(`API error: ${response.status} ${response.statusText}`);
     }
 
     // If we get here, we successfully connected
-    console.log(`Successfully connected to backend API at ${apiUrl}`);
+    console.log(`[fetchGamePlayers] Successfully connected to backend API at ${apiUrl}`);
     const data = await response.json();
     
     // Validate the response data
     if (!data || !data.whitePlayer || !data.blackPlayer) {
-      console.error('Invalid player data received:', data);
+      console.error('[fetchGamePlayers] Invalid player data received:', data);
       throw new Error('Invalid player data format received from server');
     }
     
     // Log the successful data retrieval
-    console.log('Player data retrieved successfully:', {
+    console.log('[fetchGamePlayers] Player data retrieved successfully:', {
       white: `${data.whitePlayer.username} (${data.whitePlayer.rating})`,
       black: `${data.blackPlayer.username} (${data.blackPlayer.rating})`
     });
@@ -92,12 +127,12 @@ export async function fetchGamePlayers(gameId: string): Promise<GamePlayersRespo
   } catch (error) {
     // Provide more detailed error information for debugging
     if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
-      console.error('Network error when connecting to the backend server. Please check if the backend is running and accessible.');
-      console.error(`Attempted to connect to: ${apiUrl}/games/${gameId}/players`);
-      console.error('Original error:', error);
+      console.error('[fetchGamePlayers] Network error when connecting to the backend server. Please check if the backend is running and accessible.');
+      console.error(`[fetchGamePlayers] Attempted to connect to: ${apiUrl}/games/${gameId}/players`);
+      console.error('[fetchGamePlayers] Original error:', error);
       throw new Error(`Network error: Unable to connect to the backend server at ${apiUrl}. Please check if the server is running.`);
     } else {
-      console.error('Error fetching game players:', error);
+      console.error('[fetchGamePlayers] Error fetching game players:', error);
       throw error;
     }
   }
