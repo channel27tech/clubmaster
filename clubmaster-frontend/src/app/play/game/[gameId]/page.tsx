@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
 import Header from "@/app/components/Header";
 import MoveTracker from "@/app/components/MoveTracker";
-import ChessBoardWrapper from "@/app/components/ChessBoardWrapper";
+import ChessBoardWrapper, { ChessBoardWrapperRef } from "@/app/components/ChessBoardWrapper";
 import { useSocket } from "@/context/SocketContext";
+import MoveControls from "@/app/components/MoveControls";
 
 // Helper function to validate and format time control
 const validateTimeControl = (timeControlStr: string | null): string => {
@@ -43,11 +44,44 @@ export default function GamePage() {
   const [timeControl, setTimeControl] = useState<string>('5+0');
   const { socket } = useSocket();
   const [displayedSanMoves, setDisplayedSanMoves] = useState<string[]>([]);
+  const [currentMoveIndex, setCurrentMoveIndex] = useState<number>(-1);
+  
+  // Reference to the ChessBoardWrapper component
+  const chessBoardRef = useRef<ChessBoardWrapperRef>(null);
+  // Add a ref to track the previous move index to prevent unnecessary updates
+  const previousMoveIndexRef = useRef<number>(-1);
 
   const handleSanMoveListUpdate = useCallback((moves: string[]) => {
     console.log(`[GamePage] handleSanMoveListUpdate called. Moves length: ${moves.length}`);
     setDisplayedSanMoves(moves);
-  }, []);
+    // When moves are updated, set the current move index to the latest move
+    // Only update if the moves array has actually changed
+    if (moves.length !== displayedSanMoves.length) {
+      setCurrentMoveIndex(moves.length - 1);
+      previousMoveIndexRef.current = moves.length - 1;
+    }
+  }, [displayedSanMoves.length]);
+
+  // Handle move click in the MoveTracker
+  const handleMoveClick = useCallback((moveIndex: number) => {
+    // Only update if the move index has actually changed
+    if (moveIndex !== currentMoveIndex && moveIndex !== previousMoveIndexRef.current) {
+      setCurrentMoveIndex(moveIndex);
+      previousMoveIndexRef.current = moveIndex;
+      if (chessBoardRef.current) {
+        chessBoardRef.current.jumpToMove(moveIndex);
+      }
+    }
+  }, [currentMoveIndex]);
+
+  // Handler for move index changes from ChessBoardWrapper
+  const handleMoveIndexChange = useCallback((newIndex: number) => {
+    // Only update if the move index has actually changed
+    if (newIndex !== currentMoveIndex && newIndex !== previousMoveIndexRef.current) {
+      setCurrentMoveIndex(newIndex);
+      previousMoveIndexRef.current = newIndex;
+    }
+  }, [currentMoveIndex]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -111,14 +145,30 @@ export default function GamePage() {
   return (
     <div className="flex flex-col min-h-screen bg-[#4A7C59]">
       <Header />
-      <MoveTracker moves={displayedSanMoves} />
+      <MoveTracker 
+        moves={displayedSanMoves} 
+        currentMoveIndex={currentMoveIndex}
+        onMoveClick={handleMoveClick}
+      />
+      <MoveControls
+        onBack={() => handleMoveClick(currentMoveIndex - 1)}
+        onForward={() => handleMoveClick(currentMoveIndex + 1)}
+        canGoBack={currentMoveIndex >= 0}
+        canGoForward={currentMoveIndex < displayedSanMoves.length - 1}
+        gameId={gameId}
+        gameState={{ hasStarted: true, isWhiteTurn: true, hasWhiteMoved: true }}
+        moveHistory={{ length: displayedSanMoves.length, currentMoveIndex }}
+      />
       <div className="flex-grow flex flex-col items-center justify-center">
         <div className="w-full max-w-md mx-auto">
           <ChessBoardWrapper 
+            ref={chessBoardRef}
             playerColor={playerColor} 
             timeControl={timeControl}
             gameId={gameId}
             onSanMoveListChange={handleSanMoveListUpdate}
+            currentMoveIndex={currentMoveIndex}
+            onMoveIndexChange={handleMoveIndexChange}
           />
         </div>
       </div>

@@ -99,8 +99,21 @@ const MoveControls: React.FC<MoveControlsProps> = ({
 
   // Handle options button click
   const handleOptionsClick = useCallback(() => {
-    setIsOptionsDialogOpen(true);
+    setIsOptionsDialogOpen((prev) => !prev);
   }, []);
+
+  // Add effect to close dialog if Options button is clicked again while open
+  useEffect(() => {
+    if (!isOptionsDialogOpen) return;
+    const button = optionsButtonRef.current;
+    if (!button) return;
+    const handleClick = (e: MouseEvent) => {
+      // If the dialog is open and the button is clicked, close the dialog
+      setIsOptionsDialogOpen(false);
+    };
+    button.addEventListener('click', handleClick);
+    return () => button.removeEventListener('click', handleClick);
+  }, [isOptionsDialogOpen]);
 
   // Handle options dialog close
   const handleOptionsClose = useCallback(() => {
@@ -442,8 +455,9 @@ const MoveControls: React.FC<MoveControlsProps> = ({
           isOpen={isOptionsDialogOpen}
           onClose={handleOptionsClose}
           gameState={gameState}
+          moveHistory={moveHistory}
           onResign={handleResignRequest}
-          onAbort={handleAbortRequest}
+          onAbort={showAbortOption ? handleAbortRequest : undefined}
           soundEnabled={soundEnabled}
           onSoundToggle={handleSoundToggle}
           onDrawOffer={handleDrawOfferClick}
