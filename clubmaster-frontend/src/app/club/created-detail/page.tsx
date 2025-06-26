@@ -6,6 +6,7 @@ import BottomNavigation from '../../components/BottomNavigation';
 import { useAuth } from '../../../context/AuthContext';
 import { ShareLinkModal } from '../share-link/page';
 import { deleteClub } from '@/services/clubService';
+import ClubInfoModal from '@/components/ClubInfoModal';
 
 // Define club type
 interface ClubData {
@@ -231,6 +232,7 @@ export default function ClubCreatedDetailPage() {
   const [showMemberPopup, setShowMemberPopup] = useState(false);
   const [showSuperAdminTransferModal, setShowSuperAdminTransferModal] = useState(false);
   const [currentSuperAdmin, setCurrentSuperAdmin] = useState<ClubMember | null>(null);
+  const [showClubInfoModal, setShowClubInfoModal] = useState(false);
 
   const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -285,8 +287,8 @@ export default function ClubCreatedDetailPage() {
   console.log('user?.uid:', user?.uid);
   console.log('members:', members);
   const myMembership = members.find(m => m.firebaseUid === user?.uid);
-  console.log('myMembership:', myMembership);
   const isSuperAdmin = myMembership?.role === 'super_admin';
+  const isAdminOrSuperAdmin = myMembership?.role === 'admin' || myMembership?.role === 'super_admin';
   console.log('isSuperAdmin:', isSuperAdmin);
 
   // Remove duplicate members by firebaseUid
@@ -460,7 +462,7 @@ export default function ClubCreatedDetailPage() {
       }}>
         {/* Question mark icon */}
         <div className="absolute top-4 right-4">
-          <div className="w-4 h-4 rounded-full bg-[#8FC0A9] flex items-center justify-center">
+          <div className="w-4 h-4 rounded-full bg-[#8FC0A9] flex items-center justify-center cursor-pointer" onClick={() => setShowClubInfoModal(true)}>
             <span className="text-[#1F2323] text-sm font-medium">?</span>
           </div>
         </div>
@@ -582,7 +584,8 @@ export default function ClubCreatedDetailPage() {
                     <Image src={member.photoURL || "/images/default-avatar.svg"} alt="Player Avatar" width={36} height={36} />
                   </div>
                   <span className="text-[#D9D9D9] text-sm">{member.displayName}</span>
-                  {member.role === 'super_admin' && <span className="ml-2 text-[#E9CB6B] text-xs">(Admin)</span>}
+                  {member.role === 'super_admin' && <span className="ml-2 text-[#E9CB6B] text-xs">(Super Admin)</span>}
+                  {member.role === 'admin' && <span className="ml-2 text-[#8FC0A9] text-xs">(Admin)</span>}
                 </div>
                 <div className="w-16 text-right text-[#D9D9D9] pr-4 text-sm">{member.rating || 0}</div>
               </div>
@@ -599,7 +602,7 @@ export default function ClubCreatedDetailPage() {
       </div>
 
       {/* Create Tournament Button */}
-      {isSuperAdmin && (
+      {isAdminOrSuperAdmin && (
       <div className="fixed bottom-16 left-1/2 -translate-x-1/2 w-full max-w-[400px] px-4 py-3 bg-[#333939]">
         <button 
           className="w-full py-3 rounded-lg bg-[#4A7C59] text-[#FAF3DD] font-medium border border-[#E9CB6B]"
@@ -815,6 +818,51 @@ export default function ClubCreatedDetailPage() {
               >
                 Remove From Club
               </button>
+              {isSuperAdmin && selectedMember.role !== 'admin' && selectedMember.role !== 'super_admin' && (
+                <button
+                  style={{ height: 54, width: 272, background: '#4A7C59', borderRadius: 12 }}
+                  className="text-[#FAF3DD] text-base font-medium mb-1"
+                  onClick={async () => {
+                    if (!user || !club) return;
+                    const memberUserId = selectedMember.userId || selectedMember.id;
+                    if (!memberUserId) {
+                      alert('User ID is missing for this member.');
+                      return;
+                    }
+                    try {
+                      const token = await user.getIdToken();
+                      const res = await fetch(`${backendUrl}/club-member/club/${club.id}/role`, {
+                        method: 'PATCH',
+                        headers: {
+                          'Authorization': `Bearer ${token}`,
+                          'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                          memberId: memberUserId,
+                          newRole: 'admin',
+                        }),
+                      });
+                      const data = await res.json();
+                      if (!res.ok) {
+                        alert(data.message || 'Failed to promote member.');
+                        return;
+                      }
+                      alert('Member promoted to admin!');
+                      setShowMemberPopup(false);
+                      // Refresh members list
+                      fetch(`${backendUrl}/club/${club.id}`)
+                        .then(res => res.json())
+                        .then(data => {
+                          setMembers(data.members || []);
+                        });
+                    } catch (err) {
+                      alert('Failed to promote member.');
+                    }
+                  }}
+                >
+                  Make Admin
+                </button>
+              )}
             </div>
           </div>
         </>
@@ -829,6 +877,9 @@ export default function ClubCreatedDetailPage() {
           onClose={() => setShowSuperAdminTransferModal(false)}
         />
       )}
+
+      {/* Club Info Modal */}
+      <ClubInfoModal isOpen={showClubInfoModal} onClose={() => setShowClubInfoModal(false)} />
     </div>
   );
 } 

@@ -7,6 +7,7 @@ import { ShareLinkModal } from '../share-link/page';
 import { useAuth } from '../../../context/AuthContext';
 import { useClub } from '../../context/ClubContext';
 import { joinClub } from '../../../services/clubService';
+import ClubInfoModal from '@/components/ClubInfoModal';
 
 // Add Club interface for type safety
 interface ClubMember {
@@ -51,6 +52,7 @@ export default function ClubDetailPage() {
   const [isMember, setIsMember] = useState(false);
   const [joinError, setJoinError] = useState('');
   const [members, setMembers] = useState<ClubMember[]>([]);
+  const [showClubInfoModal, setShowClubInfoModal] = useState(false);
 
   // Get club ID from query string (?id=123)
   const clubId = searchParams.get('id');
@@ -61,6 +63,7 @@ export default function ClubDetailPage() {
   // Find the current user's membership in the club
   const myMembership = Array.isArray(club?.members) ? club.members.find(m => m.firebaseUid === user?.uid) : undefined;
   const isSuperAdmin = myMembership?.role === 'super_admin';
+  const isAdminOrSuperAdmin = myMembership?.role === 'admin' || myMembership?.role === 'super_admin';
 
   // Debug logs for role check
   console.log('user?.uid:', user?.uid);
@@ -271,7 +274,7 @@ export default function ClubDetailPage() {
       }}>
         {/* Question mark icon */}
         <div className="absolute top-4 right-4">
-          <div className="w-4 h-4 rounded-full bg-[#8FC0A9] flex items-center justify-center">
+          <div className="w-4 h-4 rounded-full bg-[#8FC0A9] flex items-center justify-center cursor-pointer" onClick={() => setShowClubInfoModal(true)}>
             <span className="text-[#1F2323] text-sm font-medium">?</span>
           </div>
         </div>
@@ -388,7 +391,8 @@ export default function ClubDetailPage() {
                       <Image src={member.photoURL || "/images/default-avatar.svg"} alt="Player Avatar" width={36} height={36} />
                     </div>
                     <span className="text-[#D9D9D9] text-sm">{member.displayName}</span>
-                    {member.role === 'super_admin' && <span className="ml-2 text-[#E9CB6B] text-xs">(Admin)</span>}
+                    {member.role === 'super_admin' && <span className="ml-2 text-[#E9CB6B] text-xs">(Super Admin)</span>}
+                    {member.role === 'admin' && <span className="ml-2 text-[#8FC0A9] text-xs">(Admin)</span>}
                   </div>
                   <div className="w-16 text-right text-[#D9D9D9] pr-4 text-sm">{member.rating || 0}</div>
                 </div>
@@ -418,7 +422,7 @@ export default function ClubDetailPage() {
 {showMenu && (
   <div className="fixed bottom-14 left-1/2 -translate-x-1/2 w-[388px]  bg-[#1F2323] rounded-[10px] z-50 overflow-hidden">
     <div className="flex flex-col h-full">
-      {isSuperAdmin ? (
+      {isAdminOrSuperAdmin ? (
         <>
           <button
             onClick={() => handleMenuClick('invite')}
@@ -432,7 +436,24 @@ export default function ClubDetailPage() {
           >
             Share Link
           </button>
-         
+          <button
+            onClick={() => {
+              setShowMenu(false);
+              router.push(`/club/create?editMode=true&clubId=${club?.id}`);
+            }}
+            className="w-full text-center py-4 text-[#D9D9D9] text-base border-b border-[#3A393C]"
+          >
+            Edit Club
+          </button>
+          {/* Only super admin can see delete club */}
+          {isSuperAdmin && (
+            <button
+              onClick={() => handleMenuClick('delete')}
+              className="w-full text-center py-4 text-[#D9D9D9] text-base border-b border-[#3A393C]"
+            >
+              Delete Club
+            </button>
+          )}
           <button
             onClick={() => handleMenuClick('leave')}
             className="w-full text-center py-4 text-[#D9D9D9] text-base"
@@ -523,6 +544,9 @@ export default function ClubDetailPage() {
       )}
 
       {isMember && <div>Welcome to the club!</div>}
+
+      {/* Club Info Modal */}
+      <ClubInfoModal isOpen={showClubInfoModal} onClose={() => setShowClubInfoModal(false)} />
     </div>
   );
 } 

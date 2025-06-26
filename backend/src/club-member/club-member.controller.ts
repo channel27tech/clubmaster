@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Req, UsePipes, ValidationPipe, Get, Query, UseGuards, UnauthorizedException, NotFoundException, Param, Request, ForbiddenException } from '@nestjs/common';
+import { Controller, Post, Body, Req, UsePipes, ValidationPipe, Get, Query, UseGuards, UnauthorizedException, NotFoundException, Param, Request, ForbiddenException, Patch } from '@nestjs/common';
 import { ClubMemberService } from './club-member.service';
 import { JoinClubDto } from './dto/join-club.dto';
 import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
@@ -112,6 +112,28 @@ export class ClubMemberController {
     const requester = await this.userRepository.findOne({ where: { firebaseUid: req.user.uid } });
     if (!requester) throw new UnauthorizedException('User not found');
     await this.clubMemberService.transferSuperAdmin(requester.id, body.toUserId, clubId);
+    return { success: true };
+  }
+
+  @Patch('/club/:clubId/role')
+  @UseGuards(FirebaseAuthGuard)
+  async promoteToAdmin(
+    @Param('clubId') clubId: string,
+    @Body() body: { memberId: string, newRole: string },
+    @Request() req
+  ) {
+    if (!req.user || !req.user.uid) {
+      throw new UnauthorizedException('User authentication required');
+    }
+    // Only allow promoting to admin
+    if (body.newRole !== 'admin') {
+      throw new ForbiddenException('Can only promote to admin');
+    }
+    // Find the requesting user
+    const requester = await this.userRepository.findOne({ where: { firebaseUid: req.user.uid } });
+    if (!requester) throw new UnauthorizedException('User not found');
+    // Use the service to update the role (will check permissions)
+    await this.clubMemberService.promoteMemberToAdmin(requester.id, body.memberId, clubId);
     return { success: true };
   }
 } 
