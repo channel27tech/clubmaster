@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useMemo, useRef } from 'react';
 import * as betService from '@/services/betService';
 import { BetChallenge, BetType, BetResult } from '@/types/bet';
 import { useRouter } from 'next/navigation';
@@ -51,118 +51,96 @@ export const BetProvider: React.FC<BetProviderProps> = ({ children }) => {
   const { isConnected } = useSocket();
   const toast = useToast();
 
-  useEffect(() => {
-    // Set up socket event listeners for bet challenges
-    const handleBetChallengeReceived = (challenge: BetChallenge) => {
-      try {
-        // Validate essential fields
-        if (!challenge.id) {
-          return;
-        }
-      
-        // Update state to show notification
+  // Stable refs for external dependencies
+  const currentBetChallengeRef = useRef(currentBetChallenge);
+  useEffect(() => { currentBetChallengeRef.current = currentBetChallenge; }, [currentBetChallenge]);
+
+  const routerRef = useRef(router);
+  useEffect(() => { routerRef.current = router; }, [router]);
+
+  const toastRef = useRef(toast);
+  useEffect(() => { toastRef.current = toast; }, [toast]);
+
+  // Memoized handler functions using only refs (no external deps)
+  const handleBetChallengeReceived = useCallback((challenge: BetChallenge) => {
+    try {
+      if (!challenge.id) return;
       setCurrentBetChallenge(challenge);
       setIsShowingBetNotification(true);
-      } catch (error) {
+    } catch (error) {}
+  }, []);
+
+  const handleBetChallengeResponse = useCallback((response: any) => {
+    if (response.accepted) {
+      setCurrentBetChallenge(null);
+      setIsShowingBetNotification(false);
+      toastRef.current.success('Bet challenge accepted, setting up the game...');
+    } else {
+      setCurrentBetChallenge(null);
+      setIsShowingBetNotification(false);
+      const responderName = response.responderName || response.responderId || 'Opponent';
+      toastRef.current.info(`${responderName} declined the bet challenge`);
+    }
+  }, []);
+
+  const handleBetChallengeExpired = useCallback((data: { betId: string }) => {
+    if (currentBetChallengeRef.current?.id === data.betId) {
+      setCurrentBetChallenge(null);
+      setIsShowingBetNotification(false);
+      toastRef.current.warning('Bet challenge expired');
+    }
+  }, []);
+
+  const handleBetChallengeCancelled = useCallback((data: { betId: string }) => {
+    if (currentBetChallengeRef.current?.id === data.betId) {
+      setCurrentBetChallenge(null);
+      setIsShowingBetNotification(false);
+      toastRef.current.info('Bet challenge cancelled by opponent');
+    }
+  }, []);
+
+  const handlePendingBetChallenges = useCallback((data: { challenges: BetChallenge[] }) => {
+    setPendingBetChallenges(data.challenges);
+  }, []);
+
+  const handleBetResult = useCallback((result: BetResult) => {
+    console.log('[BetContext] Setting currentBetResult:', result);
+    setCurrentBetResult(result);
+  }, []);
+
+  const handleBetGameReady = useCallback((data: { gameId: string; betType: BetType; betId: string }) => {
+    if (data && data.gameId) {
+      toastRef.current.success('Game ready! Redirecting to the game...');
+      const opponentId = currentBetChallengeRef.current?.opponentId || null;
+      const queryParams = new URLSearchParams({
+        isBetGame: 'true',
+        betType: data.betType,
+        betId: data.betId
+      });
+      if (opponentId) {
+        queryParams.append('opponentId', opponentId);
       }
-    };
+      console.log('[BetContext] Navigating to game with bet context:', {
+        gameId: data.gameId,
+        betType: data.betType,
+        betId: data.betId,
+        opponentId
+      });
+      routerRef.current.push(`/play/game/${data.gameId}?${queryParams.toString()}`);
+    } else {
+      toastRef.current.error('Could not start game: Invalid game data received');
+    }
+  }, []);
 
-    const handleBetChallengeResponse = (response: any) => {
-      if (response.accepted) {
-        // If challenge was accepted, clear the current challenge and notification
-        setCurrentBetChallenge(null);
-        setIsShowingBetNotification(false);
-        
-        // Show a toast notification that the challenge was accepted
-        toast.success('Bet challenge accepted, setting up the game...');
-      } else {
-        // If challenge was rejected, clear the current challenge and notification
-        setCurrentBetChallenge(null);
-        setIsShowingBetNotification(false);
-        
-        // Get responder name if available
-        const responderName = response.responderName || response.responderId || 'Opponent';
-        
-        // Show a more informative toast notification
-        toast.info(`${responderName} declined the bet challenge`);
-      }
-    };
-
-    const handleBetChallengeExpired = (data: { betId: string }) => {
-      if (currentBetChallenge?.id === data.betId) {
-        setCurrentBetChallenge(null);
-        setIsShowingBetNotification(false);
-        toast.warning('Bet challenge expired');
-      }
-    };
-
-    const handleBetChallengeCancelled = (data: { betId: string }) => {
-      if (currentBetChallenge?.id === data.betId) {
-        setCurrentBetChallenge(null);
-        setIsShowingBetNotification(false);
-        toast.info('Bet challenge cancelled by opponent');
-      }
-    };
-
-    const handlePendingBetChallenges = (data: { challenges: BetChallenge[] }) => {
-      setPendingBetChallenges(data.challenges);
-    };
-
-    const handleBetResult = (result: BetResult) => {
-      console.log('[BetContext] Setting currentBetResult:', result);
-      setCurrentBetResult(result);
-    };
-
-    // Add handler for bet_game_ready event
-    const handleBetGameReady = (data: { gameId: string; betType: BetType; betId: string }) => {
-      if (data && data.gameId) {
-        // Show a success toast
-        toast.success('Game ready! Redirecting to the game...');
-        
-        // Get opponent information from the bet challenge if available
-        const opponentId = currentBetChallenge?.opponentId || null;
-        
-        // Build URL with query parameters including bet context
-        const queryParams = new URLSearchParams({
-          isBetGame: 'true',
-          betType: data.betType,
-          betId: data.betId
-        });
-        
-        // Add opponent ID if available
-        if (opponentId) {
-          queryParams.append('opponentId', opponentId);
-        }
-        
-        console.log('[BetContext] Navigating to game with bet context:', {
-          gameId: data.gameId,
-          betType: data.betType,
-          betId: data.betId,
-          opponentId
-        });
-        
-        // Navigate to the game page with bet context
-        router.push(`/play/game/${data.gameId}?${queryParams.toString()}`);
-      } else {
-        toast.error('Could not start game: Invalid game data received');
-      }
-    };
-
-    // Register event listeners
+  // Register socket listeners only once on mount/unmount
+  useEffect(() => {
     betService.onBetChallengeReceived(handleBetChallengeReceived);
     betService.onBetChallengeResponse(handleBetChallengeResponse);
     betService.onBetChallengeExpired(handleBetChallengeExpired);
     betService.onBetChallengeCancelled(handleBetChallengeCancelled);
     betService.onPendingBetChallenges(handlePendingBetChallenges);
     betService.onBetResult(handleBetResult);
-    betService.onBetGameReady(handleBetGameReady); // Add listener for bet_game_ready
-
-    // Get any pending bet challenges when the component mounts and socket is connected
-    if (user && isConnected) {
-      betService.getPendingBetChallenges();
-    }
-
-    // Clean up listeners when component unmounts
+    betService.onBetGameReady(handleBetGameReady);
     return () => {
       betService.offBetChallengeReceived();
       betService.offBetChallengeResponse();
@@ -170,84 +148,59 @@ export const BetProvider: React.FC<BetProviderProps> = ({ children }) => {
       betService.offBetChallengeCancelled();
       betService.offPendingBetChallenges();
       betService.offBetResult(handleBetResult);
-      betService.offBetGameReady(); // Remove listener for bet_game_ready
+      betService.offBetGameReady();
     };
-  }, [currentBetChallenge, router, user, isConnected, toast]);
+  }, [handleBetChallengeReceived, handleBetChallengeResponse, handleBetChallengeExpired, handleBetChallengeCancelled, handlePendingBetChallenges, handleBetResult, handleBetGameReady]);
 
-  useEffect(() => {
-    console.log('[BetContext] currentBetResult changed:', currentBetResult);
-  }, [currentBetResult]);
-
-  // Add a separate effect to re-fetch pending challenges when socket reconnects
+  // Only fetch pending challenges when user/isConnected changes
   useEffect(() => {
     if (user && isConnected) {
       betService.getPendingBetChallenges();
     }
   }, [isConnected, user]);
 
-  const acceptBetChallenge = (challengeId: string) => {
+  const acceptBetChallenge = useCallback((challengeId: string) => {
     if (!challengeId) {
-      toast.error('Invalid challenge ID');
+      toastRef.current.error('Invalid challenge ID');
       return;
     }
-
     try {
-      // Find the challenge in the pending challenges
       const challenge = pendingBetChallenges.find(c => c.id === challengeId) || 
-                       (currentBetChallenge?.id === challengeId ? currentBetChallenge : null);
-      
+                       (currentBetChallengeRef.current?.id === challengeId ? currentBetChallengeRef.current : null);
       if (!challenge) {
-        toast.error('Challenge not found');
+        toastRef.current.error('Challenge not found');
         return;
       }
-
-      // Accept the challenge through the bet service
       betService.respondToBetChallenge(challengeId, true);
-      
-      // Clear the current challenge notification
       setCurrentBetChallenge(null);
       setIsShowingBetNotification(false);
-      
-      // Show a toast notification
-      toast.success('Bet challenge accepted, setting up the game...');
-      
-      // Store bet challenge info in localStorage for reference
+      toastRef.current.success('Bet challenge accepted, setting up the game...');
       localStorage.setItem('activeBetChallengeId', challengeId);
       localStorage.setItem('activeBetType', challenge.betType);
       if (challenge.stakeAmount) {
         localStorage.setItem('activeBetStakeAmount', challenge.stakeAmount.toString());
       }
-      
-      // The game setup will be handled by the server and the matchmaking system
-      // The server will send a bet_game_ready event when the game is ready
     } catch (error) {
       console.error('Error accepting bet challenge:', error);
-      toast.error('Failed to accept challenge');
+      toastRef.current.error('Failed to accept challenge');
     }
-  };
+  }, [pendingBetChallenges]);
 
-  const rejectBetChallenge = (challengeId: string) => {
-    // Get challenger name for the notification
-    const challengerName = currentBetChallenge?.challengerName || 
-                           currentBetChallenge?.senderUsername || 
+  const rejectBetChallenge = useCallback((challengeId: string) => {
+    const challengerName = currentBetChallengeRef.current?.challengerName || 
+                           currentBetChallengeRef.current?.senderUsername || 
                            'Challenger';
-    
-    // Send the rejection to the backend
     betService.respondToBetChallenge(challengeId, false);
-    
-    // Clear the notification state
     setIsShowingBetNotification(false);
     setCurrentBetChallenge(null);
-    
-    // Show a more informative toast notification
-    toast.info(`You declined ${challengerName}'s challenge`);
-  };
+    toastRef.current.info(`You declined ${challengerName}'s challenge`);
+  }, []);
 
-  const cancelBetChallenge = (betId: string) => {
+  const cancelBetChallenge = useCallback((betId: string) => {
     betService.cancelBetChallenge(betId);
-  };
+  }, []);
 
-  const sendBetChallenge = (options: {
+  const sendBetChallenge = useCallback((options: {
     opponentId?: string;
     opponentSocketId?: string;
     betType: BetType;
@@ -257,21 +210,22 @@ export const BetProvider: React.FC<BetProviderProps> = ({ children }) => {
     preferredSide: string;
   }) => {
     return betService.sendBetChallenge(options);
-  };
+  }, []);
+
+  // Memoize context value
+  const contextValue = useMemo(() => ({
+    pendingBetChallenges,
+    currentBetChallenge,
+    isShowingBetNotification,
+    acceptBetChallenge,
+    rejectBetChallenge,
+    cancelBetChallenge,
+    sendBetChallenge,
+    currentBetResult,
+  }), [pendingBetChallenges, currentBetChallenge, isShowingBetNotification, acceptBetChallenge, rejectBetChallenge, cancelBetChallenge, sendBetChallenge, currentBetResult]);
 
   return (
-    <BetContext.Provider
-      value={{
-        pendingBetChallenges,
-        currentBetChallenge,
-        isShowingBetNotification,
-        acceptBetChallenge,
-        rejectBetChallenge,
-        cancelBetChallenge,
-        sendBetChallenge,
-        currentBetResult,
-      }}
-    >
+    <BetContext.Provider value={contextValue}>
       {children}
     </BetContext.Provider>
   );

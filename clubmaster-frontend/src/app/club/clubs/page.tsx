@@ -95,9 +95,9 @@ export default function ClubsView() {
   });
 
   return (
-    <div className="min-h-screen bg-[#333939] flex flex-col w-full max-w-[400px] mx-auto relative">
+    <div className="min-h-screen bg-[#333939] flex flex-col w-full max-w-[430px] mx-auto relative">
       {/* Fixed top section */}
-      <div className="fixed top-0 left-1/2 -translate-x-1/2 w-full max-w-[400px] z-10">
+      <div className="fixed top-0 left-1/2 -translate-x-1/2 w-full max-w-[430px] z-10">
         {/* Header */}
         <div className="bg-[#333939] px-[21px] py-4 flex items-center">
           <button 

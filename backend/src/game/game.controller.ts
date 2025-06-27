@@ -137,13 +137,15 @@ export class GameController {
           username: whitePlayerUsername, 
           rating: whiteRating,
           photoURL: whitePlayerPhotoURL,
-          userId: whitePlayer.id
+          userId: whitePlayer.id,
+          firebaseUid: whitePlayer.firebaseUid || null
         },
         blackPlayer: { 
           username: blackPlayerUsername, 
           rating: blackRating,
           photoURL: blackPlayerPhotoURL,
-          userId: blackPlayer.id
+          userId: blackPlayer.id,
+          firebaseUid: blackPlayer.firebaseUid || null
         }
       };
 

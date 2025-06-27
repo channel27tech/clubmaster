@@ -81,7 +81,10 @@ export default function BottomNavigation({ onClubClick }: BottomNavigationProps)
         </div>
         <span className={`${isClub ? 'text-[#E9CB6B]' : 'text-[#BDBDBD]'} text-xs mt-1`}>Club</span>
       </button>
-      <div className="flex flex-col items-center flex-1">
+      <button 
+        onClick={() => router.push('/tournament/view')}
+        className="flex flex-col items-center flex-1"
+      >
         <div className="flex items-center justify-center h-5">
           <Image
             src="/images/ftr tournaments.svg"
@@ -92,7 +95,7 @@ export default function BottomNavigation({ onClubClick }: BottomNavigationProps)
           />
         </div>
         <span className={`${isTournament ? 'text-[#E9CB6B]' : 'text-[#BDBDBD]'} text-xs mt-1`}>Tournaments</span>
-      </div>
+      </button>
       <div className="flex flex-col items-center flex-1">
         <div className="flex items-center justify-center h-5">
           <Image

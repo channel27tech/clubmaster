@@ -191,7 +191,10 @@ export default function Dashboard() {
           </button>
           
           {/* Tournaments Button */}
-          <button className="w-[302px] h-[57px] rounded-[10px] bg-[#1F2323] text-[#D9D9D9] text-base flex items-center justify-center border border-[#000000] mb-4">
+          <button 
+            className="w-[302px] h-[57px] rounded-[10px] bg-[#1F2323] text-[#D9D9D9] text-base flex items-center justify-center border border-[#000000] mb-4"
+            onClick={() => router.push('/tournament/view')}
+          >
             <span className="mr-3">
               <Image 
                 src="/images/trnmnt btb icon.svg" 
