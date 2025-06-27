@@ -27,42 +27,17 @@ export class ProfileDataService {
 
   /**
    * Get user profile data including rating and game statistics
-   * @param userIdOrUid User identifier (Firebase UID or DB UUID)
+   * @param firebaseUid Firebase User ID to fetch profile for
    * @returns User profile data
    * @throws NotFoundException if user not found
    */
-  async getUserProfile(userIdOrUid: string) {
-    this.logger.log(`Fetching profile for user identifier: ${userIdOrUid}`);
-    let user: User | null = null;
-    // Try Firebase UID lookup first
-    user = await this.usersRepository.findOne({
-      where: { firebaseUid: userIdOrUid },
-      select: [
-        'id',
-        'displayName',
-        'photoURL',
-        'rating',
-        'gamesPlayed',
-        'gamesWon',
-        'gamesLost',
-        'gamesDraw',
-        'username',
-        'first_name',
-        'last_name',
-        'location',
-        'custom_photo_base64',
-        'profileControlledBy',
-        'profileControlExpiry',
-        'profileLocked',
-        'profileLockExpiry',
-        'controlledNickname',
-        'controlledAvatarType',
-      ],
-    });
-    // If not found, try DB UUID lookup
-    if (!user) {
-      user = await this.usersRepository.findOne({
-        where: { id: userIdOrUid },
+  async getUserProfile(firebaseUid: string) {
+    this.logger.log(`Fetching profile for Firebase UID: ${firebaseUid}`);
+    
+    try {
+      // Find user by Firebase UID
+      const user = await this.usersRepository.findOne({
+        where: { firebaseUid },
         select: [
           'id',
           'displayName',
@@ -83,49 +58,50 @@ export class ProfileDataService {
           'profileLockExpiry',
           'controlledNickname',
           'controlledAvatarType',
-          'firebaseUid',
         ],
       });
-      if (user) {
-        this.logger.log(`User found by DB UUID: ${userIdOrUid}`);
+
+      if (!user) {
+        this.logger.warn(`User with Firebase UID ${firebaseUid} not found`);
+        throw new NotFoundException(`User not found for Firebase UID: ${firebaseUid}`);
       }
+
+      this.logger.log(`Successfully resolved Firebase UID ${firebaseUid} to user ID ${user.id}`);
+      this.logger.log(`Fetched profile for user ${user.displayName} with rating ${user.rating}`);
+      
+      // Create a property that combines custom_photo_base64 and photoURL
+      const effective_photo_url = user.custom_photo_base64 || user.photoURL;
+      
+      return {
+        id: user.id,
+        displayName: user.displayName,
+        photoURL: user.photoURL,
+        rating: user.rating,
+        gamesPlayed: user.gamesPlayed,
+        gamesWon: user.gamesWon,
+        gamesLost: user.gamesLost,
+        gamesDraw: user.gamesDraw,
+        firebaseUid: firebaseUid,
+        username: user.username || user.displayName, // Fallback to displayName if username is not set
+        first_name: user.first_name,
+        last_name: user.last_name,
+        location: user.location,
+        custom_photo_base64: user.custom_photo_base64,
+        effective_photo_url: effective_photo_url, // Combined field for UI to use
+        profileControlledBy: user.profileControlledBy,
+        profileControlExpiry: user.profileControlExpiry,
+        profileLocked: user.profileLocked,
+        profileLockExpiry: user.profileLockExpiry,
+        controlledNickname: user.controlledNickname,
+        controlledAvatarType: user.controlledAvatarType,
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error; // Re-throw NotFoundException to be handled by controller
+      }
+      this.logger.error(`Error fetching user profile: ${error.message}`, error.stack);
+      throw error;
     }
-    if (!user) {
-      this.logger.warn(`User not found for identifier: ${userIdOrUid}`);
-      throw new NotFoundException(`User not found for identifier: ${userIdOrUid}`);
-    }
-    this.logger.log(`Successfully resolved identifier ${userIdOrUid} to user ID ${user.id}`);
-    this.logger.log(`Fetched profile for user ${user.displayName} with rating ${user.rating}`);
-    // Determine if profile is currently controlled
-    const now = new Date();
-    const isControlled = user.profileControlledBy && user.profileControlExpiry && new Date(user.profileControlExpiry) > now;
-    // Use controlledNickname and controlledAvatarType if profile is controlled
-    const effectiveUsername = isControlled && user.controlledNickname ? user.controlledNickname : (user.username || user.displayName);
-    const effectiveAvatar = isControlled && user.controlledAvatarType ? user.controlledAvatarType : (user.custom_photo_base64 || user.photoURL);
-    return {
-      id: user.id,
-      displayName: user.displayName,
-      photoURL: user.photoURL,
-      rating: user.rating,
-      gamesPlayed: user.gamesPlayed,
-      gamesWon: user.gamesWon,
-      gamesLost: user.gamesLost,
-      gamesDraw: user.gamesDraw,
-      firebaseUid: user.firebaseUid,
-      username: effectiveUsername,
-      first_name: user.first_name,
-      last_name: user.last_name,
-      location: user.location,
-      custom_photo_base64: user.custom_photo_base64,
-      effective_photo_url: effectiveAvatar,
-      profileControlledBy: user.profileControlledBy,
-      profileControlExpiry: user.profileControlExpiry,
-      profileLocked: user.profileLocked,
-      profileLockExpiry: user.profileLockExpiry,
-      controlledNickname: user.controlledNickname,
-      controlledAvatarType: user.controlledAvatarType,
-      isControlled,
-    };
   }
 
   /**

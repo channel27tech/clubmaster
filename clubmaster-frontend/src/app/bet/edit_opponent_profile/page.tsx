@@ -68,6 +68,10 @@ export default function EditOpponentProfile() {
         return;
       }
       setShowSuccess(true);
+      setTimeout(() => {
+        setShowSuccess(false);
+        router.push("/club/clubs"); // or wherever you want to redirect
+      }, 1500);
     } catch (e) {
       setError("An error occurred. Please try again.");
     } finally {
@@ -246,14 +250,7 @@ export default function EditOpponentProfile() {
                   fontFamily: 'Roboto, sans-serif',
                   cursor: 'pointer',
                 }}
-                onClick={() => {
-                  setShowSuccess(false);
-                  if (opponentId) {
-                    router.push(`/player/${opponentId}`);
-                  } else {
-                    router.push('/play');
-                  }
-                }}
+                onClick={() => setShowSuccess(false)}
               >
                 View
               </button>
@@ -270,10 +267,7 @@ export default function EditOpponentProfile() {
                   fontFamily: 'Roboto, sans-serif',
                   cursor: 'pointer',
                 }}
-                onClick={() => {
-                  setShowSuccess(false);
-                  router.push('/play');
-                }}
+                onClick={() => setShowSuccess(false)}
               >
                 Home
               </button>

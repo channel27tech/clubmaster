@@ -30,11 +30,11 @@ body {
   font-family: var(--font-roboto);
 }
 
-/* Hide scrollbar but keep scroll functionality */
+/* Hide scrollbar utility for all browsers */
 .hide-scrollbar {
   scrollbar-width: none; /* Firefox */
-  -ms-overflow-style: none;  /* IE 10+ */
+  -ms-overflow-style: none; /* IE and Edge */
 }
 .hide-scrollbar::-webkit-scrollbar {
-  display: none; /* Chrome/Safari/Webkit */
+  display: none; /* Chrome, Safari, Opera */
 }

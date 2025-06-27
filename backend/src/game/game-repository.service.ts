@@ -116,10 +116,6 @@ export class GameRepositoryService {
   }
 
   async create(gameData: Partial<Game>): Promise<Game> {
-    // --- ADD THIS LOGGING BLOCK ---
-    console.log('--- NEW GAME CREATION ATTEMPT ---');
-    console.log(`Payload Received: ${JSON.stringify(gameData, null, 2)}`);
-    // -----------------------------
     // If no ID provided, generate a new UUID
     if (!gameData.id) {
       gameData.id = uuidv4();
