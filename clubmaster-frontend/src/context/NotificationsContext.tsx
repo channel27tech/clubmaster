@@ -40,12 +40,13 @@ export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ child
   const [socket, setSocket] = useState<Socket | null>(null);
   const auth = useAuth();
   const user = auth?.user;
+  const idToken = auth?.idToken;
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
   // Create and connect to the socket
   useEffect(() => {
-    // Check if user is authenticated and has an ID property
-    if (!user || !user.uid) {
+    // Only run if user and idToken are available
+    if (!user || !user.uid || !idToken) {
       return;
     }
 
@@ -56,7 +57,12 @@ export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ child
       try {
         const url = `${API_URL}/notifications?limit=20`;
         console.log('Fetching notifications from:', url);
-        const response = await fetch(url);
+        const response = await fetch(url, {
+          headers: {
+            'Authorization': `Bearer ${idToken}`,
+            'Content-Type': 'application/json',
+          },
+        });
         if (response.ok) {
           const data = await response.json();
           setNotifications(
@@ -66,6 +72,8 @@ export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ child
               read: n.status === 'READ',
             }))
           );
+        } else if (response.status === 401) {
+          console.error('Unauthorized: Invalid or missing token when fetching notifications.');
         }
       } catch (error) {
         console.error('Failed to fetch notifications:', error);
@@ -80,7 +88,7 @@ export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ child
         if (user.isAnonymous) {
           token = `guest_${user.uid}`;
         } else {
-          token = await user.getIdToken();
+          token = idToken;
         }
         
         // Create socket connection
@@ -150,7 +158,7 @@ export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ child
         setSocket(null);
       }
     };
-  }, [user, API_URL]);
+  }, [user, idToken, API_URL]);
 
   // Reconnect socket when the token might have changed
   useEffect(() => {
@@ -194,6 +202,10 @@ export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ child
       console.log('Marking notification as read:', url);
       await fetch(url, {
         method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${idToken}`,
+          'Content-Type': 'application/json',
+        },
       });
     } catch (error) {
       console.error('Failed to mark notification as read:', error);
@@ -213,6 +225,10 @@ export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ child
       console.log('Marking all notifications as read:', url);
       await fetch(url, {
         method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${idToken}`,
+          'Content-Type': 'application/json',
+        },
       });
     } catch (error) {
       console.error('Failed to mark all notifications as read:', error);
@@ -234,6 +250,10 @@ export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ child
       console.log('Deleting notification:', url);
       await fetch(url, {
         method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${idToken}`,
+          'Content-Type': 'application/json',
+        },
       });
     } catch (error) {
       console.error('Failed to delete notification:', error);
