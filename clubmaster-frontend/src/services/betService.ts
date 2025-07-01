@@ -102,8 +102,6 @@ export const onBetChallengeReceived = (callback: (challenge: BetChallenge) => vo
         if (!data || !data.id) {
           return;
         }
-        // Detailed logging of incoming data fields
-        // console.log('[betService] Incoming data fields:', { ... });
         // Get the profile image URL with proper fallback chain
         const profileImageUrl = data.senderPhotoURL || 
                                data.photoURL || 
@@ -111,8 +109,6 @@ export const onBetChallengeReceived = (callback: (challenge: BetChallenge) => vo
                                data.avatarUrl || 
                                data.challengerPhotoURL || 
                                null;
-        // Log the resolved profile image
-        // console.log('[betService] Resolved profile image URL:', profileImageUrl);
         // Create a properly formatted challenge object
         const challenge: BetChallenge = {
           id: data.id,
@@ -129,15 +125,11 @@ export const onBetChallengeReceived = (callback: (challenge: BetChallenge) => vo
           senderUsername: data.senderUsername,
           senderPhotoURL: data.senderPhotoURL || null
         };
-        // console.log('[betService] Formatted challenge for callback:', challenge);
-        // console.log('[betService] Challenger name set to:', challenge.challengerName);
-        // console.log('[betService] Challenger photo URL set to:', challenge.challengerPhotoURL);
         // Call the callback with the processed challenge data
         callback(challenge);
       } catch (error) {
       }
     });
-    // console.log('[betService] Registered bet_challenge_received listener');
   }
 };
 
@@ -152,7 +144,6 @@ export const offBetChallengeReceived = (callback?: (challenge: BetChallenge) => 
     } else {
       socket.off('bet_challenge_received');
     }
-    // console.log('[betService] Removed bet_challenge_received listener');
   }
 };
 
@@ -171,10 +162,8 @@ export const onBetChallengeResponse = (callback: (response: any) => void): void 
         return;
       }
       // Log detailed information about the response for debugging
-      // console.log('[betService] Response details:', { ... });
       callback(data);
     });
-    // console.log('[betService] Registered bet_challenge_response listener');
   }
 };
 
@@ -265,7 +254,6 @@ export const offBetResult = (callback?: (result: BetResult) => void): void => {
     } else {
       socket.off('bet_result');
     }
-    console.log('[betService] Removed bet_result listener');
   }
 };
 
@@ -364,8 +352,6 @@ export const onBetGameReady = (callback: (data: { gameId: string, betType: BetTy
         console.error('[betService] Error processing bet_game_ready event:', error);
       }
     });
-    
-    console.log('[betService] Registered bet_game_ready listener');
   } else {
     console.warn('[betService] Socket not available for onBetGameReady');
   }
@@ -382,7 +368,6 @@ export const offBetGameReady = (callback?: (data: any) => void): void => {
     } else {
       socket.off('bet_game_ready');
     }
-    console.log('[betService] Removed bet_game_ready listener');
   }
 };
 

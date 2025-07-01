@@ -70,6 +70,7 @@ export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ child
               read: n.status === 'READ',
             }))
           );
+          console.log('[NotificationsContext] Successfully fetched notifications:', data);
         }
       } catch (error) {
         console.error('Failed to fetch notifications:', error);

@@ -70,7 +70,6 @@ const MatchmakingManager = forwardRef<MatchmakingManagerHandle, MatchmakingManag
     useEffect(() => {
       if (listenersSetupRef.current) return; // Prevent duplicate setup
       listenersSetupRef.current = true;
-      console.log('[MatchmakingManager] Setting up socket listeners');
       
       const handleMatchFound = (gameData: any) => {
         console.log('[MatchmakingManager] Match found event received:', gameData);
@@ -185,7 +184,6 @@ const MatchmakingManager = forwardRef<MatchmakingManagerHandle, MatchmakingManag
       // Clean up listeners when component unmounts
       return () => {
         listenersSetupRef.current = false;
-        console.log('[MatchmakingManager] Cleaning up socket listeners');
         socketService.offMatchFound(handleMatchFound);
         socketService.offMatchmakingError(handleMatchmakingError);
         socketService.offMatchmakingStatus(handleMatchmakingStatus);
