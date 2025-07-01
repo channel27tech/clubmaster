@@ -141,7 +141,7 @@ export const BetProvider: React.FC<BetProviderProps> = ({ children }) => {
           opponentId
         });
         
-        // Navigate to the game page with bet context
+        // Navigate to the game page with bet context in the protected route
         router.push(`/play/game/${data.gameId}?${queryParams.toString()}`);
       } else {
         toast.error('Could not start game: Invalid game data received');

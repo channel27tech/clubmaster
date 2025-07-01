@@ -2,10 +2,10 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
-import BottomNavigation from '../../components/BottomNavigation';
-import { useAuth } from '../../../context/AuthContext';
+import BottomNavigation from '@/app/components/BottomNavigation';
+import { useAuth } from '@/context/AuthContext';
 import { ShareLinkModal } from '../share-link/page';
-import { TournamentOptionsModal } from '../../tournament-modals';
+import { TournamentOptionsModal } from '@/app/tournament-modals';
 import { deleteClub } from '@/services/clubService';
 import ClubInfoModal from '@/components/ClubInfoModal';
 

@@ -29,7 +29,7 @@ const guestAllowedPaths = [
  * RouteGuard component to protect routes that require authentication
  * Use this component to wrap content in pages that should be protected
  */
-export default function RouteGuard({ children }: RouteGuardProps) {
+export function RouteGuard({ children }: RouteGuardProps) {
   const router = useRouter();
   const pathname = usePathname();
   const { user, loading, isGuest } = useAuth();
@@ -37,13 +37,6 @@ export default function RouteGuard({ children }: RouteGuardProps) {
   const [checkingAuth, setCheckingAuth] = useState(true);
 
   useEffect(() => {
-    console.log("RouteGuard - Auth state:", { 
-      userExists: !!user, 
-      isGuest, 
-      loading, 
-      pathname 
-    });
-    
     // Always allow access to /login and its subpages
     if (pathname && pathname.startsWith('/login')) {
       setAuthorized(true);
@@ -60,7 +53,6 @@ export default function RouteGuard({ children }: RouteGuardProps) {
       
       // CASE 1: User is on a public path
       if (isPublicPath) {
-        console.log("Public path detected, allowing access");
         setAuthorized(true);
         setCheckingAuth(false);
         return;
@@ -68,7 +60,6 @@ export default function RouteGuard({ children }: RouteGuardProps) {
 
       // CASE 2: Registered user is logged in (not guest) - allow access to any path
       if (user && !isGuest) {
-        console.log("Registered user authenticated, allowing access");
         setAuthorized(true);
         setCheckingAuth(false);
         return;
@@ -76,7 +67,6 @@ export default function RouteGuard({ children }: RouteGuardProps) {
       
       // CASE 3: Guest user accessing guest-allowed path
       if (user && isGuest && isGuestAllowedPath) {
-        console.log("Guest user accessing allowed path, granting access");
         setAuthorized(true);
         setCheckingAuth(false);
         return;
@@ -84,7 +74,6 @@ export default function RouteGuard({ children }: RouteGuardProps) {
 
       // CASE 4: Guest user accessing non-guest allowed path - redirect to /play
       if (user && isGuest) {
-        console.log("Guest user attempting to access protected route, redirecting to play");
         setAuthorized(false);
         setCheckingAuth(false);
         router.push('/play');
@@ -92,7 +81,6 @@ export default function RouteGuard({ children }: RouteGuardProps) {
       }
       
       // CASE 5: No user at all (fresh visitor) - redirect to login
-      console.log("User not authenticated, redirecting to login");
       setAuthorized(false);
       setCheckingAuth(false);
       router.push('/login');
@@ -115,4 +103,7 @@ export default function RouteGuard({ children }: RouteGuardProps) {
 
   // If on public page or authorized, show children
   return authorized ? <>{children}</> : null;
-} 
+}
+
+// Also export as default for backward compatibility
+export default RouteGuard; 

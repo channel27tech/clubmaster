@@ -2,7 +2,6 @@ import { Geist, Geist_Mono, Poppins, Roboto } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
 import { ClubProvider } from './context/ClubContext';
-import { BetGameProvider } from '@/context/BetGameContext';
 import { metadata } from './metadata';
 
 // Font setup
@@ -43,9 +42,7 @@ export default function RootLayout({
       <body className="antialiased">
         <Providers>
           <ClubProvider>
-            <BetGameProvider>
-              {children}
-            </BetGameProvider>
+            {children}
           </ClubProvider>
         </Providers>
       </body>

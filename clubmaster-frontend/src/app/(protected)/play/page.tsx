@@ -2,13 +2,13 @@
 
 import React, { useState, useRef } from 'react';
 import MatchmakingManager, { MatchmakingManagerHandle } from '@/app/components/MatchmakingManager';
-import WaitingScreen from '../components/WaitingScreen';
+import WaitingScreen from '@/app/components/WaitingScreen';
 import { FaArrowLeft } from 'react-icons/fa';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import Head from "next/head";
-import { useAuth } from '../../context/AuthContext';
+import { useAuth } from '@/context/AuthContext';
 
 // Define the window interface to properly type the window extensions
 interface ExtendedWindow extends Window {

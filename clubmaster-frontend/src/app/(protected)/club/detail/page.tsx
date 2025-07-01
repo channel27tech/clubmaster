@@ -2,11 +2,11 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
-import BottomNavigation from '../../components/BottomNavigation';
+import BottomNavigation from '@/app/components/BottomNavigation';
 import { ShareLinkModal } from '../share-link/page';
-import { useAuth } from '../../../context/AuthContext';
-import { useClub } from '../../context/ClubContext';
-import { joinClub } from '../../../services/clubService';
+import { useAuth } from '@/context/AuthContext';
+import { useClub } from '@/app/context/ClubContext';
+import { joinClub } from '@/services/clubService';
 import ClubInfoModal from '@/components/ClubInfoModal';
 
 // Add Club interface for type safety

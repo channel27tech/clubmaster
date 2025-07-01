@@ -3,9 +3,9 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
-import BottomNavigation from '../../components/BottomNavigation';
-import { useClub } from '../../context/ClubContext';
-import { useAuth } from '../../../context/AuthContext';
+import BottomNavigation from '@/app/components/BottomNavigation';
+import { useClub } from '@/app/context/ClubContext';
+import { useAuth } from '@/context/AuthContext';
 
 // Array of profile images
 // const profileImages = [

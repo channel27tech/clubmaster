@@ -1,7 +1,7 @@
 "use client";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { ShareLinkModal } from '../share-link/page';
-import PlayerSelectionList, { PlayerType } from "../../components/players/PlayerSelectionList";
+import PlayerSelectionList, { PlayerType } from "@/app/components/players/PlayerSelectionList";
 import { useAuth } from "@/context/AuthContext";
 import { fetchUsers, AppUser } from "@/services/userService";
 import { useToast } from "@/hooks/useToast";

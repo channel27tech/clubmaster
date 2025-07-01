@@ -1,6 +1,6 @@
 "use client";
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import PlayerSelectionList, { PlayerType } from "../../components/players/PlayerSelectionList";
+import PlayerSelectionList, { PlayerType } from "@/app/components/players/PlayerSelectionList";
 import { useRouter } from 'next/navigation';
 import { useAuth } from "@/context/AuthContext";
 import { fetchUsers } from "@/services/userService";

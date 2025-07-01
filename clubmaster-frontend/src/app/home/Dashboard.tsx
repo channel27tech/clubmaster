@@ -92,6 +92,7 @@ export default function Dashboard() {
               alt="Notifications" 
               width={29} 
               height={23}
+              style={{ width: 'auto', height: 'auto' }}
             />
           </div>
         </div>
@@ -116,6 +117,7 @@ export default function Dashboard() {
                   alt="Dropdown" 
                   width={24} 
                   height={24}
+                  style={{ width: 'auto', height: 'auto' }}
                 />
               </div>
             </div>
@@ -134,6 +136,7 @@ export default function Dashboard() {
                   alt="Dropdown" 
                   width={24} 
                   height={24}
+                  style={{ width: 'auto', height: 'auto' }}
                 />
               </div>
             </div>
@@ -146,14 +149,16 @@ export default function Dashboard() {
             background: 'linear-gradient(to right, #4A7C59, #4c5454)',
           }}>
             <div className="flex h-full">
-              <div className="w-[172px] flex items-center justify-center">
-                <Image 
-                  src="/images/chess league.svg" 
-                  alt="chess league" 
-                  width={150} 
-                  height={97} 
-                  className="rounded-l-[5px]"
-                />
+              <div className="w-[172px] flex items-center justify-center overflow-hidden">
+                <div className="relative w-[150px] h-[97px]">
+                  <Image 
+                    src="/images/chess league.svg" 
+                    alt="chess league" 
+                    fill
+                    className="rounded-l-[5px] object-contain"
+                    priority
+                  />
+                </div>
               </div>
               <div className="flex-1 p-3 flex flex-col justify-center">
                 <h3 className="text-[#F5F5F5] leading-tight" style={{ 
@@ -201,6 +206,7 @@ export default function Dashboard() {
                 alt="Tournaments" 
                 width={28} 
                 height={25}
+                style={{ width: 'auto', height: 'auto' }}
               />
             </span>
             Tournaments
@@ -217,6 +223,7 @@ export default function Dashboard() {
                 alt="Play for bet" 
                 width={30} 
                 height={30}
+                style={{ width: 'auto', height: 'auto' }}
               />
             </span>
             Play for bet
@@ -235,6 +242,7 @@ export default function Dashboard() {
                   alt="Play with club member" 
                   width={30} 
                   height={30}
+                  style={{ width: 'auto', height: 'auto' }}
                 />
               </span>
               Play with club member
@@ -251,6 +259,7 @@ export default function Dashboard() {
                   alt="Join a club" 
                   width={25} 
                   height={25}
+                  style={{ width: 'auto', height: 'auto' }}
                 />
               </span>
               Join a club
@@ -267,6 +276,7 @@ export default function Dashboard() {
                 alt="Play a friend" 
                 width={31} 
                 height={22}
+                style={{ width: 'auto', height: 'auto' }}
               />
             </span>
             Play a friend

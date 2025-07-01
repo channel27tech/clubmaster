@@ -38,14 +38,13 @@ export const useNotifications = () => {
 export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [socket, setSocket] = useState<Socket | null>(null);
-  const auth = useAuth();
-  const user = auth?.user;
+  const { user, loading } = useAuth();
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
   // Create and connect to the socket
   useEffect(() => {
-    // Check if user is authenticated and has an ID property
-    if (!user || !user.uid) {
+    // Only proceed if Firebase auth is done loading AND we have a valid user
+    if (loading || !user || !user.uid) {
       return;
     }
 
@@ -54,9 +53,14 @@ export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ child
     // Initial fetch of notifications
     const fetchNotifications = async () => {
       try {
+        const token = user.isAnonymous ? `guest_${user.uid}` : await user.getIdToken();
         const url = `${API_URL}/notifications?limit=20`;
         console.log('Fetching notifications from:', url);
-        const response = await fetch(url);
+        const response = await fetch(url, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
         if (response.ok) {
           const data = await response.json();
           setNotifications(
@@ -190,10 +194,18 @@ export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ child
       setNotifications(prev => 
         prev.map(n => n.id === notificationId ? { ...n, read: true } : n)
       );
+      
+      // Only proceed if user is authenticated
+      if (!user) return;
+      
+      const token = user.isAnonymous ? `guest_${user.uid}` : await user.getIdToken();
       const url = `${API_URL}/notifications/${notificationId}/read`;
       console.log('Marking notification as read:', url);
       await fetch(url, {
         method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
       });
     } catch (error) {
       console.error('Failed to mark notification as read:', error);
@@ -209,10 +221,18 @@ export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ child
       setNotifications(prev => 
         prev.map(n => ({ ...n, read: true }))
       );
+      
+      // Only proceed if user is authenticated
+      if (!user) return;
+      
+      const token = user.isAnonymous ? `guest_${user.uid}` : await user.getIdToken();
       const url = `${API_URL}/notifications/read-all`;
       console.log('Marking all notifications as read:', url);
       await fetch(url, {
         method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
       });
     } catch (error) {
       console.error('Failed to mark all notifications as read:', error);
@@ -230,10 +250,18 @@ export const NotificationsProvider: React.FC<{ children: ReactNode }> = ({ child
       setNotifications(prev => 
         prev.filter(n => n.id !== notificationId)
       );
+      
+      // Only proceed if user is authenticated
+      if (!user) return;
+      
+      const token = user.isAnonymous ? `guest_${user.uid}` : await user.getIdToken();
       const url = `${API_URL}/notifications/${notificationId}`;
       console.log('Deleting notification:', url);
       await fetch(url, {
         method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
       });
     } catch (error) {
       console.error('Failed to delete notification:', error);

@@ -39,7 +39,6 @@ export default function LoginPage() {
   // Redirect to home if already logged in as a registered user (not guest)
   useEffect(() => {
     if (user && !user.isAnonymous) {
-      console.log("Already logged in as registered user, redirecting to home");
       router.push('/');
     }
   }, [user, router]);
@@ -61,9 +60,7 @@ export default function LoginPage() {
     setAuthError(null);
     setError(null);
     try {
-      console.log("Starting Google login flow...");
       await loginWithGoogle();
-      console.log("Google login successful");
       // The redirect will happen automatically in the useEffect that watches user state
     } catch (error) {
       console.error("Google login failed:", error);
@@ -78,9 +75,7 @@ export default function LoginPage() {
     setAuthError(null);
     setError(null);
     try {
-      console.log("Starting Facebook login flow...");
       await loginWithFacebook();
-      console.log("Facebook login successful");
       // The redirect will happen automatically in the useEffect that watches user state
     } catch (error) {
       console.error("Facebook login failed:", error);
@@ -101,9 +96,7 @@ export default function LoginPage() {
         setLoadingGuest(false);
         return;
       }
-      console.log("Starting guest login flow...");
       await continueAsGuest();
-      console.log("Guest login successful");
       router.push('/play');
     } catch (error) {
       console.error("Guest login failed:", error);
@@ -128,7 +121,14 @@ export default function LoginPage() {
               style={{ flex: "0 0 366px" }}
             >
               <div className="flex-shrink-0  mr-4 flex items-center justify-center">
-                <Image src={card.img} alt="USP" width={173.88} height={97} className="object-contain" />
+                <Image 
+                  src={card.img} 
+                  alt="USP" 
+                  width={173.88} 
+                  height={97} 
+                  className="object-contain" 
+                  priority={idx === 0}
+                />
               </div>
               <div className="flex-1 ml-8 text-[#FAF3DD] text-[18px] font-semibold font-poppins">
                 {card.text}
@@ -162,7 +162,13 @@ export default function LoginPage() {
             disabled={loadingGoogle || loadingFacebook || loadingGuest}
           >
             <span className="w-7 h-7 flex items-center justify-center mr-2">
-              <Image src="/icons/login-icons/google_icon.svg" alt="Google" width={28} height={28} />
+              <Image 
+                src="/icons/login-icons/google_icon.svg" 
+                alt="Google" 
+                width={28} 
+                height={28}
+                style={{ width: 'auto', height: 'auto' }} 
+              />
             </span>
             {loadingGoogle ? "Connecting..." : "Continue with Google"}
           </button>
@@ -173,7 +179,13 @@ export default function LoginPage() {
             disabled={loadingGoogle || loadingFacebook || loadingGuest}
           >
             <span className="w-7 h-7 flex items-center justify-center mr-2">
-              <Image src="/icons/login-icons/register_icon.svg" alt="Register with Phone" width={28} height={28} />
+              <Image 
+                src="/icons/login-icons/register_icon.svg" 
+                alt="Register with Phone" 
+                width={28} 
+                height={28}
+                style={{ width: 'auto', height: 'auto' }} 
+              />
             </span>
             Register with Phone
           </button>
@@ -184,7 +196,13 @@ export default function LoginPage() {
             disabled={loadingGoogle || loadingFacebook || loadingGuest}
           >
             <span className="w-7 h-7 flex items-center justify-center mr-2">
-              <Image src="/icons/login-icons/facebook_icon.svg" alt="Facebook" width={28} height={28} />
+              <Image 
+                src="/icons/login-icons/facebook_icon.svg" 
+                alt="Facebook" 
+                width={28} 
+                height={28}
+                style={{ width: 'auto', height: 'auto' }} 
+              />
             </span>
             {loadingFacebook ? "Connecting..." : "Continue with Facebook"}
           </button>

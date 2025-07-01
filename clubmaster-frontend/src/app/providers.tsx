@@ -1,15 +1,11 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { SocketProvider } from '../context/SocketContext';
 import { SoundProvider } from '../context/SoundContext';
 import { NotificationsProvider } from '../context/NotificationsContext';
 import { AuthProvider } from '../context/AuthContext';
-import { BetProvider } from '../context/BetContext';
 import { BetGameProvider } from '../context/BetGameContext';
 import { ActivityProvider } from '../context/ActivityContext';
-import RouteGuard from '../components/RouteGuard';
-import GlobalNotifications from './components/GlobalNotifications';
 import { Toaster } from 'react-hot-toast';
 import AuthTokenManager from '../components/AuthTokenManager';
 
@@ -83,41 +79,34 @@ export const Providers: React.FC<ProvidersProps> = ({ children }) => {
   return (
     <AuthProvider>
       <AuthTokenManager />
-      <RouteGuard>
-        <SocketProvider>
-          <NotificationsProvider>
-            <ActivityProvider>
-              <SoundProvider userId={userId}>
-                <BetProvider>
-                  <BetGameProvider>
-                    {children}
-                    <GlobalNotifications />
-                    <Toaster 
-                      position="top-center"
-                      toastOptions={{
-                        style: {
-                          background: '#4A7C59',
-                          color: '#FAF3DD',
-                        },
-                        success: {
-                          duration: 3000,
-                        },
-                        error: {
-                          duration: 5000,
-                          style: {
-                            background: '#B92D22',
-                            color: '#FAF3DD',
-                          },
-                        },
-                      }}
-                    />
-                  </BetGameProvider>
-                </BetProvider>
-              </SoundProvider>
-            </ActivityProvider>
-          </NotificationsProvider>
-        </SocketProvider>
-      </RouteGuard>
+      <NotificationsProvider>
+        <ActivityProvider>
+          <SoundProvider userId={userId}>
+            <BetGameProvider>
+              {children}
+              <Toaster 
+                position="top-center"
+                toastOptions={{
+                  style: {
+                    background: '#4A7C59',
+                    color: '#FAF3DD',
+                  },
+                  success: {
+                    duration: 3000,
+                  },
+                  error: {
+                    duration: 5000,
+                    style: {
+                      background: '#B92D22',
+                      color: '#FAF3DD',
+                    },
+                  },
+                }}
+              />
+            </BetGameProvider>
+          </SoundProvider>
+        </ActivityProvider>
+      </NotificationsProvider>
     </AuthProvider>
   );
 }; 
