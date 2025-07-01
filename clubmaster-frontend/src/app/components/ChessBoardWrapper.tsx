@@ -365,6 +365,21 @@ const ChessBoardWrapper = forwardRef<ChessBoardWrapperRef, ChessBoardWrapperProp
     gameMode: getGameModeFromTimeControl(timeControl || '5+0') // Derive game mode from time control
   });
   
+  // Memoize the gameState object to prevent unnecessary re-renders in MoveControls
+  const memoizedGameState = useMemo(() => ({
+    hasStarted: gameState.hasStarted,
+    isWhiteTurn: gameState.isWhiteTurn,
+    hasWhiteMoved: gameState.hasWhiteMoved,
+    isGameOver: gameState.isGameOver,
+    gameResult: gameState.gameOverReason
+  }), [
+    gameState.hasStarted,
+    gameState.isWhiteTurn,
+    gameState.hasWhiteMoved,
+    gameState.isGameOver,
+    gameState.gameOverReason
+  ]);
+  
   // Add debugging log when component first renders
   useEffect(() => {
     // Log initial state with isGameReady status
@@ -862,128 +877,63 @@ const ChessBoardWrapper = forwardRef<ChessBoardWrapperRef, ChessBoardWrapperProp
     });
     
     safeSocket.on('move_made', ({ player, isCapture, isCheck, from, to, san, notation, fen, moveId, promotion }) => {
-      console.log(`[SERVER EVENT] Received move_made broadcast - player: ${player}, from: ${from}, to: ${to}, promotion: ${promotion}`);
-      
-      // CRITICAL: Do NOT add this server-broadcast move to the moveQueue
-      // Instead, directly apply it to our local chess engine
-      
+      console.log(`[SERVER_UPDATE] Received 'move_made' event:`, { player, isCapture, isCheck, from, to, san, notation, fen, moveId, promotion });
+
+      // 1. Validate the data
+      if (gameRoomId !== fen || !fen) {
+        console.warn("Ignoring 'move_made' event: wrong game ID or no FEN provided.");
+        return;
+      }
+
+      // 2. The Server is the Source of Truth: Load the FEN
+      // This single line synchronizes the entire board state.
       try {
         const chess = getChessEngine();
-      
-        // If we have a FEN, use it for full synchronization (most reliable)
-        if (fen) {
-          console.log(`[SYNC] Using server-provided FEN for synchronization: ${fen}`);
-          chess.load(fen);
-        }
-        // Otherwise try SAN notation
-        else if (san) {
-          console.log(`[SYNC] Using SAN notation for move: ${san}`);
-          chess.move(san);
-        }
-        // Or try to reconstruct the move
-        else {
-          console.log(`[SYNC] Reconstructing move from: ${from}, to: ${to}, promotion: ${promotion || 'none'}`);
-        
-          // If this is a promotion move, include the promotion piece
-          if (promotion) {
-            chess.move({
-              from,
-              to,
-              promotion: promotion.toLowerCase().charAt(0)
-            });
-      } else {
-            chess.move({
-              from,
-              to
-            });
-          }
-        }
-        
-        // Get the current FEN after applying the move
-        const currentFen = chess.fen();
-        
-        // Get the current move history
-        const history = chess.history();
-        
-        // Update the SAN move list
-        setSanMoveList(history);
-        
-        // Notify parent component if callback is provided
-        if (onSanMoveListChange) {
-          onSanMoveListChange(history);
-        }
-        
-        // Update the active player
-        setActivePlayer(chess.turn() === 'w' ? 'white' : 'black');
-        
-        // Update the last move
-        setLastMove({ from, to });
-        
-        // Play move sound
-        playSound(isCapture ? 'CAPTURE' : 'MOVE', soundEnabledRef.current);
-        
-        // Check if the game is over after this move
-        const isGameOver = chess.isGameOver();
-        
-        if (isGameOver) {
-          console.log('[GAME OVER] Game is over after move');
-          
-          // Determine the reason for game over
-          let gameOverReason = '';
-          
-          if (chess.isCheckmate()) {
-            gameOverReason = 'checkmate';
-            playSound('CHECKMATE', soundEnabledRef.current);
-          } else if (chess.isDraw()) {
-            if (chess.isStalemate()) {
-              gameOverReason = 'stalemate';
-            } else if (chess.isThreefoldRepetition()) {
-              gameOverReason = 'repetition';
-            } else if (chess.isInsufficientMaterial()) {
-              gameOverReason = 'insufficient_material';
-        } else {
-              gameOverReason = 'draw';
-            }
-            playSound('DRAW', soundEnabledRef.current);
-          }
-          
-          // Update game state
-          setGameState({
-            ...gameState,
-            isGameOver: true,
-            gameOverReason
-          });
-          
-          // Stop the clocks
-          setActivePlayer(null);
-        }
-        // If not game over but check, play check sound
-        else if (isCheck) {
-          playSound('CHECK', soundEnabledRef.current);
-        }
-        
-        // Update captured pieces
-        updateCapturedPieces();
-        
-        // Dispatch a game state updated event
-        window.dispatchEvent(new CustomEvent('game_state_updated', {
-          detail: {
-            fen: currentFen,
-            isGameOver,
-            gameOverReason: isGameOver ? (chess.isCheckmate() ? 'checkmate' : chess.isDraw() ? 'draw' : '') : '',
-            activePlayer: chess.turn() === 'w' ? 'white' : 'black'
-          }
-        }));
+        chess.load(fen);
       } catch (error) {
-        console.error('[ERROR] Failed to process move from server:', error);
-        
-        // Request a board sync from the server
-        socket.emit('request_board_sync', {
-          gameId: gameRoomId,
-          reason: 'move_processing_failed',
-          clientState: getChessEngine().fen()
-        });
+        console.error("Error loading FEN from server:", error);
+        // Optional: Request a full sync from the server if loading fails
+        // safeSocket.emit('request_full_sync', { gameId: gameRoomId });
+        return;
       }
+
+      // 3. Update all UI state based on the new, correct board state
+      const chess = getChessEngine();
+      
+      // Update the board display
+      updateBoardState(getCurrentBoardState());
+      
+      // Update whose turn it is
+      const newActivePlayer = chess.turn() === 'w' ? 'white' : 'black';
+      setActivePlayer(newActivePlayer);
+      setGameState(prev => ({ ...prev, isWhiteTurn: newActivePlayer === 'white' }));
+
+      // Update the move history display
+      const newHistory = chess.history();
+      setSanMoveList(newHistory);
+      if (onSanMoveListChange) {
+        onSanMoveListChange(newHistory);
+      }
+      
+      // Update last move highlight
+      const historyWithDetails = chess.history({ verbose: true });
+      const lastMoveInHistory = historyWithDetails[historyWithDetails.length - 1];
+      if (lastMoveInHistory) {
+        setLastMove({ from: lastMoveInHistory.from, to: lastMoveInHistory.to });
+      }
+
+      // 4. Play Sounds
+      if (isCapture) {
+        playSound('CAPTURE', soundEnabledRef.current);
+      } else {
+        playSound('MOVE', soundEnabledRef.current);
+      }
+      if (chess.isCheck()) {
+        playSound('CHECK', soundEnabledRef.current);
+      }
+
+      // 5. Update captured pieces list
+      updateCapturedPieces();
     });
     
     // Start a reliable state check interval 
@@ -3617,30 +3567,6 @@ const ChessBoardWrapper = forwardRef<ChessBoardWrapperRef, ChessBoardWrapperProp
     };
   }, [socket, gameRoomId]);
 
-  // Add debug logs to the board_updated handler
-  useEffect(() => {
-    if (!socket || !gameRoomId) return;
-
-    const handleBoardUpdated = (data: any) => {
-      if (data.gameId !== gameRoomId) return;
-      
-      console.log(`[ChessBoardWrapper] Received board_updated for ${gameRoomId}:`, {
-        fen: data.fen,
-        moveCount: data.moveHistory?.length,
-        whiteTurn: data.whiteTurn
-      });
-      
-      // Rest of your handler logic
-      // ...
-    };
-
-    socket.on('board_updated', handleBoardUpdated);
-
-    return () => {
-      socket.off('board_updated', handleBoardUpdated);
-    };
-  }, [socket, gameRoomId]);
-
   // Add debug logs to the move_made handler
   useEffect(() => {
     if (!socket || !gameRoomId) return;
@@ -3922,7 +3848,7 @@ const ChessBoardWrapper = forwardRef<ChessBoardWrapperRef, ChessBoardWrapperProp
         canGoBack={canGoBack}
         canGoForward={canGoForward}
         gameId={gameRoomId}
-        gameState={gameState}
+        gameState={memoizedGameState}
         onResign={handleResignGame}
         onAbortGame={handleAbortGame}
           moveHistory={{

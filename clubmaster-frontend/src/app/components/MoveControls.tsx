@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import GameOptionsDialog from './GameOptionsDialog';
 import ResignConfirmationDialog from './ResignConfirmationDialog';
 import AbortConfirmationDialog from './AbortConfirmationDialog';
@@ -504,4 +504,5 @@ const MoveControls: React.FC<MoveControlsProps> = ({
   );
 }
 
-export default MoveControls; 
+// Memoize the entire component to prevent unnecessary re-renders
+export default React.memo(MoveControls); 
