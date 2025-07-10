@@ -2,6 +2,13 @@ import { log } from 'console';
 import { io, Socket, ManagerOptions } from 'socket.io-client';
 
 let socket: Socket | null = null;
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 10;
+const RECONNECT_DELAY = 1000;
+
+// Track active games for reconnection
+let activeGameId: string | null = null;
+let activePlayerId: string | null = null;
 
 /**
  * Get the socket server URL based on the environment
@@ -99,6 +106,39 @@ export const offConnectionStatusChange = (listener: (status: string, details?: s
 };
 
 /**
+ * Attempt to reconnect the socket with exponential backoff
+ */
+const attemptReconnect = (): void => {
+  if (!socket || reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) return;
+  
+  reconnectAttempts++;
+  const delay = Math.min(RECONNECT_DELAY * Math.pow(1.5, reconnectAttempts - 1), 30000);
+  
+  console.log(`[socketService] Attempting to reconnect (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}) in ${delay}ms`);
+  
+  setTimeout(() => {
+    if (!socket?.connected) {
+      console.log(`[socketService] Reconnection attempt ${reconnectAttempts}`);
+      socket?.connect();
+    }
+  }, delay);
+};
+
+/**
+ * Handle successful reconnection by rejoining active games
+ */
+const handleReconnection = (): void => {
+  console.log('[socketService] Reconnected successfully');
+  reconnectAttempts = 0;
+  
+  // If we were in a game, attempt to rejoin it
+  if (activeGameId && activePlayerId) {
+    console.log(`[socketService] Attempting to rejoin game ${activeGameId}`);
+    rejoinGame(activeGameId, activePlayerId);
+  }
+};
+
+/**
  * Get or initialize the socket connection
  * @param options Socket.IO manager options
  * @param idToken Firebase ID token for authentication
@@ -133,10 +173,10 @@ export const getSocket = (
   socket = io(`${socketServerUrl}/chess`, {
     autoConnect: true,
     reconnection: true,
-    reconnectionAttempts: 5,
+    reconnectionAttempts: 10,
     reconnectionDelay: 1000,
-    reconnectionDelayMax: 5000,
-    timeout: 20000,
+    reconnectionDelayMax: 10000,
+    timeout: 30000, // Increased timeout for better reliability
     auth,
     ...options,
   });
@@ -145,36 +185,71 @@ export const getSocket = (
   socket.on('connect', () => {
     console.log(`[socketService] Socket connected with ID: ${socket?.id}`);
     emitConnectionStatus('connected');
+    
+    // Handle reconnection logic
+    if (reconnectAttempts > 0) {
+      handleReconnection();
+    }
   });
   
   socket.on('disconnect', (reason) => {
     console.log(`[socketService] Socket disconnected. Reason: ${reason}`);
-    emitConnectionStatus('disconnected');
+    emitConnectionStatus('disconnected', reason);
+    
+    // Attempt to reconnect for certain disconnect reasons
+    if (reason === 'io server disconnect' || reason === 'transport close' || reason === 'ping timeout') {
+      attemptReconnect();
+    }
   });
   
   socket.on('connect_error', (error) => {
     console.error('[socketService] Socket connection error:', error);
     emitConnectionStatus('error', error.message);
+    attemptReconnect();
   });
   
   socket.on('reconnect', (attemptNumber) => {
     console.log(`[socketService] Socket reconnected after ${attemptNumber} attempts`);
     emitConnectionStatus('connected');
+    reconnectAttempts = 0;
+    
+    // Handle reconnection logic
+    handleReconnection();
   });
   
   socket.on('reconnect_attempt', (attemptNumber) => {
+    console.log(`[socketService] Socket reconnection attempt ${attemptNumber}`);
   });
   
   socket.on('reconnect_error', (error) => {
     console.error('[socketService] Socket reconnection error:', error);
+    attemptReconnect();
   });
   
   socket.on('reconnect_failed', () => {
     console.error('[socketService] Socket reconnection failed after all attempts');
     emitConnectionStatus('failed');
+    
+    // Try a complete socket reset after all reconnection attempts fail
+    setTimeout(() => {
+      resetSocket();
+    }, 5000);
   });
   
   return socket;
+};
+
+/**
+ * Reset the socket connection completely
+ */
+export const resetSocket = (): void => {
+  if (socket) {
+    socket.removeAllListeners();
+    socket.disconnect();
+    socket = null;
+  }
+  reconnectAttempts = 0;
+  getSocket(); // Recreate the socket
 };
 
 /**
@@ -185,6 +260,8 @@ export const disconnectSocket = (): void => {
     socket.disconnect();
     socket = null;
   }
+  activeGameId = null;
+  activePlayerId = null;
 };
 
 /**
@@ -197,15 +274,44 @@ export const isConnected = (): boolean => {
 };
 
 /**
+ * Set active game information for reconnection handling
+ * @param gameId Game ID
+ * @param playerId Player ID
+ */
+export const setActiveGame = (gameId: string, playerId: string): void => {
+  activeGameId = gameId;
+  activePlayerId = playerId;
+  console.log(`[socketService] Set active game: ${gameId}, player: ${playerId}`);
+};
+
+/**
+ * Clear active game information
+ */
+export const clearActiveGame = (): void => {
+  activeGameId = null;
+  activePlayerId = null;
+};
+
+/**
  * Rejoin a game after reconnection
  * @param gameId Game ID
  * @param playerId Player ID
  */
 export const rejoinGame = (gameId: string, playerId: string): void => {
   if (socket?.connected) {
+    console.log(`[socketService] Rejoining game ${gameId} as player ${playerId}`);
     socket.emit('rejoin_game', { gameId, playerId });
+    
+    // Store game info for future reconnections
+    setActiveGame(gameId, playerId);
   } else {
-    console.warn(`Cannot rejoin game ${gameId}: Socket not connected`);
+    console.warn(`[socketService] Cannot rejoin game ${gameId}: Socket not connected`);
+    
+    // Store game info for when we reconnect
+    setActiveGame(gameId, playerId);
+    
+    // Try to connect
+    getSocket();
   }
 };
 
@@ -217,7 +323,66 @@ export const joinGame = (gameOptions: { gameType: string }): void => {
   if (socket?.connected) {
     socket.emit('joinGame', gameOptions);
   } else {
-    console.warn('Cannot join game: Socket not connected');
+    console.warn('[socketService] Cannot join game: Socket not connected');
+    getSocket(); // Try to connect
+  }
+};
+
+/**
+ * Request board synchronization from the server
+ * @param gameId Game ID
+ * @param reason Reason for the sync request
+ * @param clientState Optional current client state (FEN)
+ */
+export const requestBoardSync = (gameId: string, reason: string = 'manual_sync', clientState?: string): void => {
+  if (!socket?.connected) {
+    console.warn('[socketService] Cannot request board sync: Socket not connected');
+    getSocket(); // Try to connect
+    return;
+  }
+  
+  console.log(`[socketService] Requesting board sync for game ${gameId}. Reason: ${reason}`);
+  socket.emit('request_board_sync', {
+    gameId,
+    reason,
+    clientState
+  });
+};
+
+/**
+ * Register a listener for board sync responses
+ * @param callback Function to call when board sync response is received
+ */
+export const onBoardSync = (callback: (data: {
+  gameId: string;
+  fen: string;
+  pgn: string;
+  moveHistory: string[];
+  whiteTurn: boolean;
+  isCheck: boolean;
+  isGameOver: boolean;
+  timestamp: number;
+  reason: string;
+}) => void): void => {
+  if (!socket) {
+    console.warn('[socketService] Socket not initialized for onBoardSync');
+    return;
+  }
+  
+  socket.on('board_sync', callback);
+};
+
+/**
+ * Remove a board sync listener
+ * @param callback The listener function to remove
+ */
+export const offBoardSync = (callback?: (data: unknown) => void): void => {
+  if (!socket) return;
+  
+  if (callback) {
+    socket.off('board_sync', callback);
+  } else {
+    socket.off('board_sync');
   }
 };
 
@@ -233,12 +398,13 @@ export const startMatchmaking = (matchmakingOptions: {
   betChallengeId?: string;
 }): void => {
   if (!socket) {
-    console.error('Cannot start matchmaking: Socket not initialized');
+    console.error('[socketService] Cannot start matchmaking: Socket not initialized');
+    getSocket(); // Try to initialize
     return;
   }
 
   if (!socket.connected) {
-    console.warn('Socket not connected, attempting to reconnect before starting matchmaking');
+    console.warn('[socketService] Socket not connected, attempting to reconnect before starting matchmaking');
     socket.connect();
   }
 
@@ -248,58 +414,28 @@ export const startMatchmaking = (matchmakingOptions: {
     const currentUser = auth.currentUser;
     
     const firebaseUid = currentUser ? currentUser.uid : 'guest';
-    const username = currentUser?.displayName || null;
-
-    // Add time control to localStorage for consistency across app
-    const timeControlStr = matchmakingOptions.timeControl || '10+0';
-    // Validate time control format before storing
-    if (/^\d+\+\d+$/.test(timeControlStr)) {
-      // Store the validated time control
-      localStorage.setItem('timeControl', timeControlStr);
-    }
+    const username = currentUser?.displayName || `Guest-${socket?.id?.substring(0, 5)}`;
     
-    // Store the game mode for consistency
-    if (matchmakingOptions.gameMode) {
-      localStorage.setItem('gameMode', matchmakingOptions.gameMode);
-    }
-
-    // Add Firebase UID and username to matchmaking options
-    const updatedMatchmakingOptions = {
-      gameMode: matchmakingOptions.gameMode,
-      timeControl: matchmakingOptions.timeControl,
-      rated: matchmakingOptions.rated,
-      preferredSide: matchmakingOptions.preferredSide,
+    const payload = {
+      ...matchmakingOptions,
       firebaseUid,
-      username,
-      ...(matchmakingOptions.betChallengeId ? { betChallengeId: matchmakingOptions.betChallengeId } : {})
+      username
     };
-
-    console.log('Starting matchmaking with options:', updatedMatchmakingOptions);
     
-    if (socket?.connected) {
-      socket.emit('startMatchmaking', updatedMatchmakingOptions);
-    } else {
-      console.error('Cannot start matchmaking: Socket disconnected');
-    }
-  }).catch((error) => {
-    console.error('Error getting Firebase auth:', error);
-    // Fallback to guest mode
-    const updatedMatchmakingOptions = {
-      gameMode: matchmakingOptions.gameMode,
-      timeControl: matchmakingOptions.timeControl,
-      rated: matchmakingOptions.rated,
-      preferredSide: matchmakingOptions.preferredSide,
+    console.log('[socketService] Starting matchmaking with payload:', payload);
+    socket?.emit('startMatchmaking', payload);
+  }).catch(error => {
+    console.error('[socketService] Error getting Firebase auth:', error);
+    
+    // Fall back to guest mode
+    const payload = {
+      ...matchmakingOptions,
       firebaseUid: 'guest',
-      ...(matchmakingOptions.betChallengeId ? { betChallengeId: matchmakingOptions.betChallengeId } : {})
+      username: `Guest-${socket?.id?.substring(0, 5)}`
     };
     
-    console.log('Starting matchmaking as guest with options:', updatedMatchmakingOptions);
-    
-    if (socket?.connected) {
-      socket.emit('startMatchmaking', updatedMatchmakingOptions);
-    } else {
-      console.error('Cannot start matchmaking: Socket disconnected');
-    }
+    console.log('[socketService] Starting matchmaking with guest payload:', payload);
+    socket?.emit('startMatchmaking', payload);
   });
 };
 
